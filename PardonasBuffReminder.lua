@@ -1,5 +1,6 @@
 -- Pardona's Buff Reminder – WoW Forever (Interface 16001, Mainline-API)
--- Erinnert an fehlende Klassen- und allgemeine Buffs sowie an knappe Reagenzien.
+-- Erinnert an fehlende Klassen- und allgemeine Buffs (auch bei Gruppen-/Raid-Mitgliedern)
+-- sowie an knappe Reagenzien.
 -- Auswahl per GUI (Minimap-Button / /br), Rechtsklick auf Erinnerung = stummschalten,
 -- Linksklick auf Erinnerung = Buff auf sich selbst zaubern (abschaltbar);
 -- bei Essen/Fläschchen = bestes Item aus den Taschen benutzen, Rechtsklick = Auswahl.
@@ -86,6 +87,18 @@ if GetLocale() == "deDE" then
         HINT_NOITEM   = "Nicht in der Tasche · Rechtsklick: stumm",
         LEFTCLICK_USE = "Linksklick: %s benutzen",
         RIGHTCLICK_CHOOSE = "Rechtsklick: Auswahl / stummschalten",
+        -- Gruppen-Buffs
+        GROUP_SECTION = "Gruppen-Buffs",
+        GROUP_CHECK   = "Gruppen-Buffs prüfen",
+        GROUP_MODE    = "Prüfen in: %s",
+        GROUP_MODES   = { always = "Immer", instance = "Nur Dungeon & Raid", raid = "Nur Raid" },
+        GROUP_MISSING = "%s fehlt: %d",
+        GROUP_CHAT    = "|cffffb000%s fehlt bei %d Spieler(n) – bitte nachbuffen!|r",
+        HINT_GROUP    = "Linksklick: Gruppe · Strg+Linksklick: einzeln · Rechtsklick: stumm",
+        HINT_SINGLE   = "Linksklick: einzeln · Rechtsklick: stumm",
+        LEFTCLICK_GROUP = "Linksklick: Gruppenversion auf %s",
+        LEFTCLICK_SINGLE = "Linksklick: Einzelversion auf %s",
+        CTRLCLICK_SINGLE = "Strg+Linksklick: Einzelversion auf %s",
     }
 else
     L = {
@@ -159,6 +172,17 @@ else
         HINT_NOITEM   = "Not in bags · Right-click: mute",
         LEFTCLICK_USE = "Left-click: use %s",
         RIGHTCLICK_CHOOSE = "Right-click: choose / mute",
+        GROUP_SECTION = "Group buffs",
+        GROUP_CHECK   = "Check group buffs",
+        GROUP_MODE    = "Check in: %s",
+        GROUP_MODES   = { always = "Always", instance = "Dungeons & raids only", raid = "Raids only" },
+        GROUP_MISSING = "%s missing: %d",
+        GROUP_CHAT    = "|cffffb000%s is missing on %d player(s) – rebuff!|r",
+        HINT_GROUP    = "Left-click: group · Ctrl+Left-click: single · Right-click: mute",
+        HINT_SINGLE   = "Left-click: single · Right-click: mute",
+        LEFTCLICK_GROUP = "Left-click: group version on %s",
+        LEFTCLICK_SINGLE = "Left-click: single version on %s",
+        CTRLCLICK_SINGLE = "Ctrl+Left-click: single version on %s",
     }
 end
 
@@ -563,6 +587,41 @@ local REAGENT_SPELLS = {
     },
 }
 
+---------------------------------------------------------------------------
+-- Gruppen-Buffs (Party/Raid, nur außerhalb des Kampfes)
+--   groupIds : Ränge der Gruppenversion (aufsteigend); Lernstufe und Reagenz je Rang
+--              stammen aus REAGENT_SPELLS (RANK_INFO)
+--   manaOnly : nur Spieler mit Mana-Klasse prüfen (Klasse, nicht aktueller Ressourcentyp)
+-- Wird beim Login in die Einträge von CLASS_BUFFS übernommen (gleiche Keys).
+---------------------------------------------------------------------------
+local GROUP_BUFFS = {
+    PRIEST = {
+        fortitude    = { groupIds = { 21562, 21564, 25392, 48162 } },   -- Gebet der Seelenstärke
+        shadowprot   = { groupIds = { 27683, 39374, 48170 } },          -- Gebet des Schattenschutzes
+        divinespirit = { groupIds = { 27681, 32999, 48074 }, manaOnly = true },   -- Gebet der Willenskraft
+    },
+    MAGE = {
+        intellect = { groupIds = { 23028, 27127, 43002 }, manaOnly = true },      -- Arkane Brillanz
+    },
+    DRUID = {
+        motw = { groupIds = { 21849, 21850, 26991, 48470 } },           -- Gabe der Wildnis
+    },
+}
+
+local GROUP_MODE_ORDER = { "always", "instance", "raid" }
+
+local MANA_CLASSES = {
+    DRUID = true, HUNTER = true, MAGE = true, PALADIN = true, PRIEST = true, SHAMAN = true, WARLOCK = true,
+}
+
+-- Spell-ID -> { level, item } aus REAGENT_SPELLS (Lernstufe und Reagenz je Rang)
+local RANK_INFO = {}
+for _, lines in pairs(REAGENT_SPELLS) do
+    for _, ranks in ipairs(lines) do
+        for _, r in ipairs(ranks) do RANK_INFO[r[1]] = { level = r[2], item = r[3] } end
+    end
+end
+
 local SOUNDS = {
     ping   = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE)          or 3081,
     glocke = (SOUNDKIT and SOUNDKIT.ALARM_CLOCK_WARNING_3) or 12889,
@@ -578,6 +637,8 @@ local DEFAULTS = {
     minimapAngle = 200,
     minimapHide  = false,
     instanceOnly = true,
+    groupCheck   = true,       -- Gruppen-Buffs bei Party-/Raid-Mitgliedern prüfen
+    groupMode    = "always",   -- "always" | "instance" (Dungeon & Raid) | "raid"
     clickCast    = true,   -- Linksklick auf Erinnerung zaubert den Buff
 }
 
@@ -1062,16 +1123,17 @@ end
 ---------------------------------------------------------------------------
 -- Buff-Erkennung
 ---------------------------------------------------------------------------
--- liefert idSet, nameSet, unreliable, own, list  (nil = gar nicht lesbar)
+-- liefert idSet, nameSet, unreliable, own, list  (nil = gar nicht lesbar); unit Standard "player"
 --   own  = { ids, names } nur der selbst gewirkten Auren (für das Merken der Variante)
 --   list = { { id, name, icon }, ... } aller lesbaren Auren (icon nil, falls secret)
-local function ScanAuras()
+local function ScanAuras(unit)
+    unit = unit or "player"
     local ids, names, unreliable = {}, {}, false
     local own = { ids = {}, names = {} }
     local list = {}
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         for i = 1, 255 do
-            local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
+            local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
             if not ok then return nil end
             if aura == nil then break end
             if IsSecret(aura) then
@@ -1097,7 +1159,7 @@ local function ScanAuras()
         return ids, names, unreliable, own, list
     elseif UnitBuff then
         for i = 1, 40 do
-            local name, icon, _, _, _, _, src, _, _, id = UnitBuff("player", i)
+            local name, icon, _, _, _, _, src, _, _, id = UnitBuff(unit, i)
             if not name then break end
             names[name] = true
             if id then ids[id] = true end
@@ -1199,6 +1261,181 @@ local function InGroupInstance()
 end
 
 ---------------------------------------------------------------------------
+-- Gruppen-Buffs: Prüfung aller Party-/Raid-Mitglieder (inkl. Spieler selbst)
+-- Nur außerhalb des Kampfes. Ergebnis je Eintrag in groupState; ausgewertet wird
+-- gedrosselt (höchstens alle GROUP_THROTTLE Sek.), ohne Event spätestens alle
+-- GROUP_POLL Sek. (Reichweite/Sichtbarkeit ändern sich ohne Event).
+---------------------------------------------------------------------------
+local groupState = {}         -- key -> { missing = { { unit, name }, ... }, unknown = bool }
+local groupDirty, groupLastScan, groupTimerPending = true, 0, false
+local GROUP_THROTTLE, GROUP_POLL = 0.5, 2
+
+-- Ja/Nein-Abfrage einer Unit-Funktion; nil = nicht verfügbar oder Secret-Wert
+local function UnitFlag(fn, ...)
+    if not fn then return nil end
+    local ok, v = pcall(fn, ...)
+    if not ok or IsSecret(v) then return nil end
+    return v and true or false
+end
+
+local function GroupModeOk()
+    if db.groupMode == "instance" then return InGroupInstance() end
+    if db.groupMode == "raid" then
+        local inInst, t = IsInInstance()
+        return inInst and t == "raid"
+    end
+    return true
+end
+
+-- Gruppen-Check für einen (erlernten, aktivierten) Eintrag aktiv?
+local function GroupActive(e)
+    return e.groupIds ~= nil and db.groupCheck and IsInGroup ~= nil and IsInGroup() and GroupModeOk()
+end
+
+local function GroupUnits()
+    local units = {}
+    local n = GetNumGroupMembers and GetNumGroupMembers() or 0
+    if IsInRaid and IsInRaid() then
+        for i = 1, n do units[#units + 1] = "raid" .. i end
+    elseif IsInGroup and IsInGroup() then
+        units[1] = "player"
+        for i = 1, n - 1 do units[#units + 1] = "party" .. i end
+    end
+    return units
+end
+
+-- Prüf- und Zielbarkeit: existiert, online, lebt, sichtbar, in Reichweite.
+-- Unbekannte (Secret-)Werte zählen als "nicht prüfbar" → Spieler wird übersprungen.
+local function UnitUsable(unit)
+    if UnitFlag(UnitExists, unit) ~= true then return false end
+    if UnitIsConnected and UnitFlag(UnitIsConnected, unit) ~= true then return false end
+    if UnitFlag(UnitIsDeadOrGhost, unit) ~= false then return false end
+    if UnitIsVisible and UnitFlag(UnitIsVisible, unit) ~= true then return false end
+    if UnitFlag(UnitIsUnit, unit, "player") == true then return true end
+    if UnitInRange then
+        local ok, inRange, checked = pcall(UnitInRange, unit)
+        if not ok or IsSecret(inRange) or IsSecret(checked) then return false end
+        if checked and not inRange then return false end
+    end
+    return true
+end
+
+local function UnitClassFile(unit)
+    local ok, _, class = pcall(UnitClass, unit)
+    if ok and class and not IsSecret(class) then return class end
+end
+
+local function UnitDisplayName(unit)
+    local ok, n = pcall(UnitName, unit)
+    if ok and n and not IsSecret(n) then return n end
+    return "?"
+end
+
+local function ScanGroup()
+    wipe(groupState)
+    local list = {}
+    for _, e in ipairs(entries) do
+        if e.groupIds and knownCache[e.key] and IsEnabled(e) then
+            list[#list + 1] = e
+            groupState[e.key] = { missing = {}, unknown = false }
+        end
+    end
+    if #list == 0 then return end
+    for _, unit in ipairs(GroupUnits()) do
+        if UnitUsable(unit) then
+            local ids, names, unreliable, _, auras = ScanAuras(unit)
+            local scan = ids and { ids = ids, names = names, unreliable = unreliable, list = auras } or nil
+            local class = UnitClassFile(unit)
+            for _, e in ipairs(list) do
+                if not e.manaOnly or (class and MANA_CLASSES[class]) then
+                    local st = groupState[e.key]
+                    -- Gruppen- und Einzelversion stehen beide in e.idSet / e.names
+                    local m = CheckMissing(e, scan)
+                    if m == true then
+                        st.missing[#st.missing + 1] = { unit = unit, name = UnitDisplayName(unit) }
+                    elseif m == nil then
+                        st.unknown = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Auswertung, wenn fällig (nie im Kampf)
+local function GroupScanIfDue(now)
+    if InCombatLockdown() then return end
+    if (groupDirty or now - groupLastScan >= GROUP_POLL) and now - groupLastScan >= GROUP_THROTTLE then
+        ScanGroup()
+        groupLastScan, groupDirty = now, false
+    end
+end
+
+-- Aura/Roster geändert: neu auswerten, aber höchstens alle GROUP_THROTTLE Sek.
+local function MarkGroupDirty()
+    groupDirty = true
+    if groupTimerPending then return end
+    groupTimerPending = true
+    C_Timer.After(GROUP_THROTTLE, function()
+        groupTimerPending = false
+        Evaluate()
+    end)
+end
+
+-- true = jemandem fehlt der Buff, false = alle haben ihn, nil = unbekannt
+local function GroupMissing(e)
+    local st = groupState[e.key]
+    if not st then return nil end
+    e.groupMissing = st.missing
+    if #st.missing > 0 then return true end
+    if st.unknown then return nil end
+    return false
+end
+
+-- höchster erlernter Rang der Gruppenversion + dessen Reagenz; Namens-Fallback wie bei Reagenzien
+local function GroupSpellFor(e)
+    local ids = e.groupIds
+    for i = #ids, 1, -1 do
+        if SpellKnown(ids[i]) then return ids[i], RANK_INFO[ids[i]] and RANK_INFO[ids[i]].item end
+    end
+    local n = SpellName(ids[1])
+    if KnownByName(n) then
+        local lvl, best = UnitLevel("player") or 1, nil
+        for i = #ids, 1, -1 do
+            local info = RANK_INFO[ids[i]]
+            if info and lvl >= info.level then best = info; break end
+        end
+        return n, best and best.item
+    end
+end
+
+-- Klick-Aktion einer Gruppen-Zeile, Ziel = erster Spieler ohne Buff (Roster-Reihenfolge):
+--   Linksklick      : Gruppenversion; Einzelversion, wenn nicht erlernt oder Reagenz fehlt
+--   Strg+Linksklick : Einzelversion
+local function GroupActionFor(e)
+    local target = e.groupMissing and e.groupMissing[1]
+    local single = CastSpellFor(e)
+    if not target or not single then return nil end
+    local a = { unit = target.unit, targetName = target.name, ctrlSpell = single, ctrlUnit = target.unit }
+    local gspell, item = GroupSpellFor(e)
+    if gspell and (not item or (ItemCount(item) or 1) > 0) then
+        a.spell, a.isGroup = gspell, true
+    else
+        a.spell = single
+    end
+    return a
+end
+
+-- Namen der Spieler ohne Buff: max. 5, dann "+N"
+local function MissingNames(e)
+    local list, out = e.groupMissing or {}, {}
+    for i = 1, math.min(5, #list) do out[i] = list[i].name end
+    local s = table.concat(out, ", ")
+    if #list > 5 then s = s .. " +" .. (#list - 5) end
+    return s
+end
+
+---------------------------------------------------------------------------
 -- Einblendung (Liste fehlender Buffs)
 ---------------------------------------------------------------------------
 -- Kampfsperre: Die Zeilen sind Secure Buttons. Sie und ihr Parent (anchor) werden in
@@ -1260,24 +1497,53 @@ local function IsActionPhase(down)
     return (down and true or false) == GetCVarFlag("ActionButtonUseKeyDown")
 end
 
--- Linksklick-Aktion einer Zeile setzen (nur außerhalb des Kampfes aufrufen):
--- Zauber (ID/Name) oder Item-ID; beides nil = Linksklick tut nichts
-local function SetRowAction(r, spell, item)
-    if r.castSpell == spell and r.useItem == item then return end
-    r.castSpell, r.useItem = spell, item
-    if spell then
+-- Klick-Aktion einer Zeile setzen (nur außerhalb des Kampfes aufrufen). a = nil oder
+--   { spell = ID/Name | item = Item-ID, unit = Ziel (Standard "player"),
+--     ctrlSpell, ctrlUnit = Strg+Linksklick (Gruppen-Zeilen), isGroup, targetName }
+-- Ohne spell/item tut Linksklick nichts.
+local function SetRowAction(r, a)
+    a = a or {}
+    local sig = table.concat({ tostring(a.spell), tostring(a.item), tostring(a.unit),
+        tostring(a.ctrlSpell), tostring(a.ctrlUnit) }, "|")
+    r.action = a
+    r.castSpell, r.useItem = a.spell, a.item
+    if r.actionSig == sig then return end
+    r.actionSig = sig
+    if a.spell then
         r:SetAttribute("type1", "spell")
-        r:SetAttribute("spell1", spell)
+        r:SetAttribute("spell1", a.spell)
         r:SetAttribute("item1", nil)
-    elseif item then
+    elseif a.item then
         r:SetAttribute("type1", "item")
-        r:SetAttribute("item1", "item:" .. item)
+        r:SetAttribute("item1", "item:" .. a.item)
         r:SetAttribute("spell1", nil)
     else
         r:SetAttribute("type1", nil)
         r:SetAttribute("spell1", nil)
         r:SetAttribute("item1", nil)
     end
+    r:SetAttribute("unit1", a.unit or "player")
+    r:SetAttribute("ctrl-type1", a.ctrlSpell and "spell" or nil)
+    r:SetAttribute("ctrl-spell1", a.ctrlSpell)
+    r:SetAttribute("ctrl-unit1", a.ctrlUnit)
+end
+
+-- Zeilenhöhe: 2 Textzeilen (Standard) oder 3 (Gruppen-Zeile mit Namenszeile)
+local ROW_HEIGHT_GROUP = 56
+
+local function SetRowLines(r, three)
+    if r.threeLines == three then return end
+    r.threeLines = three
+    local top, mid, bottom = 7, 0, -8
+    if three then top, mid, bottom = 14, 0, -14 end
+    r:SetHeight(three and ROW_HEIGHT_GROUP or ROW_HEIGHT)
+    r.text:SetPoint("LEFT", r.icon, "RIGHT", 10, top)
+    r.text:SetPoint("RIGHT", -8, top)
+    r.names:SetPoint("LEFT", r.icon, "RIGHT", 10, mid)
+    r.names:SetPoint("RIGHT", -8, mid)
+    r.hint:SetPoint("LEFT", r.icon, "RIGHT", 10, bottom)
+    r.hint:SetPoint("RIGHT", -8, bottom)
+    if three then r.names:Show() else r.names:Hide() end
 end
 
 local function GetRow(i)
@@ -1311,6 +1577,13 @@ local function GetRow(i)
     r.hint:SetPoint("RIGHT", -8, -8)
     r.hint:SetJustifyH("LEFT")
     r.hint:SetWordWrap(false)
+
+    -- Namenszeile der Gruppen-Zeilen (Spieler ohne Buff), zwischen Haupttext und Hinweis
+    r.names = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.names:SetJustifyH("LEFT")
+    r.names:SetWordWrap(false)
+    r.names:Hide()
+    r.threeLines = false
 
     if i == 1 then
         r:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
@@ -1347,7 +1620,15 @@ local function GetRow(i)
         if not self.entry then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(EntryLabel(self.entry), 1, 0.82, 0)
-        if self.castSpell then GameTooltip:AddLine(L.LEFTCLICK, 0.8, 0.8, 0.8) end
+        local a = self.action or {}
+        if a.ctrlSpell then
+            -- Gruppen-Zeile: Ziel nennen
+            local who = a.targetName or "?"
+            GameTooltip:AddLine((a.isGroup and L.LEFTCLICK_GROUP or L.LEFTCLICK_SINGLE):format(who), 0.8, 0.8, 0.8)
+            GameTooltip:AddLine(L.CTRLCLICK_SINGLE:format(who), 0.8, 0.8, 0.8)
+        elseif self.castSpell then
+            GameTooltip:AddLine(L.LEFTCLICK, 0.8, 0.8, 0.8)
+        end
         if self.useItem then
             GameTooltip:AddLine(L.LEFTCLICK_USE:format(ItemName(self.useItem)), 0.8, 0.8, 0.8)
             GameTooltip:AddLine(L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
@@ -1370,11 +1651,26 @@ local function ShowRows(list, dragMode)
         r.icon:SetTexture(EntryIcon(e))
         if dragMode then
             r.entry = nil
-            SetRowAction(r, nil, nil)
+            SetRowAction(r, nil)
+            SetRowLines(r, false)
             r.text:SetText(L.DRAG)
             r.hint:SetText("")
+        elseif e.groupActive then
+            -- Gruppen-Zeile: Anzahl, Namen, Gruppen-/Einzel-Klick auf den ersten Spieler ohne Buff
+            r.entry = e
+            local a = GroupActionFor(e)
+            SetRowAction(r, a)
+            SetRowLines(r, true)
+            r.text:SetText(L.GROUP_MISSING:format(EntryLabel(e), #(e.groupMissing or {})))
+            r.names:SetText(MissingNames(e))
+            if a then
+                r.hint:SetText(a.isGroup and L.HINT_GROUP or L.HINT_SINGLE)
+            else
+                r.hint:SetText(L.HINT_MUTE)
+            end
         else
             r.entry = e
+            SetRowLines(r, false)
             local spell = CastSpellFor(e)
             -- Essen/Fläschchen: Linksklick benutzt die beste Wahl aus den Taschen
             local item, noItem
@@ -1383,7 +1679,7 @@ local function ShowRows(list, dragMode)
                 item = choices[1] and choices[1].id
                 noItem = item == nil
             end
-            SetRowAction(r, spell, item)
+            SetRowAction(r, (spell or item) and { spell = spell, item = item } or nil)
             if e.kind == "reagent" then
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
             else
@@ -1404,7 +1700,7 @@ local function ShowRows(list, dragMode)
     for i = #list + 1, #rows do
         rows[i]:Hide()
         rows[i].entry = nil
-        SetRowAction(rows[i], nil, nil)
+        SetRowAction(rows[i], nil)
     end
     if #list > 0 then
         if not anchor:IsShown() then
@@ -1666,11 +1962,20 @@ function Evaluate()
         end
         local instOk = (not db.instanceOnly) or InGroupInstance()
         local now = GetTime()
+        -- Gruppen-Buffs: nur außerhalb des Kampfes auswerten (gedrosselt)
+        if not combat and db.groupCheck then GroupScanIfDue(now) end
 
         for _, e in ipairs(entries) do
             local relevant = knownCache[e.key] and IsEnabled(e) and (not e.general or instOk)
+            -- Gruppen-Check aktiv: Gruppen-Zeile ersetzt die Selbst-Zeile (gleicher Key)
+            e.groupActive = relevant and GroupActive(e) or false
             if relevant then
-                local m = CheckMissing(e, scan)
+                local m
+                if e.groupActive then
+                    if not combat then m = GroupMissing(e) end   -- im Kampf: Zustand beibehalten
+                else
+                    m = CheckMissing(e, scan)
+                end
                 if m ~= nil then missing[e.key] = m end   -- nil: Zustand beibehalten (Kampf/Secret)
                 -- Entprellung: nil (unbekannt) lässt missingSince unverändert
                 if m == true then
@@ -1693,6 +1998,8 @@ function Evaluate()
                     newOnes = true
                     if e.kind == "reagent" then
                         Print(L.REAGENT_CHAT:format(EntryLabel(e), e.count or 0))
+                    elseif e.groupActive then
+                        Print(L.GROUP_CHAT:format(EntryLabel(e), #(e.groupMissing or {})))
                     else
                         Print(L.CHAT:format(EntryLabel(e)))
                     end
@@ -1799,6 +2106,10 @@ function RefreshConfig()
     config.enabledCB:SetChecked(db.enabled)
     config.instCB:SetChecked(db.instanceOnly)
     config.castCB:SetChecked(db.clickCast)
+    if config.groupCB then
+        config.groupCB:SetChecked(db.groupCheck)
+        config.groupModeBtn:SetText(L.GROUP_MODE:format(L.GROUP_MODES[db.groupMode] or db.groupMode))
+    end
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
 end
@@ -1934,6 +2245,35 @@ local function BuildConfig()
     y = y - 22
     for _, e in ipairs(GENERAL_BUFFS) do
         MakeEntryRow(config, e, y)
+        y = y - 26
+    end
+
+    -- Gruppen-Buffs: nur für Klassen mit Gruppen-Buffs (Priester, Magier, Druide)
+    local hasGroup = false
+    for _, e in ipairs(classEntries) do
+        if e.groupIds then hasGroup = true end
+    end
+    if hasGroup then
+        y = y - 10
+        MakeHeader(config, L.GROUP_SECTION, y)
+        y = y - 22
+        config.groupCB = MakeCheck(config, L.GROUP_CHECK, 16, y, function(self)
+            db.groupCheck = self:GetChecked() and true or false
+            MarkGroupDirty()
+            NoteDeferred()
+            Evaluate()
+        end)
+        config.groupModeBtn = MakeButton(config, "", 200)
+        config.groupModeBtn:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
+        config.groupModeBtn:SetScript("OnClick", function()
+            local idx = 1
+            for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
+            db.groupMode = GROUP_MODE_ORDER[idx % #GROUP_MODE_ORDER + 1]
+            MarkGroupDirty()
+            NoteDeferred()
+            Evaluate()
+            RefreshConfig()
+        end)
         y = y - 26
     end
 
@@ -2171,6 +2511,8 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         classEntries = CLASS_BUFFS[class] or {}
         for _, e in ipairs(classEntries) do
             PrepareEntry(e); PrepareCast(e, class); entries[#entries + 1] = e
+            local g = GROUP_BUFFS[class] and GROUP_BUFFS[class][e.key]
+            if g then e.groupIds, e.manaOnly = g.groupIds, g.manaOnly end
         end
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
         -- Essen & Fläschchen: Kategorie-Gewichte der Klasse, gelernte Fläschchen-Spells, Taschen
@@ -2198,7 +2540,9 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         RefreshKnown()
         ApplyLayout()
         UpdateMinimapPos()
-        self:RegisterUnitEvent("UNIT_AURA", "player")
+        -- UNIT_AURA für alle Units; gefiltert auf player / party* / raid* (siehe unten)
+        self:RegisterEvent("UNIT_AURA")
+        self:RegisterEvent("GROUP_ROSTER_UPDATE")
         self:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
         self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
         C_Timer.NewTicker(1, Evaluate)
@@ -2237,8 +2581,34 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         return
     end
 
+    if event == "UNIT_AURA" then
+        -- arg1 = Unit. Spieler: sofort auswerten (wie bisher); Gruppen-/Raid-Mitglieder:
+        -- gedrosselt (MarkGroupDirty); alle anderen Units (Ziel, Namensplaketten …) ignorieren.
+        if arg1 == nil or IsSecret(arg1) then return end
+        if arg1 == "player" then
+            MarkGroupDirty()
+            Evaluate()
+        elseif arg1:find("^party%d") or arg1:find("^raid%d") then
+            MarkGroupDirty()
+        end
+        return
+    end
+
+    if event == "GROUP_ROSTER_UPDATE" then
+        MarkGroupDirty()
+        return
+    end
+
+    if event == "PLAYER_REGEN_ENABLED" then
+        -- nach dem Kampf: Gruppe sofort neu prüfen, Zeilen/Attribute nachziehen
+        groupDirty = true
+        Evaluate()
+        return
+    end
+
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- arg1 = unit, arg2 = castGUID, arg3 = spellID (kann ein Secret-Wert sein)
+        MarkGroupDirty()   -- Ziel der Gruppen-Zeilen nach jedem Cast neu bestimmen
         if cdb then
             RememberFromCast(arg3)
             -- Fläschchen-Effekt (auch über Aktionsleiste/Taschen benutzt) -> zuletzt benutzt

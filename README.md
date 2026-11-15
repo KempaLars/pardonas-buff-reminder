@@ -49,6 +49,12 @@ Built for **WoW Forever** (Interface `16001`).
   - Rogue: Flash Powder (Vanish), Blinding Powder (Blind)
   - The settings window has a "Reagents" section listing your class's reagents, each with a threshold field (0–50, 0 = no warning) and the current count in your bags. Defaults: Ankh and seeds 1, runes and Blinding Powder 5, everything else 10. Thresholds are saved per character.
   - Reagent warnings appear in the normal reminder list with the item's icon and name in your client language. Left-click does nothing; right-click mutes them like buff reminders.
+- **Group buffs (beta)** – in a party or raid, the addon also checks your group members (including yourself) for the buffs you can give: Power Word: Fortitude, Shadow Protection, Divine Spirit, Arcane Intellect and Mark of the Wild. A player counts as buffed with either the single-target or the group version (e.g. Prayer of Fortitude). Paladin blessings are not included.
+  - Only buffs whose single-target version you have learned are checked. Arcane Intellect and Divine Spirit are only checked on mana classes (Druid, Hunter, Mage, Paladin, Priest, Shaman, Warlock).
+  - Players who are dead, offline, not visible or out of range are skipped. Only checked out of combat.
+  - One line per buff replaces your own reminder for it, e.g. "Fortitude missing: 3". Below it are the names of the players without the buff (up to 5, then "+N"), then the click hints.
+  - **Left-click** casts the group version on the first player without the buff, which covers that player's party or raid subgroup. If you have not learned the group version or are out of its reagent (see reagent warnings), the single-target version is cast instead. **Ctrl+Left-click** casts the single-target version on the next player without the buff. After each cast or buff change the target is chosen again. Hint: "Left-click: group · Ctrl+Left-click: single · Right-click: mute".
+  - Settings section "Group buffs": "Check group buffs" (on by default) and "Check in: Always / Dungeons & raids only / Raids only" (default Always). Each buff's own on/off checkbox still applies.
 - **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
 - **Right-click to mute** – right-click a reminder to mute it for 5, 15 or 60 minutes or for the rest of the session. Mutes can be cleared from the settings window or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
@@ -57,7 +63,7 @@ Built for **WoW Forever** (Interface `16001`).
   - Not castable: Rogue poisons and Well-Rested. Well Fed and Flask use an item instead (see above, beta).
   - Can be turned off in the settings ("Left-click casts buff", on by default).
 - **Hint line** – every reminder shows a small grey second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, "Left-click: <item> · Right-click: choose" for food and flasks (beta), otherwise "Right-click: mute".
-- **Combat behaviour** – reminders are secure buttons, so the list cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
+- **Combat behaviour** – reminders are secure buttons, so the list (including click targets of group buff lines) cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
 - **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock". While moving, left-click does not cast.
 - **Minimap button** – left-click opens the settings, right-click shows a test reminder, drag to move the button around the minimap.
