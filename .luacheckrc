@@ -18,14 +18,17 @@ globals = {
 -- WoW API functions and objects the addon reads
 read_globals = {
     -- namespaces
+    "C_Container",
     "C_CVar",
     "C_Item",
     "C_Spell",
     "C_SpellBook",
     "C_Timer",
+    "C_TooltipInfo",
     "C_UnitAuras",
     -- frames and UI objects
     "CreateFrame",
+    "Enum",
     "GameTooltip",
     "Minimap",
     "UIParent",
@@ -50,6 +53,7 @@ read_globals = {
     "issecretvalue",
     "IsSpellKnown",
     "MouseIsOver",
+    "NUM_BAG_SLOTS",
     "PlaySound",
     "tinsert",
     "UnitBuff",

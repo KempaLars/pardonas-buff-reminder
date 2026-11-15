@@ -1,7 +1,8 @@
 -- Pardona's Buff Reminder – WoW Forever (Interface 16001, Mainline-API)
 -- Erinnert an fehlende Klassen- und allgemeine Buffs sowie an knappe Reagenzien.
 -- Auswahl per GUI (Minimap-Button / /br), Rechtsklick auf Erinnerung = stummschalten,
--- Linksklick auf Erinnerung = Buff auf sich selbst zaubern (abschaltbar).
+-- Linksklick auf Erinnerung = Buff auf sich selbst zaubern (abschaltbar);
+-- bei Essen/Fläschchen = bestes Item aus den Taschen benutzen, Rechtsklick = Auswahl.
 
 local ADDON_NAME = ...
 
@@ -80,6 +81,11 @@ if GetLocale() == "deDE" then
         REAGENT_LOW   = "%s: %d übrig",
         REAGENT_CHAT  = "|cffffb000Reagenz knapp: %s – nur noch %d!|r",
         IN_BAGS       = "%d in Taschen",
+        -- Essen & Fläschchen
+        HINT_ITEM     = "Linksklick: %s · Rechtsklick: Auswahl",
+        HINT_NOITEM   = "Nicht in der Tasche · Rechtsklick: stumm",
+        LEFTCLICK_USE = "Linksklick: %s benutzen",
+        RIGHTCLICK_CHOOSE = "Rechtsklick: Auswahl / stummschalten",
     }
 else
     L = {
@@ -149,6 +155,10 @@ else
         REAGENT_LOW   = "%s: %d left",
         REAGENT_CHAT  = "|cffffb000Reagent running low: %s – only %d left!|r",
         IN_BAGS       = "%d in bags",
+        HINT_ITEM     = "Left-click: %s · Right-click: choose",
+        HINT_NOITEM   = "Not in bags · Right-click: mute",
+        LEFTCLICK_USE = "Left-click: use %s",
+        RIGHTCLICK_CHOOSE = "Right-click: choose / mute",
     }
 end
 
@@ -252,9 +262,12 @@ local CLASS_BUFFS = {
 }
 
 local GENERAL_BUFFS = {
-    { key = "gen_wellfed", general = true, defaultOff = true, ids = { 19705 }, nameIds = { 19705 },
+    -- itemKind: Linksklick benutzt das beste passende Item aus den Taschen (siehe "Essen & Fläschchen")
+    -- 1243969 = "Well Fed XP Boost" (WoW Forever)
+    { key = "gen_wellfed", general = true, defaultOff = true, itemKind = "food",
+      ids = { 19705, 1243969 }, nameIds = { 19705 },
       icon = "Interface\\Icons\\Spell_Misc_Food" },
-    { key = "gen_flask", general = true, defaultOff = true, label = "FLASK", nameIds = {},
+    { key = "gen_flask", general = true, defaultOff = true, itemKind = "flask", label = "FLASK", nameIds = {},
       ids = { 17626, 17627, 17628, 17629, 28518, 28519, 28520, 28521, 28540,
               53752, 53755, 53758, 53760, 54212, 62380 },
       icon = "Interface\\Icons\\INV_Potion_1" },
@@ -381,6 +394,67 @@ local CAST_DATA = {
         horn = { castIds = { 57330, 57623 } },
     },
 }
+
+---------------------------------------------------------------------------
+-- Essen & Fläschchen (Linksklick / Auswahl-Popup bei gen_wellfed und gen_flask)
+--
+-- FOOD: XP-Essen aus WoW Forever, je Kategorie { Item-ID, Kochkunst-Stufe }.
+--   Datenquelle: Wowhead "All Cooking Food that Currently Gives XP Buffs" (WoW Forever).
+--   ACHTUNG: Die Liste stammt aus der Beta und kann sich bis zum Release noch ändern.
+--   Ob ein Item tatsächlich einen XP-Bonus gibt, wird zusätzlich per Tooltip geprüft.
+-- Sortierung ("beste Wahl" zuerst):
+--   1) XP-Bonus laut Tooltip, 2) Score = Kategorie-Gewicht x Kochkunst-Stufe, 3) Anzahl.
+--   Nur Items, deren benötigte Stufe <= Spielerstufe.
+---------------------------------------------------------------------------
+local FOOD = {
+    MeleeAP = { { 6290, 1 }, { 787, 50 }, { 4592, 50 }, { 8364, 175 }, { 13927, 225 }, { 13932, 250 },
+        { 13934, 275 } },
+    SpellDamage = { { 5095, 50 }, { 21072, 80 }, { 21217, 175 }, { 274971, 200 }, { 13931, 250 },
+        { 13935, 250 }, { 249869, 200 } },
+    Healing = { { 249865, 25 }, { 249866, 100 }, { 249867, 125 }, { 249868, 180 }, { 13933, 275 },
+        { 249870, 250 } },
+    Stamina = { { 6888, 1 }, { 5472, 10 }, { 263509, 25 }, { 3663, 90 }, { 250080, 75 }, { 5479, 100 },
+        { 12213, 175 }, { 3665, 130 }, { 3666, 110 }, { 3729, 175 }, { 12214, 175 }, { 250078, 175 },
+        { 6038, 175 }, { 12215, 200 }, { 12218, 225 }, { 17222, 200 }, { 250068, 275 } },
+    Strength = { { 2888, 25 }, { 6890, 40 }, { 2681, 50 }, { 724, 50 }, { 3220, 60 }, { 3726, 110 },
+        { 2687, 110 }, { 2685, 110 }, { 5480, 110 }, { 250074, 175 }, { 274976, 185 }, { 250065, 225 },
+        { 250070, 275 }, { 250071, 275 }, { 20452, 285 } },
+    Agility = { { 2680, 25 }, { 2684, 50 }, { 3662, 80 }, { 1017, 100 }, { 3727, 100 }, { 3664, 125 },
+        { 12209, 125 }, { 13851, 175 }, { 20074, 150 }, { 12212, 125 }, { 18045, 225 }, { 250072, 275 },
+        { 250069, 275 } },
+    Intellect = { { 12224, 1 }, { 250079, 25 }, { 263512, 35 }, { 5477, 50 }, { 2682, 85 }, { 2683, 75 },
+        { 1082, 100 }, { 250077, 75 }, { 12210, 175 }, { 4457, 175 }, { 12216, 225 }, { 250073, 275 },
+        { 250076, 225 }, { 18254, 275 }, { 250066, 275 }, { 250067, 175 }, { 250075, 275 } },
+    Spirit = { { 249871, 25 }, { 249872, 100 }, { 249873, 125 }, { 249874, 125 }, { 249875, 200 },
+        { 249876, 250 } },
+    Crit = { { 13928, 240 }, { 13929, 240 } },
+    Armor = { { 286152, 225 } },
+    Movement = { { 733, 75 }, { 267341, 275 } },
+    Profession = { { 6316, 100 }, { 5476, 50 }, { 4593, 100 }, { 4594, 100 }, { 8957, 100 }, { 13930, 225 },
+        { 10841, 100 } },
+}
+
+-- Kategorie-Reihenfolge je Klasse; Gewicht nach Position (FOOD_WEIGHTS).
+-- Nicht genannte Kampf-Kategorien: FOOD_WEIGHT_OTHER; Movement/Profession fest.
+local FOOD_PRIORITY = {
+    WARRIOR = { "Strength", "MeleeAP", "Agility", "Crit", "Stamina" },
+    ROGUE   = { "Agility", "MeleeAP", "Crit", "Strength", "Stamina" },
+    HUNTER  = { "Agility", "Crit", "Intellect", "Stamina" },
+    PALADIN = { "Strength", "MeleeAP", "Intellect", "Stamina" },
+    SHAMAN  = { "MeleeAP", "Strength", "Intellect", "Stamina" },
+    DRUID   = { "Agility", "Strength", "Intellect", "Stamina" },
+    PRIEST  = { "Spirit", "Intellect", "SpellDamage", "Healing" },
+    MAGE    = { "SpellDamage", "Intellect", "Spirit", "Stamina" },
+    WARLOCK = { "SpellDamage", "Stamina", "Spirit", "Intellect" },
+}
+local FOOD_WEIGHTS = { 1.0, 0.85, 0.7, 0.55, 0.55 }
+local FOOD_WEIGHT_OTHER = 0.35
+local FOOD_WEIGHT_FIXED = { Movement = 0.25, Profession = 0.1 }
+-- Heiler: Healing mindestens 0.55
+local FOOD_HEALING_MIN = { PRIEST = 0.55, PALADIN = 0.55, DRUID = 0.55, SHAMAN = 0.55 }
+
+-- Fläschchen-Fallback (Classic), falls die Item-Klasse nicht ermittelbar ist
+local FLASK_IDS = { [13506] = true, [13510] = true, [13511] = true, [13512] = true, [13513] = true }
 
 ---------------------------------------------------------------------------
 -- Reagenzien (Classic-Daten)
@@ -603,6 +677,142 @@ local function ReagentThreshold(item)
     local v = cdb and cdb.reagents and cdb.reagents[item]
     if v == nil then v = REAGENT_INFO[item] and REAGENT_INFO[item].default or 0 end
     return v
+end
+
+---------------------------------------------------------------------------
+-- Essen & Fläschchen: Taschen-Inhalt, Auswahl und Sortierung
+---------------------------------------------------------------------------
+local bagCounts = {}      -- Item-ID -> Anzahl in den Taschen (Scan bei BAG_UPDATE_DELAYED)
+local foodScore = {}      -- Item-ID -> Kategorie-Gewicht x Kochkunst-Stufe (Klasse des Spielers)
+local xpCache = {}        -- Item-ID -> true/false: Tooltip nennt XP-Bonus (nur geladene Items)
+local flaskBySpell = {}   -- Spell-ID des Fläschchen-Effekts -> Item-ID
+local flaskEntry          -- Eintrag gen_flask (idSet wird zur Laufzeit ergänzt)
+
+local function BuildFoodScores(class)
+    local weights = {}
+    for cat in pairs(FOOD) do weights[cat] = FOOD_WEIGHT_FIXED[cat] or FOOD_WEIGHT_OTHER end
+    for i, cat in ipairs(FOOD_PRIORITY[class] or {}) do
+        weights[cat] = FOOD_WEIGHTS[i] or FOOD_WEIGHT_OTHER
+    end
+    if FOOD_HEALING_MIN[class] then
+        weights.Healing = math.max(weights.Healing, FOOD_HEALING_MIN[class])
+    end
+    wipe(foodScore)
+    for cat, list in pairs(FOOD) do
+        for _, v in ipairs(list) do
+            local score = weights[cat] * v[2]
+            if not foodScore[v[1]] or score > foodScore[v[1]] then foodScore[v[1]] = score end
+        end
+    end
+end
+
+-- Item-Level und benötigte Stufe (nil, falls das Item noch nicht geladen ist)
+local function ItemLevels(item)
+    local fn = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+    if not fn then return nil end
+    local ok, name, _, _, ilvl, minLevel = pcall(fn, item)
+    if not ok or not name or IsSecret(ilvl) or IsSecret(minLevel) then return nil end
+    return ilvl, minLevel
+end
+
+-- Nennt der Tooltip einen XP-Bonus? (enUS "experience", deDE "Erfahrung")
+local function HasXPBonus(item)
+    if xpCache[item] ~= nil then return xpCache[item] end
+    if not (C_TooltipInfo and C_TooltipInfo.GetItemByID) then return false end
+    local ok, data = pcall(C_TooltipInfo.GetItemByID, item)
+    if not ok or type(data) ~= "table" or IsSecret(data) or type(data.lines) ~= "table" then return false end
+    local found = false
+    for _, line in ipairs(data.lines) do
+        for _, t in ipairs({ line.leftText, line.rightText }) do
+            if type(t) == "string" and not IsSecret(t) then
+                local s = t:lower()
+                if s:find("experience", 1, true) or s:find("erfahrung", 1, true) then found = true end
+            end
+        end
+    end
+    -- nur cachen, wenn das Item geladen ist (sonst ist der Tooltip unvollständig)
+    if ItemLevels(item) then xpCache[item] = found end
+    return found
+end
+
+local function IsFlaskItem(item)
+    if FLASK_IDS[item] then return true end
+    local flaskSub = Enum and Enum.ItemConsumableSubclass and Enum.ItemConsumableSubclass.Flask
+    if not flaskSub then return false end
+    local consumable = (Enum.ItemClass and Enum.ItemClass.Consumable) or 0
+    local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if not fn then return false end
+    local ok, _, _, _, _, _, classID, subClassID = pcall(fn, item)
+    return ok and classID == consumable and subClassID == flaskSub
+end
+
+-- Spell-ID des Fläschchen-Effekts lernen, damit auch neue Fläschchen als aktiv erkannt werden
+local function LearnFlaskSpell(item)
+    if not (C_Item and C_Item.GetItemSpell) then return end
+    local ok, _, spellID = pcall(C_Item.GetItemSpell, item)
+    if not ok or type(spellID) ~= "number" or IsSecret(spellID) then return end
+    flaskBySpell[spellID] = item
+    if flaskEntry then flaskEntry.idSet[spellID] = true end
+    if db then db.flaskSpells[spellID] = true end
+end
+
+-- Taschen 0..NUM_BAG_SLOTS durchgehen (ohne Bank)
+local function ScanBags()
+    if not (C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo) then return end
+    wipe(bagCounts)
+    for bag = 0, NUM_BAG_SLOTS or 4 do
+        local okN, slots = pcall(C_Container.GetContainerNumSlots, bag)
+        if okN and type(slots) == "number" and not IsSecret(slots) then
+            for slot = 1, slots do
+                local ok, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
+                if ok and type(info) == "table" and not IsSecret(info) then
+                    local id, n = info.itemID, info.stackCount or 1
+                    if type(id) == "number" and not IsSecret(id) and not IsSecret(n) then
+                        bagCounts[id] = (bagCounts[id] or 0) + n
+                    end
+                end
+            end
+        end
+    end
+    for id in pairs(bagCounts) do
+        if IsFlaskItem(id) then LearnFlaskSpell(id) end
+    end
+end
+
+-- passende Items aus den Taschen, beste Wahl zuerst: { { id, count }, ... }
+local function ItemChoices(e)
+    local list = {}
+    if e.itemKind == "food" then
+        local lvl = UnitLevel("player") or 1
+        for id, n in pairs(bagCounts) do
+            if foodScore[id] then
+                local _, minLevel = ItemLevels(id)
+                if not minLevel or minLevel <= lvl then
+                    list[#list + 1] = { id = id, count = n, xp = HasXPBonus(id), score = foodScore[id] }
+                end
+            end
+        end
+        table.sort(list, function(a, b)
+            if a.xp ~= b.xp then return a.xp end
+            if a.score ~= b.score then return a.score > b.score end
+            if a.count ~= b.count then return a.count > b.count end
+            return a.id < b.id
+        end)
+    elseif e.itemKind == "flask" then
+        local last = cdb and cdb.lastFlask
+        for id, n in pairs(bagCounts) do
+            if IsFlaskItem(id) then
+                list[#list + 1] = { id = id, count = n, ilvl = ItemLevels(id) or 0 }
+            end
+        end
+        table.sort(list, function(a, b)
+            if (a.id == last) ~= (b.id == last) then return a.id == last end
+            if a.ilvl ~= b.ilvl then return a.ilvl > b.ilvl end
+            if a.count ~= b.count then return a.count > b.count end
+            return a.id < b.id
+        end)
+    end
+    return list
 end
 
 local function EntryLabel(e)
@@ -1050,12 +1260,24 @@ local function IsActionPhase(down)
     return (down and true or false) == GetCVarFlag("ActionButtonUseKeyDown")
 end
 
--- Linksklick-Zauber einer Zeile setzen (nur außerhalb des Kampfes aufrufen)
-local function SetRowSpell(r, spell)
-    if r.castSpell == spell then return end
-    r.castSpell = spell
-    r:SetAttribute("type1", spell and "spell" or nil)
-    r:SetAttribute("spell1", spell)
+-- Linksklick-Aktion einer Zeile setzen (nur außerhalb des Kampfes aufrufen):
+-- Zauber (ID/Name) oder Item-ID; beides nil = Linksklick tut nichts
+local function SetRowAction(r, spell, item)
+    if r.castSpell == spell and r.useItem == item then return end
+    r.castSpell, r.useItem = spell, item
+    if spell then
+        r:SetAttribute("type1", "spell")
+        r:SetAttribute("spell1", spell)
+        r:SetAttribute("item1", nil)
+    elseif item then
+        r:SetAttribute("type1", "item")
+        r:SetAttribute("item1", "item:" .. item)
+        r:SetAttribute("spell1", nil)
+    else
+        r:SetAttribute("type1", nil)
+        r:SetAttribute("spell1", nil)
+        r:SetAttribute("item1", nil)
+    end
 end
 
 local function GetRow(i)
@@ -1105,8 +1327,15 @@ local function GetRow(i)
     end
     r:RegisterForDrag("LeftButton")
     r:SetScript("PostClick", function(self, button, down)
-        if button ~= "RightButton" or not IsActionPhase(down) then return end
-        if self.entry and not unlocked then OpenMuteMenu(self) end
+        if not IsActionPhase(down) then return end
+        if button == "LeftButton" then
+            -- per Linksklick benutztes Fläschchen als "zuletzt benutzt" merken
+            if self.useItem and self.entry and self.entry.itemKind == "flask" then
+                cdb.lastFlask = self.useItem
+            end
+            return
+        end
+        if button == "RightButton" and self.entry and not unlocked then OpenMuteMenu(self) end
     end)
     r:SetScript("OnDragStart", function()
         if unlocked and not InCombatLockdown() then anchor:StartMoving() end
@@ -1119,7 +1348,12 @@ local function GetRow(i)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(EntryLabel(self.entry), 1, 0.82, 0)
         if self.castSpell then GameTooltip:AddLine(L.LEFTCLICK, 0.8, 0.8, 0.8) end
-        GameTooltip:AddLine(L.RIGHTCLICK, 0.8, 0.8, 0.8)
+        if self.useItem then
+            GameTooltip:AddLine(L.LEFTCLICK_USE:format(ItemName(self.useItem)), 0.8, 0.8, 0.8)
+            GameTooltip:AddLine(L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
+        else
+            GameTooltip:AddLine(L.RIGHTCLICK, 0.8, 0.8, 0.8)
+        end
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1136,26 +1370,41 @@ local function ShowRows(list, dragMode)
         r.icon:SetTexture(EntryIcon(e))
         if dragMode then
             r.entry = nil
-            SetRowSpell(r, nil)
+            SetRowAction(r, nil, nil)
             r.text:SetText(L.DRAG)
             r.hint:SetText("")
         else
             r.entry = e
             local spell = CastSpellFor(e)
-            SetRowSpell(r, spell)
+            -- Essen/Fläschchen: Linksklick benutzt die beste Wahl aus den Taschen
+            local item, noItem
+            if not spell and e.itemKind and db.clickCast then
+                local choices = ItemChoices(e)
+                item = choices[1] and choices[1].id
+                noItem = item == nil
+            end
+            SetRowAction(r, spell, item)
             if e.kind == "reagent" then
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
             else
                 r.text:SetText(L.MISSING:format(EntryLabel(e)))
             end
-            r.hint:SetText(spell and L.HINT_CAST or L.HINT_MUTE)
+            if spell then
+                r.hint:SetText(L.HINT_CAST)
+            elseif item then
+                r.hint:SetText(L.HINT_ITEM:format(ItemName(item)))
+            elseif noItem then
+                r.hint:SetText(L.HINT_NOITEM)
+            else
+                r.hint:SetText(L.HINT_MUTE)
+            end
         end
         r:Show()
     end
     for i = #list + 1, #rows do
         rows[i]:Hide()
         rows[i].entry = nil
-        SetRowSpell(rows[i], nil)
+        SetRowAction(rows[i], nil, nil)
     end
     if #list > 0 then
         if not anchor:IsShown() then
@@ -1175,19 +1424,26 @@ local function PlayAlertSound()
 end
 
 ---------------------------------------------------------------------------
--- Rechtsklick-Menü (Stummschalten)
+-- Rechtsklick-Menü (Stummschalten, bei Essen/Fläschchen mit Item-Auswahl darüber)
+-- Die Item-Auswahl (itemPanel) enthält Secure Buttons und ist daher ein eigener
+-- Frame: Sie wird nur außerhalb des Kampfes gezeigt, befüllt und versteckt. Das
+-- Stumm-Menü (menu) ist unsicher und funktioniert auch im Kampf; mit Item-Auswahl
+-- hängt es ohne Titel unter dem itemPanel.
 ---------------------------------------------------------------------------
+local MENU_WIDTH = 230
+local MENU_BACKDROP = {
+    bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true, tileSize = 16, edgeSize = 14,
+    insets = { left = 3, right = 3, top = 3, bottom = 3 },
+}
+
 local menu = CreateFrame("Frame", "BuffReminderMuteMenu", UIParent, "BackdropTemplate")
 menu:SetFrameStrata("DIALOG")
 menu:SetClampedToScreen(true)
 menu:EnableMouse(true)
 menu:Hide()
-menu:SetBackdrop({
-    bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 14,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-})
+menu:SetBackdrop(MENU_BACKDROP)
 menu:SetBackdropColor(0, 0, 0, 0.92)
 tinsert(UISpecialFrames, "BuffReminderMuteMenu")   -- ESC schließt
 
@@ -1200,10 +1456,11 @@ local MENU_OPTIONS = {
     { L.MUTE5, 300 }, { L.MUTE15, 900 }, { L.MUTE60, 3600 },
     { L.MUTESESSION, math.huge }, { L.CANCEL, nil },
 }
+menu.buttons = {}
 for i, opt in ipairs(MENU_OPTIONS) do
     local b = CreateFrame("Button", nil, menu)
-    b:SetSize(180, 18)
-    b:SetPoint("TOPLEFT", 6, -26 - (i - 1) * 19)
+    b:SetSize(MENU_WIDTH - 12, 18)
+    menu.buttons[i] = b
     b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
     local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     fs:SetPoint("LEFT", 6, 0)
@@ -1218,25 +1475,153 @@ for i, opt in ipairs(MENU_OPTIONS) do
         menu:Hide()
     end)
 end
-menu:SetSize(192, 26 + #MENU_OPTIONS * 19 + 8)
 
--- Schließt sich, wenn die Maus das Menü 2 Sek. lang verlassen hat
+-- mit Titel (eigenständig) oder ohne (unter der Item-Auswahl)
+local function LayoutMenu(withTitle)
+    local top = withTitle and -26 or -8
+    for i, b in ipairs(menu.buttons) do
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", 6, top - (i - 1) * 19)
+    end
+    if withTitle then menu.title:Show() else menu.title:Hide() end
+    menu:SetSize(MENU_WIDTH, -top + #MENU_OPTIONS * 19 + 8)
+end
+LayoutMenu(true)
+
+-- Item-Auswahl (Secure Buttons: type "item")
+local MAX_ITEM_CHOICES = 12
+local itemPanel = CreateFrame("Frame", "BuffReminderItemMenu", UIParent, "BackdropTemplate")
+itemPanel:SetFrameStrata("DIALOG")
+itemPanel:SetClampedToScreen(true)
+itemPanel:EnableMouse(true)
+itemPanel:Hide()
+itemPanel:SetBackdrop(MENU_BACKDROP)
+itemPanel:SetBackdropColor(0, 0, 0, 0.92)
+itemPanel.buttons = {}
+
+itemPanel.title = itemPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+itemPanel.title:SetPoint("TOPLEFT", 10, -9)
+itemPanel.title:SetPoint("RIGHT", -10, 0)
+itemPanel.title:SetJustifyH("LEFT")
+
+-- Trenner zu den Stumm-Optionen
+itemPanel.sep = itemPanel:CreateTexture(nil, "ARTWORK")
+itemPanel.sep:SetColorTexture(1, 0.8, 0.2, 0.35)
+itemPanel.sep:SetHeight(1)
+itemPanel.sep:SetPoint("BOTTOMLEFT", 10, 6)
+itemPanel.sep:SetPoint("BOTTOMRIGHT", -10, 6)
+
+local function GetItemButton(i)
+    if itemPanel.buttons[i] then return itemPanel.buttons[i] end
+    local b = CreateFrame("Button", nil, itemPanel, "SecureActionButtonTemplate")
+    b:SetSize(MENU_WIDTH - 12, 20)
+    b:SetPoint("TOPLEFT", 6, -26 - (i - 1) * 21)
+    b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetSize(16, 16)
+    b.icon:SetPoint("LEFT", 4, 0)
+    b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    b.count = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.count:SetPoint("RIGHT", -6, 0)
+    b.count:SetJustifyH("RIGHT")
+    b.name = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, 0)
+    b.name:SetPoint("RIGHT", b.count, "LEFT", -6, 0)
+    b.name:SetJustifyH("LEFT")
+    b.name:SetWordWrap(false)
+    b:SetAttribute("type", "item")
+    if HasKeyDownCVar() then
+        b:RegisterForClicks("AnyUp", "AnyDown")
+    else
+        b:RegisterForClicks("AnyUp")
+    end
+    b:SetScript("PostClick", function(self, _, down)
+        if not IsActionPhase(down) then return end
+        if itemPanel.entry and itemPanel.entry.itemKind == "flask" then cdb.lastFlask = self.itemID end
+        menu:Hide()   -- schließt auch das itemPanel
+    end)
+    itemPanel.buttons[i] = b
+    return b
+end
+
+-- Item-Auswahl befüllen (nur außerhalb des Kampfes); false = nichts anzuzeigen
+local function FillItemPanel(e, choices)
+    if InCombatLockdown() then return false end
+    local n = math.min(#choices, MAX_ITEM_CHOICES)
+    if n == 0 then return false end
+    itemPanel.entry = e
+    itemPanel.title:SetText(EntryLabel(e))
+    for i = 1, n do
+        local c, b = choices[i], GetItemButton(i)
+        b.itemID = c.id
+        b:SetAttribute("item", "item:" .. c.id)
+        b.icon:SetTexture(ItemIcon(c.id) or FALLBACK_ICON)
+        b.name:SetText(ItemName(c.id))
+        b.count:SetText(c.count)
+        b:Show()
+    end
+    for i = n + 1, #itemPanel.buttons do
+        local b = itemPanel.buttons[i]
+        b:Hide()
+        b.itemID = nil
+        b:SetAttribute("item", nil)
+    end
+    itemPanel:SetSize(MENU_WIDTH, 26 + n * 21 + 10)
+    return true
+end
+
+local function HideItemPanel()
+    if itemPanel:IsShown() and not InCombatLockdown() then itemPanel:Hide() end
+end
+
+menu:SetScript("OnHide", HideItemPanel)
+
+-- Schließt sich, wenn die Maus Menü und Item-Auswahl 2 Sek. lang verlassen hat
 menu:SetScript("OnUpdate", function(self, el)
-    if MouseIsOver(self) then self.away = 0 else
+    if MouseIsOver(self) or (itemPanel:IsShown() and MouseIsOver(itemPanel)) then self.away = 0 else
         self.away = (self.away or 0) + el
         if self.away > 2 then self:Hide() end
     end
 end)
 
+-- Rechtsklick auf eine Erinnerung. Essen/Fläschchen (außerhalb des Kampfes und mit
+-- "Linksklick zaubert Buff"): passende Items oben, darunter die Stumm-Optionen.
 function OpenMuteMenu(row)
-    menu.key = row.entry.key
-    menu.title:SetText(EntryLabel(row.entry))
+    local e = row.entry
+    menu.key = e.key
     local x, y = GetCursorPosition()
     local s = UIParent:GetEffectiveScale()
+    local withItems = e.itemKind and db.clickCast and not InCombatLockdown()
+        and FillItemPanel(e, ItemChoices(e))
     menu:ClearAllPoints()
-    menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s - 10, y / s + 10)
+    if withItems then
+        itemPanel:ClearAllPoints()
+        itemPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s - 10, y / s + 10)
+        itemPanel:Show()
+        LayoutMenu(false)
+        menu:SetPoint("TOPLEFT", itemPanel, "BOTTOMLEFT", 0, 3)
+    else
+        HideItemPanel()
+        LayoutMenu(true)
+        menu.title:SetText(EntryLabel(e))
+        menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s - 10, y / s + 10)
+    end
     menu.away = 0
     menu:Show()
+end
+
+-- Taschen geändert: offene Item-Auswahl neu befüllen (oder schließen, wenn leer)
+local function RefreshItemPanel()
+    if not itemPanel:IsShown() or InCombatLockdown() then return end
+    if not FillItemPanel(itemPanel.entry, ItemChoices(itemPanel.entry)) then menu:Hide() end
+end
+
+-- Kampfbeginn: Item-Auswahl (Secure Buttons) schließen, solange das noch erlaubt ist
+local function CloseItemPanelForCombat()
+    if itemPanel:IsShown() then
+        itemPanel:Hide()
+        menu:Hide()
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -1742,6 +2127,7 @@ ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 ev:RegisterEvent("BAG_UPDATE_DELAYED")
+ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Ladebildschirm-Events gibt es nicht in jedem Client → Registrierung absichern
 pcall(ev.RegisterEvent, ev, "LOADING_SCREEN_ENABLED")
@@ -1759,7 +2145,7 @@ local function StartGrace()
     local gen = graceGen
     C_Timer.After(GRACE_TIME, function()
         if gen ~= graceGen then return end
-        ready = true; RefreshKnown(); Evaluate()
+        ready = true; ScanBags(); RefreshKnown(); Evaluate()
     end)
 end
 
@@ -1773,7 +2159,9 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         cdb.buffs = cdb.buffs or {}
         cdb.lastVariant = cdb.lastVariant or {}   -- Eintrag-Key -> zuletzt genutzte Variante
         cdb.reagents = cdb.reagents or {}         -- Reagenz-Item-ID -> Warnschwelle (0 = aus)
+        -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
+        db.flaskSpells = db.flaskSpells or {}     -- gelernte Spell-IDs von Fläschchen-Effekten
         self:UnregisterEvent("ADDON_LOADED")
         return
     end
@@ -1785,6 +2173,13 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             PrepareEntry(e); PrepareCast(e, class); entries[#entries + 1] = e
         end
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
+        -- Essen & Fläschchen: Kategorie-Gewichte der Klasse, gelernte Fläschchen-Spells, Taschen
+        for _, e in ipairs(GENERAL_BUFFS) do
+            if e.itemKind == "flask" then flaskEntry = e end
+        end
+        for id in pairs(db.flaskSpells) do flaskEntry.idSet[id] = true end
+        BuildFoodScores(class)
+        ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
         reagentLines = REAGENT_SPELLS[class] or {}
         local seen = {}
@@ -1812,7 +2207,14 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
 
     if event == "GET_ITEM_INFO_RECEIVED" then
         -- arg1 = Item-ID; nur eigene Reagenzien interessieren (lokalisierter Name nachgeladen)
+        -- bzw. Essen/Fläschchen in den Taschen (Name, Stufe, Tooltip jetzt verfügbar)
         if IsSecret(arg1) then return end
+        if bagCounts[arg1] then
+            if IsFlaskItem(arg1) then LearnFlaskSpell(arg1) end
+            RefreshItemPanel()
+            Evaluate()
+            return
+        end
         for _, e in ipairs(reagentEntries) do
             if e.item == arg1 then
                 Evaluate()
@@ -1823,9 +2225,27 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         return
     end
 
+    if event == "BAG_UPDATE_DELAYED" then
+        ScanBags()
+        RefreshItemPanel()   -- im Kampf nicht offen; Zeilen-Attribute folgen per Evaluate nach dem Kampf
+        Evaluate()
+        return
+    end
+
+    if event == "PLAYER_REGEN_DISABLED" then
+        CloseItemPanelForCombat()
+        return
+    end
+
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- arg1 = unit, arg2 = castGUID, arg3 = spellID (kann ein Secret-Wert sein)
-        if cdb then RememberFromCast(arg3) end
+        if cdb then
+            RememberFromCast(arg3)
+            -- Fläschchen-Effekt (auch über Aktionsleiste/Taschen benutzt) -> zuletzt benutzt
+            if arg3 ~= nil and not IsSecret(arg3) and flaskBySpell[arg3] then
+                cdb.lastFlask = flaskBySpell[arg3]
+            end
+        end
         Evaluate()
         return
     end
