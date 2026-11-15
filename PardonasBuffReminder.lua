@@ -764,16 +764,28 @@ local foodEntry           -- Eintrag gen_wellfed (eatStart = Beginn des Essens, 
 -- Well Fed kommt laut Item-Tooltip nach "at least 10 seconds" Essen
 local EAT_WELLFED_TIME = 10
 local eatSpells = {}      -- Spell-ID der Ess-Aura -> true
+local eatNames = {}       -- Name der Ess-Aura -> true (die Aura-ID kann vom Item-Spell abweichen)
+local eatNorm = {}        -- NormName(Name) -> true
 local eatPending = {}     -- Item-ID -> true: Item-Daten noch nicht geladen, Spell folgt
+local eatAura             -- zuletzt gefundene Ess-Aura { id, name } (für /br debug)
+-- generische Auren, die Essen/Trinken anlegen (WoW Forever: "Food" 433)
+local EAT_GENERIC_AURAS = { 433, 430 }   -- Food, Drink
+
+local function AddEatName(name)
+    if type(name) ~= "string" or name == "" or IsSecret(name) then return end
+    eatNames[name] = true
+    eatNorm[NormName(name)] = true
+end
 
 -- Ess-Aura eines Essens ermitteln und cachen; nicht geladene Items nachfordern
 -- (GET_ITEM_INFO_RECEIVED ruft mit loaded = true erneut auf; hat das geladene Item
 -- keinen Spell, wird es nicht erneut angefordert – keine Endlosschleife)
 local function ResolveEatSpell(item, loaded)
     if not (C_Item and C_Item.GetItemSpell) then return end
-    local ok, _, spellID = pcall(C_Item.GetItemSpell, item)
+    local ok, spellName, spellID = pcall(C_Item.GetItemSpell, item)
     if ok and type(spellID) == "number" and not IsSecret(spellID) then
         eatSpells[spellID] = true
+        AddEatName(spellName)
         eatPending[item] = nil
         return
     end
@@ -783,22 +795,38 @@ local function ResolveEatSpell(item, loaded)
 end
 
 local function ResolveAllEatSpells()
+    for _, id in ipairs(EAT_GENERIC_AURAS) do AddEatName(SpellName(id)) end
     for _, list in pairs(FOOD) do
         for _, v in ipairs(list) do ResolveEatSpell(v[1]) end
     end
 end
 
+local function IsEatAura(a)
+    if a.id and eatSpells[a.id] then return true end
+    local n = a.name
+    if type(n) ~= "string" or IsSecret(n) then return false end
+    return eatNames[n] == true or eatNorm[NormName(n)] == true
+end
+
 -- Startzeit einer aktiven Ess-Aura (expirationTime - duration), nil = isst nicht oder
 -- Laufzeit nicht lesbar (Secret) -> normale Anzeige ohne Countdown
 local function FindEatStart(scan)
+    eatAura = nil
     if not scan then return nil end
     for _, a in ipairs(scan.list) do
-        if a.id and eatSpells[a.id] then
+        if IsEatAura(a) then
+            eatAura = { id = a.id, name = a.name }
             local dur, exp = a.duration, a.expirationTime
             if type(dur) == "number" and type(exp) == "number" and dur > 0 then return exp - dur end
             return nil
         end
     end
+end
+
+local function CountKeys(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
 end
 
 -- Haupttext während des Essens
@@ -2782,6 +2810,10 @@ SlashCmdList.BUFFREMINDER = function(msg)
                 tostring(missing[e.key]), tostring(MuteRemaining(e.key) ~= nil),
                 table.concat(e.names or {}, "/")))
         end
+        Print(("eating=%s aura=%s eatSpells=%d eatNames=%d"):format(
+            (foodEntry and foodEntry.eatStart) and "yes" or "no",
+            eatAura and ("%s – %s"):format(tostring(eatAura.name), tostring(eatAura.id)) or "none",
+            CountKeys(eatSpells), CountKeys(eatNames)))
     elseif cmd == "auras" then
         Print(L.AURAS_HEAD)
         if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
