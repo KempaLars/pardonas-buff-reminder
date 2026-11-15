@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing, and (beta) when your reagents are running low. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
 
 **CurseForge:** https://www.curseforge.com/wow/addons/pardonas-buff-reminder
 
@@ -34,6 +34,15 @@ Built for **WoW Forever** (Interface `16001`).
   - Situational buffs (e.g. Thorns, Shadowform, Righteous Fury, shouts) are off by default.
 - **Weapon imbues and poisons** – Shaman main-hand/off-hand weapon imbues and Rogue main-hand/off-hand poisons. Off-hand checks only apply when an actual weapon is equipped there.
 - **General buffs (optional, off by default)** – Well Fed, Flask, and Well-Rested (sleeping bag).
+- **Reagent warnings (beta)** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
+  - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
+  - Mage: Arcane Powder (Arcane Brilliance), Rune of Teleportation, Rune of Portals, Light Feather (Slow Fall)
+  - Druid: Wild Berries, Wild Thornroot (Gift of the Wild), Maple / Stranglethorn / Ashwood / Hornbeam / Ironwood Seed (Rebirth)
+  - Paladin: Symbol of Kings (Greater Blessings), Symbol of Divinity (Divine Intervention)
+  - Shaman: Ankh (Reincarnation), Fish Oil (Water Walking), Shiny Fish Scale (Water Breathing)
+  - Rogue: Flash Powder (Vanish), Blinding Powder (Blind)
+  - The settings window has a "Reagents" section listing your class's reagents, each with a threshold field (0–50, 0 = no warning) and the current count in your bags. Defaults: Ankh and seeds 1, runes and Blinding Powder 5, everything else 10. Thresholds are saved per character.
+  - Reagent warnings appear in the normal reminder list with the item's icon and name in your client language. Left-click does nothing; right-click mutes them like buff reminders.
 - **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
 - **Right-click to mute** – right-click a reminder to mute it for 5, 15 or 60 minutes or for the rest of the session. Mutes can be cleared from the settings window or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
@@ -72,7 +81,7 @@ luacheck .
 
 It must report 0 warnings / 0 errors.
 
-On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
+On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` or `develop` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
 
 **Testing in game:** WoW only picks up new files (e.g. textures such as `Textures/Icon.tga`) after a full restart of the game client – `/reload` is not enough. Changes to existing Lua files are picked up by `/reload`.
 
@@ -97,7 +106,7 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 ```
 .
 ├── .github/workflows/
-│   ├── lint.yml                    # Lint workflow (luacheck on push to main and pull requests)
+│   ├── lint.yml                    # Lint workflow (luacheck on push to main/develop and pull requests)
 │   └── release.yml                 # Release workflow (triggered by version tags, lint first)
 ├── media/
 │   ├── icon.svg                    # Source for the round in-game icon

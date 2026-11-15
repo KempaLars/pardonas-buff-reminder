@@ -1,5 +1,5 @@
 -- Pardona's Buff Reminder – WoW Forever (Interface 16001, Mainline-API)
--- Erinnert an fehlende Klassen- und allgemeine Buffs.
+-- Erinnert an fehlende Klassen- und allgemeine Buffs sowie an knappe Reagenzien.
 -- Auswahl per GUI (Minimap-Button / /br), Rechtsklick auf Erinnerung = stummschalten,
 -- Linksklick auf Erinnerung = Buff auf sich selbst zaubern (abschaltbar).
 
@@ -74,6 +74,12 @@ if GetLocale() == "deDE" then
         CLICKCAST     = "Linksklick zaubert Buff",
         COMBAT        = "Im Kampf nicht möglich.",
         AFTER_COMBAT  = "Änderung wird nach dem Kampf angezeigt.",
+        -- Reagenzien
+        REAGENTS      = "Reagenzien",
+        REAGENT_HINT  = "Warnen unter (0 = aus)",
+        REAGENT_LOW   = "%s: %d übrig",
+        REAGENT_CHAT  = "|cffffb000Reagenz knapp: %s – nur noch %d!|r",
+        IN_BAGS       = "%d in Taschen",
     }
 else
     L = {
@@ -138,6 +144,11 @@ else
         CLICKCAST     = "Left-click casts buff",
         COMBAT        = "Not possible in combat.",
         AFTER_COMBAT  = "Change will be shown after combat.",
+        REAGENTS      = "Reagents",
+        REAGENT_HINT  = "Warn below (0 = off)",
+        REAGENT_LOW   = "%s: %d left",
+        REAGENT_CHAT  = "|cffffb000Reagent running low: %s – only %d left!|r",
+        IN_BAGS       = "%d in bags",
     }
 end
 
@@ -371,6 +382,113 @@ local CAST_DATA = {
     },
 }
 
+---------------------------------------------------------------------------
+-- Reagenzien (Classic-Daten)
+--   REAGENT_INFO   : Item-ID -> Standard-Schwelle (Warnung, wenn Anzahl < Schwelle;
+--                    0 = aus) und englischer Name (Fallback, bis das Item geladen ist)
+--   REAGENT_SPELLS : pro Klasse Zauberlinien; Ränge aufsteigend { Spell-ID, Lernstufe, Item }.
+--                    Item nil = dieser Rang verbraucht ein hier nicht geführtes Reagenz.
+--   Ein Reagenz wird geprüft, wenn bei mindestens einer Linie der höchste erlernte Rang es
+--   verbraucht (z. B. Gebet der Seelenstärke Rang 1 = Heilige Kerze, Rang 2 = Geweihte Kerze).
+--   Namens-Fallback: Ist keine ID erlernt, aber der Zaubername bekannt, zählt der höchste
+--   Rang, dessen Lernstufe erreicht ist.
+---------------------------------------------------------------------------
+local REAGENT_INFO = {
+    [17028] = { default = 10, name = "Holy Candle" },
+    [17029] = { default = 10, name = "Sacred Candle" },
+    [17020] = { default = 10, name = "Arcane Powder" },
+    [17031] = { default = 5,  name = "Rune of Teleportation" },
+    [17032] = { default = 5,  name = "Rune of Portals" },
+    [17056] = { default = 10, name = "Light Feather" },
+    [17021] = { default = 10, name = "Wild Berries" },
+    [17026] = { default = 10, name = "Wild Thornroot" },
+    [17034] = { default = 1,  name = "Maple Seed" },
+    [17035] = { default = 1,  name = "Stranglethorn Seed" },
+    [17036] = { default = 1,  name = "Ashwood Seed" },
+    [17037] = { default = 1,  name = "Hornbeam Seed" },
+    [17038] = { default = 1,  name = "Ironwood Seed" },
+    [21177] = { default = 10, name = "Symbol of Kings" },
+    [17033] = { default = 10, name = "Symbol of Divinity" },
+    [17030] = { default = 1,  name = "Ankh" },
+    [17058] = { default = 10, name = "Fish Oil" },
+    [17057] = { default = 10, name = "Shiny Fish Scale" },
+    [5140]  = { default = 10, name = "Flash Powder" },
+    [5530]  = { default = 5,  name = "Blinding Powder" },
+}
+
+-- je Spell-ID eine eigene Linie mit einem Rang (Teleports, Portale), damit der
+-- Namens-Fallback für jeden Zielort einzeln greift
+local function SingleRankLines(item, list)
+    local lines = {}
+    for _, v in ipairs(list) do lines[#lines + 1] = { { v[1], v[2], item } } end
+    return lines
+end
+
+local function Concat(...)
+    local out = {}
+    for _, t in ipairs({ ... }) do
+        for _, v in ipairs(t) do out[#out + 1] = v end
+    end
+    return out
+end
+
+local REAGENT_SPELLS = {
+    PRIEST = {
+        -- Gebet der Seelenstärke
+        { { 21562, 48, 17028 }, { 21564, 60, 17029 }, { 25392, 70, 17029 }, { 48162, 80, nil } },
+        -- Gebet der Willenskraft
+        { { 27681, 60, 17029 }, { 32999, 70, 17029 }, { 48074, 80, nil } },
+        -- Gebet des Schattenschutzes
+        { { 27683, 56, 17029 }, { 39374, 70, 17029 }, { 48170, 80, nil } },
+        -- Levitieren
+        { { 1706, 34, 17056 } },
+    },
+    MAGE = Concat({
+        -- Arkane Brillanz
+        { { 23028, 56, 17020 }, { 27127, 70, 17020 }, { 43002, 80, 17020 } },
+        -- Langsamer Fall
+        { { 130, 12, 17056 } },
+    },
+    -- Teleport: Sturmwind, Eisenschmiede, Darnassus, Exodar, Orgrimmar, Unterstadt,
+    -- Donnerfels, Silbermond, Shattrath (A/H), Theramore, Steinard, Dalaran
+    SingleRankLines(17031, { { 3561, 20 }, { 3562, 20 }, { 3565, 20 }, { 32271, 20 }, { 3567, 20 },
+        { 3563, 20 }, { 3566, 20 }, { 32272, 20 }, { 33690, 60 }, { 35715, 60 }, { 49359, 60 },
+        { 49358, 60 }, { 53140, 71 } }),
+    -- Portal: gleiche Reihenfolge
+    SingleRankLines(17032, { { 10059, 40 }, { 11416, 40 }, { 11419, 40 }, { 32266, 40 }, { 11417, 40 },
+        { 11418, 40 }, { 11420, 40 }, { 32267, 40 }, { 33691, 65 }, { 35717, 65 }, { 49360, 65 },
+        { 49361, 65 }, { 53142, 74 } })),
+    DRUID = {
+        -- Gabe der Wildnis
+        { { 21849, 50, 17021 }, { 21850, 60, 17026 }, { 26991, 70, nil }, { 48470, 80, nil } },
+        -- Wiedergeburt
+        { { 20484, 20, 17034 }, { 20739, 30, 17035 }, { 20742, 40, 17036 }, { 20747, 50, 17037 },
+          { 20748, 60, 17038 }, { 26994, 69, nil }, { 48477, 78, nil } },
+    },
+    PALADIN = {
+        -- Große Segen: Macht, Weisheit, Könige, Rettung, Licht, Refugium
+        { { 25782, 52, 21177 }, { 25916, 60, 21177 }, { 27141, 70, 21177 }, { 48933, 73, 21177 },
+          { 48934, 79, 21177 } },
+        { { 25894, 54, 21177 }, { 25918, 60, 21177 }, { 27143, 70, 21177 }, { 48937, 75, 21177 },
+          { 48938, 80, 21177 } },
+        { { 25898, 60, 21177 } },
+        { { 25895, 60, 21177 } },
+        { { 25890, 60, 21177 }, { 27145, 70, 21177 } },
+        { { 25899, 60, 21177 }, { 27169, 70, 21177 } },
+        -- Göttliches Eingreifen
+        { { 19752, 30, 17033 } },
+    },
+    SHAMAN = {
+        { { 20608, 30, 17030 } },   -- Reinkarnation
+        { { 546, 28, 17058 } },     -- Wasserwandeln
+        { { 131, 22, 17057 } },     -- Wasseratmung
+    },
+    ROGUE = {
+        { { 1856, 22, 5140 }, { 1857, 42, 5140 }, { 26889, 70, 5140 } },   -- Verschwinden
+        { { 2094, 34, 5530 } },                                              -- Blenden
+    },
+}
+
 local SOUNDS = {
     ping   = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE)          or 3081,
     glocke = (SOUNDKIT and SOUNDKIT.ALARM_CLOCK_WARNING_3) or 12889,
@@ -397,6 +515,8 @@ local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local db, cdb                 -- account / Charakter
 local entries = {}            -- aktive Liste (Klasse + allgemein)
 local classEntries = {}
+local reagentEntries = {}     -- Reagenzien der eigenen Klasse (auch in entries)
+local reagentLines = {}       -- Zauberlinien der eigenen Klasse (REAGENT_SPELLS)
 local knownCache = {}
 local missing = {}            -- key -> bool (letzter lesbarer Zustand)
 local missingSince = {}       -- key -> GetTime(), seit dem der Buff durchgehend fehlt
@@ -442,13 +562,58 @@ local function SpellIcon(id)
     end
 end
 
+---------------------------------------------------------------------------
+-- Items (Reagenzien)
+---------------------------------------------------------------------------
+local function ItemName(item)
+    if C_Item and C_Item.GetItemNameByID then
+        local ok, n = pcall(C_Item.GetItemNameByID, item)
+        if ok and n and not IsSecret(n) then return n end
+    end
+    if GetItemInfo then
+        local ok, n = pcall(GetItemInfo, item)
+        if ok and n and not IsSecret(n) then return n end
+    end
+    -- noch nicht im Cache: Laden anstoßen (GET_ITEM_INFO_RECEIVED aktualisiert die Anzeige)
+    if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, item) end
+    return REAGENT_INFO[item] and REAGENT_INFO[item].name or tostring(item)
+end
+
+local function ItemIcon(item)
+    if C_Item and C_Item.GetItemIconByID then
+        local ok, t = pcall(C_Item.GetItemIconByID, item)
+        if ok and t and not IsSecret(t) then return t end
+    end
+    if GetItemIcon then
+        local ok, t = pcall(GetItemIcon, item)
+        if ok and t and not IsSecret(t) then return t end
+    end
+end
+
+-- Anzahl nur in den Taschen (ohne Bank), nil = nicht lesbar
+local function ItemCount(item)
+    local fn = (C_Item and C_Item.GetItemCount) or GetItemCount
+    if not fn then return nil end
+    local ok, n = pcall(fn, item, false, false, false, false)
+    if not ok or n == nil or IsSecret(n) then return nil end
+    return n
+end
+
+local function ReagentThreshold(item)
+    local v = cdb and cdb.reagents and cdb.reagents[item]
+    if v == nil then v = REAGENT_INFO[item] and REAGENT_INFO[item].default or 0 end
+    return v
+end
+
 local function EntryLabel(e)
+    if e.kind == "reagent" then return ItemName(e.item) end
     if e.label then return L[e.label] end
     local first = (e.ids or e.knownIds or {})[1]
     return (first and SpellName(first)) or e.key
 end
 
 local function EntryIcon(e)
+    if e.kind == "reagent" then return ItemIcon(e.item) or FALLBACK_ICON end
     if e.general then
         -- a) zuletzt im Spiel gesehenes Aura-Icon, b) Spell-Textur der ersten ID,
         -- c) fest eingetragenes Icon, d) Fallback
@@ -522,11 +687,21 @@ local function ComputeKnown(e)
     return false
 end
 
+local RelevantReagents -- forward (braucht KnownByName)
+
 local function RefreshKnown()
-    for _, e in ipairs(entries) do knownCache[e.key] = ComputeKnown(e) end
+    local items = RelevantReagents()
+    for _, e in ipairs(entries) do
+        if e.kind == "reagent" then
+            knownCache[e.key] = items[e.item] == true
+        else
+            knownCache[e.key] = ComputeKnown(e)
+        end
+    end
 end
 
 local function IsEnabled(e)
+    if e.kind == "reagent" then return ReagentThreshold(e.item) > 0 end
     local v = cdb.buffs[e.key]
     if v == nil then return not e.defaultOff end
     return v
@@ -557,6 +732,27 @@ local function KnownByName(n)
         if ok and name and not IsSecret(name) then return true end
     end
     return false
+end
+
+-- Reagenzien, die der jeweils höchste erlernte Rang einer Zauberlinie verbraucht
+function RelevantReagents()
+    local items = {}
+    local lvl = UnitLevel("player") or 1
+    for _, ranks in ipairs(reagentLines) do
+        local rank
+        for i = #ranks, 1, -1 do
+            if SpellKnown(ranks[i][1]) then rank = ranks[i]; break end
+        end
+        if not rank and KnownByName(SpellName(ranks[1][1])) then
+            -- Namens-Fallback: höchster Rang, dessen Lernstufe erreicht ist
+            rank = ranks[1]
+            for i = #ranks, 1, -1 do
+                if lvl >= ranks[i][2] then rank = ranks[i]; break end
+            end
+        end
+        if rank and rank[3] then items[rank[3]] = true end
+    end
+    return items
 end
 
 -- höchster erlernter Rang; Fallback: Zaubername, falls per Name bekannt
@@ -743,6 +939,12 @@ end
 
 -- true = fehlt, false = vorhanden / nicht relevant, nil = unbekannt
 local function CheckMissing(e, scan)
+    if e.kind == "reagent" then
+        local n = ItemCount(e.item)
+        if n == nil then return nil end
+        e.count = n
+        return n < ReagentThreshold(e.item)
+    end
     if e.kind == "weapon_mh" or e.kind == "weapon_oh" then
         local slot = (e.kind == "weapon_mh") and 16 or 17
         if not HasWeaponIn(slot) then return false end
@@ -941,7 +1143,11 @@ local function ShowRows(list, dragMode)
             r.entry = e
             local spell = CastSpellFor(e)
             SetRowSpell(r, spell)
-            r.text:SetText(L.MISSING:format(EntryLabel(e)))
+            if e.kind == "reagent" then
+                r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
+            else
+                r.text:SetText(L.MISSING:format(EntryLabel(e)))
+            end
             r.hint:SetText(spell and L.HINT_CAST or L.HINT_MUTE)
         end
         r:Show()
@@ -1100,7 +1306,11 @@ function Evaluate()
                 list[#list + 1] = e
                 if not combat and not shownKeys[e.key] then
                     newOnes = true
-                    Print(L.CHAT:format(EntryLabel(e)))
+                    if e.kind == "reagent" then
+                        Print(L.REAGENT_CHAT:format(EntryLabel(e), e.count or 0))
+                    else
+                        Print(L.CHAT:format(EntryLabel(e)))
+                    end
                 end
             end
         end
@@ -1133,6 +1343,7 @@ end
 ---------------------------------------------------------------------------
 local config
 local configRows = {}
+local reagentRows = {}
 
 local function FormatMute(left)
     if left == math.huge then return L.SESSION end
@@ -1177,6 +1388,29 @@ function RefreshConfig()
             w.status:SetTextColor(0.5, 0.5, 0.5)
         end
     end
+    for _, w in ipairs(reagentRows) do
+        local e = w.entry
+        w.icon:SetTexture(EntryIcon(e))
+        w.name:SetText(EntryLabel(e))
+        if not w.edit:HasFocus() then w.edit:SetText(tostring(ReagentThreshold(e.item))) end
+        if knownCache[e.key] then
+            w.icon:SetDesaturated(false)
+            w.name:SetTextColor(1, 1, 1)
+            local left = MuteRemaining(e.key)
+            if left then
+                w.status:SetText(L.MUTED:format(FormatMute(left)))
+                w.status:SetTextColor(1, 0.4, 0.3)
+            else
+                w.status:SetText(L.IN_BAGS:format(ItemCount(e.item) or 0))
+                w.status:SetTextColor(0.6, 0.6, 0.6)
+            end
+        else
+            w.icon:SetDesaturated(true)
+            w.name:SetTextColor(0.5, 0.5, 0.5)
+            w.status:SetText(L.NOT_LEARNED)
+            w.status:SetTextColor(0.5, 0.5, 0.5)
+        end
+    end
     config.enabledCB:SetChecked(db.enabled)
     config.instCB:SetChecked(db.instanceOnly)
     config.castCB:SetChecked(db.clickCast)
@@ -1212,6 +1446,44 @@ local function MakeEntryRow(parent, e, y)
     w.status:SetPoint("RIGHT", parent, "TOPLEFT", 424, y - 12)
     w.status:SetJustifyH("RIGHT")
     configRows[#configRows + 1] = w
+end
+
+-- Reagenz-Zeile: Icon, Name, Eingabefeld für die Schwelle (0-50), Status
+local function MakeReagentRow(parent, e, y)
+    local w = { entry = e }
+    w.icon = parent:CreateTexture(nil, "ARTWORK")
+    w.icon:SetSize(20, 20)
+    w.icon:SetPoint("TOPLEFT", 22, y - 2)
+    w.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    w.name = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    w.name:SetPoint("LEFT", w.icon, "RIGHT", 8, 0)
+    w.name:SetWidth(190)
+    w.name:SetJustifyH("LEFT")
+    w.name:SetWordWrap(false)
+    w.edit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    w.edit:SetSize(30, 20)
+    w.edit:SetPoint("TOPLEFT", 266, y - 2)
+    w.edit:SetAutoFocus(false)
+    w.edit:SetNumeric(true)
+    w.edit:SetMaxLetters(2)
+    w.edit:SetJustifyH("CENTER")
+    -- Übernehmen bei Enter/Fokusverlust (auf 0-50 begrenzt), ESC verwirft die Eingabe
+    w.edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    w.edit:SetScript("OnEscapePressed", function(self) self.cancel = true; self:ClearFocus() end)
+    w.edit:SetScript("OnEditFocusLost", function(self)
+        local n = not self.cancel and tonumber(self:GetText())
+        self.cancel = nil
+        if n then
+            cdb.reagents[e.item] = math.max(0, math.min(50, math.floor(n)))
+            NoteDeferred()
+            Evaluate()
+        end
+        self:SetText(tostring(ReagentThreshold(e.item)))
+    end)
+    w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.status:SetPoint("RIGHT", parent, "TOPLEFT", 424, y - 12)
+    w.status:SetJustifyH("RIGHT")
+    reagentRows[#reagentRows + 1] = w
 end
 
 local function MakeButton(parent, text, width)
@@ -1278,6 +1550,21 @@ local function BuildConfig()
     for _, e in ipairs(GENERAL_BUFFS) do
         MakeEntryRow(config, e, y)
         y = y - 26
+    end
+
+    -- Reagenzien: nur die der eigenen Klasse; Abschnitt entfällt ohne Reagenzien
+    if #reagentEntries > 0 then
+        y = y - 10
+        MakeHeader(config, L.REAGENTS, y)
+        local hint = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        hint:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y - 2)
+        hint:SetJustifyH("RIGHT")
+        hint:SetText(L.REAGENT_HINT)
+        y = y - 22
+        for _, e in ipairs(reagentEntries) do
+            MakeReagentRow(config, e, y)
+            y = y - 26
+        end
     end
 
     y = y - 12
@@ -1454,6 +1741,8 @@ ev:RegisterEvent("SPELLS_CHANGED")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+ev:RegisterEvent("BAG_UPDATE_DELAYED")
+ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Ladebildschirm-Events gibt es nicht in jedem Client → Registrierung absichern
 pcall(ev.RegisterEvent, ev, "LOADING_SCREEN_ENABLED")
 pcall(ev.RegisterEvent, ev, "LOADING_SCREEN_DISABLED")
@@ -1483,6 +1772,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         ApplyDefaults(db, DEFAULTS)
         cdb.buffs = cdb.buffs or {}
         cdb.lastVariant = cdb.lastVariant or {}   -- Eintrag-Key -> zuletzt genutzte Variante
+        cdb.reagents = cdb.reagents or {}         -- Reagenz-Item-ID -> Warnschwelle (0 = aus)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
         self:UnregisterEvent("ADDON_LOADED")
         return
@@ -1495,6 +1785,21 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             PrepareEntry(e); PrepareCast(e, class); entries[#entries + 1] = e
         end
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
+        -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
+        reagentLines = REAGENT_SPELLS[class] or {}
+        local seen = {}
+        for _, ranks in ipairs(reagentLines) do
+            for _, rank in ipairs(ranks) do
+                local item = rank[3]
+                if item and not seen[item] then
+                    seen[item] = true
+                    local e = { key = "reagent_" .. item, kind = "reagent", item = item }
+                    reagentEntries[#reagentEntries + 1] = e
+                    entries[#entries + 1] = e
+                    ItemName(item)   -- Item-Daten vorladen
+                end
+            end
+        end
         RefreshKnown()
         ApplyLayout()
         UpdateMinimapPos()
@@ -1502,6 +1807,19 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         self:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
         self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
         C_Timer.NewTicker(1, Evaluate)
+        return
+    end
+
+    if event == "GET_ITEM_INFO_RECEIVED" then
+        -- arg1 = Item-ID; nur eigene Reagenzien interessieren (lokalisierter Name nachgeladen)
+        if IsSecret(arg1) then return end
+        for _, e in ipairs(reagentEntries) do
+            if e.item == arg1 then
+                Evaluate()
+                if not ready then RefreshConfig() end   -- Evaluate tut vor ready nichts
+                return
+            end
+        end
         return
     end
 
@@ -1584,6 +1902,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         for k in pairs(DEFAULTS) do db[k] = nil end
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
+        wipe(cdb.reagents)
         ApplyLayout(); UpdateMinimapPos(); Print(L.RESET); Evaluate()
     else
         for _, line in ipairs(L.HELP) do Print(line) end
