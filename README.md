@@ -87,7 +87,7 @@ git push origin 1.0.1
 
 The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck and, if it passes, uses the BigWigs packager to build the addon zip, upload it to CurseForge and create a GitHub release. The changelog is generated from the commit messages.
 
-- The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge is **Pardona's Buff Reminder X.Y.Z**.
+- The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge is just the version number (e.g. **1.0.3**). The packager replaces spaces, apostrophes and other special characters in the label with `_`, so a label like "Pardona's Buff Reminder 1.0.3" would turn into `Pardona_s_Buff_Reminder_1.0.3`.
 
 - **Requirement:** the repository secret `CF_API_KEY` must contain a CurseForge API token.
 - Tags containing `beta` or `alpha` (e.g. `1.1.0-beta1`) are published as beta or alpha releases.

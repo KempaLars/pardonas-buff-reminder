@@ -38,6 +38,9 @@ jobs:
       - name: Package and release
         uses: BigWigsMods/packager@v2
         with:
-          # File: PardonasBuffReminder-X.Y.Z.zip, CurseForge label: "Pardona's Buff Reminder X.Y.Z"
+          # File: PardonasBuffReminder-X.Y.Z.zip, CurseForge label: "X.Y.Z".
+          # The packager replaces spaces/apostrophes in the label with "_", so the label is
+          # just the version. It is set explicitly because the default label
+          # "{project-version}{classic}{nolib}" would append "-forever".
           args: >-
-            -n "{package-name}-{project-version}:Pardona's Buff Reminder {project-version}"
+            -n "{package-name}-{project-version}:{project-version}"
