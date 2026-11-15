@@ -82,6 +82,10 @@ if GetLocale() == "deDE" then
         REAGENT_LOW   = "%s: %d übrig",
         REAGENT_CHAT  = "|cffffb000Reagenz knapp: %s – nur noch %d!|r",
         IN_BAGS       = "%d in Taschen",
+        -- Ess-Countdown
+        EATING        = "Isst … %d s",
+        EATING_DONE   = "Gleich satt …",
+        HINT_EATING   = "Sitzen bleiben",
         -- Essen & Fläschchen
         HINT_ITEM     = "Linksklick: %s · Rechtsklick: Auswahl",
         HINT_NOITEM   = "Nicht in der Tasche · Rechtsklick: stumm",
@@ -168,6 +172,9 @@ else
         REAGENT_LOW   = "%s: %d left",
         REAGENT_CHAT  = "|cffffb000Reagent running low: %s – only %d left!|r",
         IN_BAGS       = "%d in bags",
+        EATING        = "Eating … %d s",
+        EATING_DONE   = "Almost well fed …",
+        HINT_EATING   = "Stay seated",
         HINT_ITEM     = "Left-click: %s · Right-click: choose",
         HINT_NOITEM   = "Not in bags · Right-click: mute",
         LEFTCLICK_USE = "Left-click: use %s",
@@ -748,6 +755,58 @@ local foodScore = {}      -- Item-ID -> Kategorie-Gewicht x Kochkunst-Stufe (Kla
 local xpCache = {}        -- Item-ID -> true/false: Tooltip nennt XP-Bonus (nur geladene Items)
 local flaskBySpell = {}   -- Spell-ID des Fläschchen-Effekts -> Item-ID
 local flaskEntry          -- Eintrag gen_flask (idSet wird zur Laufzeit ergänzt)
+local foodEntry           -- Eintrag gen_wellfed (eatStart = Beginn des Essens, nil = isst nicht)
+
+---------------------------------------------------------------------------
+-- Ess-Countdown: Ess-Auren aller FOOD-Items (C_Item.GetItemSpell), unabhängig davon,
+-- ob über die Warnung oder direkt aus der Tasche gegessen wird.
+---------------------------------------------------------------------------
+-- Well Fed kommt laut Item-Tooltip nach "at least 10 seconds" Essen
+local EAT_WELLFED_TIME = 10
+local eatSpells = {}      -- Spell-ID der Ess-Aura -> true
+local eatPending = {}     -- Item-ID -> true: Item-Daten noch nicht geladen, Spell folgt
+
+-- Ess-Aura eines Essens ermitteln und cachen; nicht geladene Items nachfordern
+-- (GET_ITEM_INFO_RECEIVED ruft mit loaded = true erneut auf; hat das geladene Item
+-- keinen Spell, wird es nicht erneut angefordert – keine Endlosschleife)
+local function ResolveEatSpell(item, loaded)
+    if not (C_Item and C_Item.GetItemSpell) then return end
+    local ok, _, spellID = pcall(C_Item.GetItemSpell, item)
+    if ok and type(spellID) == "number" and not IsSecret(spellID) then
+        eatSpells[spellID] = true
+        eatPending[item] = nil
+        return
+    end
+    if loaded then eatPending[item] = nil; return end
+    eatPending[item] = true
+    if C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, item) end
+end
+
+local function ResolveAllEatSpells()
+    for _, list in pairs(FOOD) do
+        for _, v in ipairs(list) do ResolveEatSpell(v[1]) end
+    end
+end
+
+-- Startzeit einer aktiven Ess-Aura (expirationTime - duration), nil = isst nicht oder
+-- Laufzeit nicht lesbar (Secret) -> normale Anzeige ohne Countdown
+local function FindEatStart(scan)
+    if not scan then return nil end
+    for _, a in ipairs(scan.list) do
+        if a.id and eatSpells[a.id] then
+            local dur, exp = a.duration, a.expirationTime
+            if type(dur) == "number" and type(exp) == "number" and dur > 0 then return exp - dur end
+            return nil
+        end
+    end
+end
+
+-- Haupttext während des Essens
+local function EatText(e)
+    local left = (e.eatStart or 0) + EAT_WELLFED_TIME - GetTime()
+    if left > 0 then return L.EATING:format(math.ceil(left)) end
+    return L.EATING_DONE
+end
 
 local function BuildFoodScores(class)
     local weights = {}
@@ -1152,14 +1211,17 @@ local function ScanAuras(unit)
                     end
                     local icon = aura.icon
                     if IsSecret(icon) then icon = nil end
-                    list[#list + 1] = { id = id, name = name, icon = icon }
+                    -- Laufzeit (für den Ess-Countdown); Secret-Werte -> nil
+                    local dur, exp = aura.duration, aura.expirationTime
+                    if IsSecret(dur) or IsSecret(exp) then dur, exp = nil, nil end
+                    list[#list + 1] = { id = id, name = name, icon = icon, duration = dur, expirationTime = exp }
                 end
             end
         end
         return ids, names, unreliable, own, list
     elseif UnitBuff then
         for i = 1, 40 do
-            local name, icon, _, _, _, _, src, _, _, id = UnitBuff(unit, i)
+            local name, icon, _, _, dur, exp, src, _, _, id = UnitBuff(unit, i)
             if not name then break end
             names[name] = true
             if id then ids[id] = true end
@@ -1167,7 +1229,7 @@ local function ScanAuras(unit)
                 own.names[name] = true
                 if id then own.ids[id] = true end
             end
-            list[#list + 1] = { id = id, name = name, icon = icon }
+            list[#list + 1] = { id = id, name = name, icon = icon, duration = dur, expirationTime = exp }
         end
         return ids, names, false, own, list
     end
@@ -1682,10 +1744,14 @@ local function ShowRows(list, dragMode)
             SetRowAction(r, (spell or item) and { spell = spell, item = item } or nil)
             if e.kind == "reagent" then
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
+            elseif e.eatStart then
+                r.text:SetText(EatText(e))   -- Ess-Countdown (OnUpdate des anchor zählt weiter)
             else
                 r.text:SetText(L.MISSING:format(EntryLabel(e)))
             end
-            if spell then
+            if e.eatStart then
+                r.hint:SetText(L.HINT_EATING)
+            elseif spell then
                 r.hint:SetText(L.HINT_CAST)
             elseif item then
                 r.hint:SetText(L.HINT_ITEM:format(ItemName(item)))
@@ -1713,6 +1779,18 @@ local function ShowRows(list, dragMode)
         anchor:Hide()
     end
 end
+
+-- Ess-Countdown: nur den Text der Zeilen aktualisieren (höchstens alle 0,2 Sek.).
+-- FontStrings sind nicht geschützt → auch im Kampf erlaubt; keine Attribute, kein Show/Hide.
+local EAT_TICK = 0.2
+anchor:SetScript("OnUpdate", function(self, el)
+    self.eatTick = (self.eatTick or 0) + el
+    if self.eatTick < EAT_TICK then return end
+    self.eatTick = 0
+    for _, r in ipairs(rows) do
+        if r:IsShown() and r.entry and r.entry.eatStart then r.text:SetText(EatText(r.entry)) end
+    end
+end)
 
 local function PlayAlertSound()
     if db.sound == "aus" then return end
@@ -1991,6 +2069,8 @@ function Evaluate()
         local now = GetTime()
         -- Gruppen-Buffs: nur außerhalb des Kampfes auswerten (gedrosselt)
         if not combat and db.groupCheck then GroupScanIfDue(now) end
+        -- Isst der Spieler gerade? (nil auch bei nicht lesbarer Aura → normale Anzeige)
+        if foodEntry then foodEntry.eatStart = FindEatStart(scan) end
 
         for _, e in ipairs(entries) do
             local relevant = knownCache[e.key] and IsEnabled(e) and (not e.general or instOk)
@@ -2019,9 +2099,13 @@ function Evaluate()
             -- Bereits angezeigte Warnungen bleiben stehen, solange der Buff fehlt.
             local since = missingSince[e.key]
             local confirmed = shownKeys[e.key] or (since ~= nil and now - since >= MISSING_CONFIRM)
-            if missing[e.key] and confirmed and not MuteRemaining(e.key) then
+            -- Ess-Countdown: Zeile sofort zeigen, zählt aber nicht als "neu fehlend" (keine
+            -- Chatmeldung, kein Ton). Da sie danach in shownKeys steht, bleibt auch die normale
+            -- Warnung nach dem Aufstehen (Ess-Aura weg, kein Well Fed) ohne erneute Meldung.
+            local eating = e.eatStart ~= nil
+            if missing[e.key] and (confirmed or eating) and not MuteRemaining(e.key) then
                 list[#list + 1] = e
-                if not combat and not shownKeys[e.key] then
+                if not combat and not shownKeys[e.key] and not eating then
                     newOnes = true
                     if e.kind == "reagent" then
                         Print(L.REAGENT_CHAT:format(EntryLabel(e), e.count or 0))
@@ -2545,9 +2629,11 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- Essen & Fläschchen: Kategorie-Gewichte der Klasse, gelernte Fläschchen-Spells, Taschen
         for _, e in ipairs(GENERAL_BUFFS) do
             if e.itemKind == "flask" then flaskEntry = e end
+            if e.itemKind == "food" then foodEntry = e end
         end
         for id in pairs(db.flaskSpells) do flaskEntry.idSet[id] = true end
         BuildFoodScores(class)
+        ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
         ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
         reagentLines = REAGENT_SPELLS[class] or {}
@@ -2580,6 +2666,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- arg1 = Item-ID; nur eigene Reagenzien interessieren (lokalisierter Name nachgeladen)
         -- bzw. Essen/Fläschchen in den Taschen (Name, Stufe, Tooltip jetzt verfügbar)
         if IsSecret(arg1) then return end
+        if eatPending[arg1] then ResolveEatSpell(arg1, true) end   -- Ess-Aura jetzt ermittelbar
         if bagCounts[arg1] then
             if IsFlaskItem(arg1) then LearnFlaskSpell(arg1) end
             RefreshItemPanel()
