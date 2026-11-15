@@ -247,12 +247,14 @@ local GENERAL_BUFFS = {
       ids = { 17626, 17627, 17628, 17629, 28518, 28519, 28520, 28521, 28540,
               53752, 53755, 53758, 53760, 54212, 62380 },
       icon = "Interface\\Icons\\INV_Potion_1" },
-    -- Schlafsack-Buff aus WoW Forever. Spell-ID unbekannt → Erkennung über den Buffnamen
-    -- (Groß-/Kleinschreibung, Leerzeichen und Bindestriche werden ignoriert).
-    -- Sobald die ID bekannt ist (/br auras), in ids eintragen.
+    -- Schlafsack-Buff aus WoW Forever: Spell-ID 429959 (wie Season of Discovery, per
+    -- /br auras bestätigt). Der Name-Fallback (Groß-/Kleinschreibung, Leerzeichen und
+    -- Bindestriche werden ignoriert) bleibt für abweichende IDs erhalten.
+    -- excludeIds: Das passive Legacy-Talent "Well Rested" (1225478) heißt fast gleich, ist
+    -- aber kein Schlafsack-Buff – Auren mit dieser ID zählen nie als Namenstreffer.
     { key = "gen_wellrested", general = true, defaultOff = true, label = "WELLRESTED",
-      ids = {}, matchNames = { "Well-Rested", "Well Rested" },
-      icon = "Interface\\Icons\\Spell_Nature_Sleep" },
+      ids = { 429959 }, nameIds = { 429959 }, matchNames = { "Well-Rested", "Well Rested" },
+      excludeIds = { 1225478 } },
 }
 
 ---------------------------------------------------------------------------
@@ -445,6 +447,17 @@ local function EntryLabel(e)
 end
 
 local function EntryIcon(e)
+    if e.general then
+        -- a) zuletzt im Spiel gesehenes Aura-Icon, b) Spell-Textur der ersten ID,
+        -- c) fest eingetragenes Icon, d) Fallback
+        local cached = db and db.iconCache and db.iconCache[e.key]
+        if cached then return cached end
+        local id = (e.ids or {})[1]
+        local tex = id and SpellIcon(id)
+        if tex then return tex end
+        if type(e.icon) == "string" then return e.icon end
+        return FALLBACK_ICON
+    end
     if type(e.icon) == "string" then return e.icon end
     local id = e.icon or (e.ids or e.knownIds or {})[1]
     return (id and SpellIcon(id)) or FALLBACK_ICON
@@ -464,6 +477,10 @@ local function PrepareEntry(e)
     for _, n in ipairs(e.matchNames or {}) do
         e.names[#e.names + 1] = n
         e.normNames[NormName(n)] = true
+    end
+    if e.excludeIds then
+        e.excludeSet = {}
+        for _, id in ipairs(e.excludeIds) do e.excludeSet[id] = true end
     end
 end
 
@@ -637,11 +654,13 @@ end
 ---------------------------------------------------------------------------
 -- Buff-Erkennung
 ---------------------------------------------------------------------------
--- liefert idSet, nameSet, unreliable, own  (nil = gar nicht lesbar)
---   own = { ids, names } nur der selbst gewirkten Auren (für das Merken der Variante)
+-- liefert idSet, nameSet, unreliable, own, list  (nil = gar nicht lesbar)
+--   own  = { ids, names } nur der selbst gewirkten Auren (für das Merken der Variante)
+--   list = { { id, name, icon }, ... } aller lesbaren Auren (icon nil, falls secret)
 local function ScanAuras()
     local ids, names, unreliable = {}, {}, false
     local own = { ids = {}, names = {} }
+    local list = {}
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         for i = 1, 255 do
             local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
@@ -661,13 +680,16 @@ local function ScanAuras()
                         if id then own.ids[id] = true end
                         if name then own.names[name] = true end
                     end
+                    local icon = aura.icon
+                    if IsSecret(icon) then icon = nil end
+                    list[#list + 1] = { id = id, name = name, icon = icon }
                 end
             end
         end
-        return ids, names, unreliable, own
+        return ids, names, unreliable, own, list
     elseif UnitBuff then
         for i = 1, 40 do
-            local name, _, _, _, _, _, src, _, _, id = UnitBuff("player", i)
+            local name, icon, _, _, _, _, src, _, _, id = UnitBuff("player", i)
             if not name then break end
             names[name] = true
             if id then ids[id] = true end
@@ -675,8 +697,9 @@ local function ScanAuras()
                 own.names[name] = true
                 if id then own.ids[id] = true end
             end
+            list[#list + 1] = { id = id, name = name, icon = icon }
         end
-        return ids, names, false, own
+        return ids, names, false, own, list
     end
     return nil
 end
@@ -698,6 +721,24 @@ local function WeaponEnchants()
     return mh and true or false, oh and true or false
 end
 
+-- Namenstreffer einer einzelnen Aura (exakter Name oder normalisiert);
+-- Auren mit ausgeschlossener Spell-ID (excludeIds) zählen nie
+local function AuraNameMatch(e, a)
+    if not a.name then return false end
+    if a.id and e.excludeSet and e.excludeSet[a.id] then return false end
+    for _, n in ipairs(e.names) do
+        if a.name == n then return true end
+    end
+    return next(e.normNames) ~= nil and e.normNames[NormName(a.name)] == true
+end
+
+-- passende aktive Aura eines Eintrags (für das Icon), nil = keine
+local function FindAura(e, scan)
+    for _, a in ipairs(scan.list) do
+        if (a.id and e.idSet[a.id]) or AuraNameMatch(e, a) then return a end
+    end
+end
+
 -- true = fehlt, false = vorhanden / nicht relevant, nil = unbekannt
 local function CheckMissing(e, scan)
     if e.kind == "weapon_mh" or e.kind == "weapon_oh" then
@@ -712,12 +753,19 @@ local function CheckMissing(e, scan)
     for id in pairs(e.idSet) do
         if scan.ids[id] then return false end
     end
-    for _, n in ipairs(e.names) do
-        if scan.names[n] then return false end
-    end
-    if next(e.normNames) then
-        for n in pairs(scan.names) do
-            if e.normNames[NormName(n)] then return false end
+    if e.excludeSet then
+        -- Name-Fallback pro Aura, damit ausgeschlossene IDs nicht per Name treffen
+        for _, a in ipairs(scan.list) do
+            if AuraNameMatch(e, a) then return false end
+        end
+    else
+        for _, n in ipairs(e.names) do
+            if scan.names[n] then return false end
+        end
+        if next(e.normNames) then
+            for n in pairs(scan.names) do
+                if e.normNames[NormName(n)] then return false end
+            end
         end
     end
     if scan.unreliable then return nil end
@@ -1013,9 +1061,16 @@ function Evaluate()
 
     local list, newOnes = {}, false
     if db.enabled and not Suppressed() then
-        local ids, names, unreliable, own = ScanAuras()
-        local scan = ids and { ids = ids, names = names, unreliable = unreliable } or nil
+        local ids, names, unreliable, own, auraList = ScanAuras()
+        local scan = ids and { ids = ids, names = names, unreliable = unreliable, list = auraList } or nil
         RememberFromAuras(own)
+        if scan then
+            -- Icons der allgemeinen Buffs aus dem Spiel merken (account-weit)
+            for _, e in ipairs(GENERAL_BUFFS) do
+                local a = FindAura(e, scan)
+                if a and a.icon then db.iconCache[e.key] = a.icon end
+            end
+        end
         local instOk = (not db.instanceOnly) or InGroupInstance()
 
         for _, e in ipairs(entries) do
@@ -1394,6 +1449,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         ApplyDefaults(db, DEFAULTS)
         cdb.buffs = cdb.buffs or {}
         cdb.lastVariant = cdb.lastVariant or {}   -- Eintrag-Key -> zuletzt genutzte Variante
+        db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
         self:UnregisterEvent("ADDON_LOADED")
         return
     end
