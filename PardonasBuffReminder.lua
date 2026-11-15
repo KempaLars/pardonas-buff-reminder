@@ -1,6 +1,7 @@
 -- Pardona's Buff Reminder – WoW Forever (Interface 16001, Mainline-API)
 -- Erinnert an fehlende Klassen- und allgemeine Buffs.
--- Auswahl per GUI (Minimap-Button / /br), Rechtsklick auf Erinnerung = stummschalten.
+-- Auswahl per GUI (Minimap-Button / /br), Rechtsklick auf Erinnerung = stummschalten,
+-- Linksklick auf Erinnerung = Buff auf sich selbst zaubern (abschaltbar).
 
 local ADDON_NAME = ...
 
@@ -66,6 +67,13 @@ if GetLocale() == "deDE" then
         SHOUT         = "Schlachtruf / Befehlsruf",
         FLASK         = "Fläschchen",
         WELLRESTED    = "Well-Rested (Schlafsack)",
+        -- Klick-Zaubern
+        HINT_CAST     = "Linksklick: zaubern · Rechtsklick: stumm",
+        HINT_MUTE     = "Rechtsklick: stumm",
+        LEFTCLICK     = "Linksklick: zaubern",
+        CLICKCAST     = "Linksklick zaubert Buff",
+        COMBAT        = "Im Kampf nicht möglich.",
+        AFTER_COMBAT  = "Änderung wird nach dem Kampf angezeigt.",
     }
 else
     L = {
@@ -124,6 +132,12 @@ else
         SHOUT         = "Battle / Commanding Shout",
         FLASK         = "Flask",
         WELLRESTED    = "Well-Rested (sleeping bag)",
+        HINT_CAST     = "Left-click: cast · Right-click: mute",
+        HINT_MUTE     = "Right-click: mute",
+        LEFTCLICK     = "Left-click: cast",
+        CLICKCAST     = "Left-click casts buff",
+        COMBAT        = "Not possible in combat.",
+        AFTER_COMBAT  = "Change will be shown after combat.",
     }
 end
 
@@ -241,6 +255,120 @@ local GENERAL_BUFFS = {
       icon = "Interface\\Icons\\Spell_Nature_Sleep" },
 }
 
+---------------------------------------------------------------------------
+-- Klick-Zaubern (Linksklick auf eine Erinnerung zaubert den Buff auf sich)
+--   castIds  : Einzelziel-Ränge in aufsteigender Reihenfolge; gezaubert wird
+--              der höchste erlernte Rang (keine Gruppenvarianten)
+--   variants : "beliebig"-Einträge; gemerkt wird pro Charakter die zuletzt
+--              genutzte Variante (Zauber-Event oder eigene aktive Aura)
+--     castIds : Einzelziel-Ränge, die gezaubert werden (zählen auch als Aura-IDs)
+--     ids     : zusätzliche Aura-IDs der Variante (Gruppen-/Großer-Segen-Versionen)
+--   Varianten werden zusätzlich über den Zaubernamen erkannt (Forever kann andere IDs nutzen).
+-- Wird beim Login in die Einträge von CLASS_BUFFS übernommen (gleiche Keys).
+-- Nicht zauberbar: Schurkengifte und alle allgemeinen Buffs.
+---------------------------------------------------------------------------
+local SHAMAN_IMBUES = {
+    { key = "rockbiter",   castIds = { 8017, 8018, 8019, 10399, 16314, 16315, 16316, 25479, 25485 } },
+    { key = "flametongue", castIds = { 8024, 8027, 8030, 16339, 16341, 16342, 25489, 58785, 58789, 58790 } },
+    { key = "frostbrand",  castIds = { 8033, 8038, 10456, 16355, 16356, 25500, 58794, 58795, 58796 } },
+    { key = "windfury",    castIds = { 8232, 8235, 10486, 16362, 25505, 58801, 58803, 58804 } },
+    { key = "earthliving", castIds = { 51730, 51988, 51991, 51992, 51993, 51994 } },
+}
+
+local CAST_DATA = {
+    PRIEST = {
+        fortitude    = { castIds = { 1243, 1244, 1245, 2791, 10937, 10938, 25389, 48161 } },
+        innerfire    = { castIds = { 588, 7128, 602, 1006, 10951, 10952, 25431, 48040, 48168 } },
+        divinespirit = { castIds = { 14752, 14818, 14819, 27841, 25312, 48073 } },
+        shadowprot   = { castIds = { 976, 10957, 10958, 25433, 48169 } },
+        vampembrace  = { castIds = { 15286 } },
+        shadowform   = { castIds = { 15473 } },
+    },
+    MAGE = {
+        intellect = { castIds = { 1459, 1460, 1461, 10156, 10157, 27126, 42995 } },
+        armor = { variants = {
+            { key = "frost",  castIds = { 168, 7300, 7301 } },
+            { key = "ice",    castIds = { 7302, 7320, 10219, 10220, 27124, 43008 } },
+            { key = "mage",   castIds = { 6117, 22782, 22783, 27125, 43023, 43024 } },
+            { key = "molten", castIds = { 30482, 43045, 43046 } },
+        } },
+    },
+    WARLOCK = {
+        armor = { variants = {
+            { key = "demonskin",  castIds = { 687, 696 } },
+            { key = "demonarmor", castIds = { 706, 1086, 11733, 11734, 11735, 27260, 47793, 47889 } },
+            { key = "felarmor",   castIds = { 28176, 28189, 47892, 47893 } },
+        } },
+    },
+    DRUID = {
+        motw   = { castIds = { 1126, 5232, 6756, 5234, 8907, 9884, 9885, 26990, 48469 } },
+        thorns = { castIds = { 467, 782, 1075, 8914, 9756, 9910, 26992, 53307 } },
+    },
+    PALADIN = {
+        aura = { variants = {
+            { key = "devotion",      castIds = { 465, 10290, 643, 10291, 1032, 10292, 10293, 27149, 48941, 48942 } },
+            { key = "retribution",   castIds = { 7294, 10298, 10299, 10300, 10301, 27150, 54042 } },
+            { key = "concentration", castIds = { 19746 } },
+            { key = "shadowres",     castIds = { 19876, 19895, 19896, 27151, 48943 } },
+            { key = "frostres",      castIds = { 19888, 19897, 19898, 27152, 48945 } },
+            { key = "fireres",       castIds = { 19891, 19899, 19900, 27153, 48947 } },
+            { key = "crusader",      castIds = { 32223 } },
+        } },
+        seal = { variants = {
+            { key = "righteousness", castIds = { 21084, 20154 } },
+            { key = "command",       castIds = { 20375 } },
+            { key = "light",         castIds = { 20165 } },
+            { key = "wisdom",        castIds = { 20166 } },
+            { key = "justice",       castIds = { 20164 } },
+            { key = "vengeance",     castIds = { 31801 } },
+            { key = "corruption",    castIds = { 53736 } },
+            { key = "martyr",        castIds = { 53720 } },
+            { key = "blood",         castIds = { 31892 } },
+        } },
+        blessing = { variants = {
+            { key = "might",
+              castIds = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 27140, 48931, 48932 },
+              ids = { 25782, 25916, 27141, 48933, 48934 } },               -- Großer Segen der Macht
+            { key = "wisdom",
+              castIds = { 19742, 19850, 19852, 19853, 19854, 25290, 27142, 48935, 48936 },
+              ids = { 25894, 25918, 27143, 48937, 48938 } },               -- Großer Segen der Weisheit
+            { key = "kings",     castIds = { 20217 }, ids = { 25898 } },   -- Großer Segen der Könige
+            { key = "sanctuary", castIds = { 20911 }, ids = { 25899 } },   -- Großer Segen des Refugiums
+        } },
+    },
+    SHAMAN = {
+        shield = { variants = {
+            { key = "lightning", castIds = { 324, 325, 905, 945, 8134, 10431, 10432, 25469, 25472, 49280, 49281 } },
+            { key = "water",     castIds = { 52127, 52129, 52131, 52134, 52136, 52138, 24398, 33736, 57960 } },
+            { key = "earth",     castIds = { 974, 32593, 32594, 49283, 49284 } },
+        } },
+        imbue_mh = { variants = SHAMAN_IMBUES },
+        imbue_oh = { variants = SHAMAN_IMBUES },
+    },
+    HUNTER = {
+        aspect = { variants = {
+            { key = "monkey",     castIds = { 13163 } },
+            { key = "hawk",       castIds = { 13165, 14318, 14319, 14320, 14321, 14322, 25296, 27044 } },
+            { key = "cheetah",    castIds = { 5118 } },
+            { key = "pack",       castIds = { 13159 } },
+            { key = "beast",      castIds = { 13161 } },
+            { key = "wild",       castIds = { 20043, 20190, 27045, 49071 } },
+            { key = "viper",      castIds = { 34074 } },
+            { key = "dragonhawk", castIds = { 61846, 61847 } },
+        } },
+        trueshot = { castIds = { 19506 } },
+    },
+    WARRIOR = {
+        shout = { variants = {
+            { key = "battle",     castIds = { 6673, 5242, 6192, 11549, 11550, 11551, 25289, 2048, 47436 } },
+            { key = "commanding", castIds = { 469, 47439, 47440 } },
+        } },
+    },
+    DEATHKNIGHT = {
+        horn = { castIds = { 57330, 57623 } },
+    },
+}
+
 local SOUNDS = {
     ping   = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE)          or 3081,
     glocke = (SOUNDKIT and SOUNDKIT.ALARM_CLOCK_WARNING_3) or 12889,
@@ -256,6 +384,7 @@ local DEFAULTS = {
     minimapAngle = 200,
     minimapHide  = false,
     instanceOnly = true,
+    clickCast    = true,   -- Linksklick auf Erinnerung zaubert den Buff
 }
 
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -274,6 +403,11 @@ local ready, unlocked, testUntil = false, false, 0
 local Evaluate, RefreshConfig -- forward
 
 local function Print(msg) print("|cff66ccff" .. L.TITLE .. ":|r " .. msg) end
+
+-- Im Kampf: Hinweis, dass die Änderung erst danach sichtbar wird
+local function NoteDeferred()
+    if InCombatLockdown() then Print(L.AFTER_COMBAT) end
+end
 
 -- Namensvergleich ohne Groß-/Kleinschreibung, Leerzeichen und Bindestriche
 local function NormName(n) return (n:lower():gsub("[%s%-]", "")) end
@@ -389,11 +523,125 @@ local function MuteRemaining(key)
 end
 
 ---------------------------------------------------------------------------
+-- Klick-Zaubern: Zauber bestimmen, zuletzt genutzte Variante merken
+---------------------------------------------------------------------------
+local function IsWeaponEntry(e) return e.kind == "weapon_mh" or e.kind == "weapon_oh" end
+
+local function KnownByName(n)
+    if not n then return false end
+    if C_Spell and C_Spell.GetSpellInfo then
+        local ok, info = pcall(C_Spell.GetSpellInfo, n)
+        if ok and info and not IsSecret(info) then return true end
+    end
+    if GetSpellInfo then
+        local ok, name = pcall(GetSpellInfo, n)
+        if ok and name and not IsSecret(name) then return true end
+    end
+    return false
+end
+
+-- höchster erlernter Rang; Fallback: Zaubername, falls per Name bekannt
+local function BestCast(castIds)
+    for i = #castIds, 1, -1 do
+        if SpellKnown(castIds[i]) then return castIds[i] end
+    end
+    local n = SpellName(castIds[1])
+    if KnownByName(n) then return n end
+    return nil
+end
+
+-- castIds/variants aus CAST_DATA übernehmen, Lookup-Tabellen der Varianten bauen
+local function PrepareCast(e, class)
+    local c = CAST_DATA[class] and CAST_DATA[class][e.key]
+    if not c then return end
+    e.castIds, e.variants = c.castIds, c.variants
+    for _, v in ipairs(e.variants or {}) do
+        if not v.matchSet then            -- Imbue-Varianten sind zwischen MH/OH geteilt
+            v.matchSet, v.nameSet = {}, {}
+            for _, list in ipairs({ v.castIds, v.ids or {} }) do
+                for _, id in ipairs(list) do
+                    v.matchSet[id] = true
+                    local n = SpellName(id)
+                    if n then v.nameSet[n] = true end
+                end
+            end
+        end
+    end
+end
+
+local function VariantByKey(e, key)
+    if not key then return nil end
+    for _, v in ipairs(e.variants) do
+        if v.key == key then return v end
+    end
+end
+
+-- Spell (ID oder Name) für Linksklick, nil = nicht zauberbar
+local function CastSpellFor(e)
+    if not db.clickCast then return nil end
+    if e.castIds then return BestCast(e.castIds) end
+    if e.variants then
+        local v = VariantByKey(e, cdb.lastVariant[e.key])
+        if v then return BestCast(v.castIds) end
+    end
+    return nil
+end
+
+-- Quelle 1: eigener erfolgreicher Zauber (UNIT_SPELLCAST_SUCCEEDED)
+local function RememberFromCast(spellID)
+    if spellID == nil or IsSecret(spellID) then return end
+    local name = SpellName(spellID)
+    for _, e in ipairs(entries) do
+        if e.variants then
+            for _, v in ipairs(e.variants) do
+                if v.matchSet[spellID] or (name and v.nameSet[name]) then
+                    -- Waffenverzauberung: der Zauber verrät die Hand nicht. Übernehmen für
+                    -- die Hand, die gerade fehlt, sonst nur, solange noch nichts gemerkt ist.
+                    if not IsWeaponEntry(e) or missing[e.key] or not cdb.lastVariant[e.key] then
+                        cdb.lastVariant[e.key] = v.key
+                    end
+                    break
+                end
+            end
+        end
+    end
+end
+
+local function VariantActive(v, own)
+    for id in pairs(v.matchSet) do
+        if own.ids[id] then return true end
+    end
+    for n in pairs(v.nameSet) do
+        if own.names[n] then return true end
+    end
+    return false
+end
+
+-- Quelle 2: eigene aktive Aura (nur selbst gewirkte, damit fremde Segen/Auren nichts überschreiben)
+local function RememberFromAuras(own)
+    if not own then return end
+    for _, e in ipairs(entries) do
+        if e.variants and not IsWeaponEntry(e) then
+            local cur, found = cdb.lastVariant[e.key], nil
+            for _, v in ipairs(e.variants) do
+                if VariantActive(v, own) then
+                    if v.key == cur then found = nil; break end   -- gemerkte Variante ist aktiv
+                    found = found or v
+                end
+            end
+            if found then cdb.lastVariant[e.key] = found.key end
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- Buff-Erkennung
 ---------------------------------------------------------------------------
--- liefert idSet, nameSet, unreliable  (nil = gar nicht lesbar)
+-- liefert idSet, nameSet, unreliable, own  (nil = gar nicht lesbar)
+--   own = { ids, names } nur der selbst gewirkten Auren (für das Merken der Variante)
 local function ScanAuras()
     local ids, names, unreliable = {}, {}, false
+    local own = { ids = {}, names = {} }
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         for i = 1, 255 do
             local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "player", i, "HELPFUL")
@@ -408,18 +656,27 @@ local function ScanAuras()
                 else
                     if id then ids[id] = true end
                     if name then names[name] = true end
+                    local src = aura.sourceUnit
+                    if not IsSecret(src) and src == "player" then
+                        if id then own.ids[id] = true end
+                        if name then own.names[name] = true end
+                    end
                 end
             end
         end
-        return ids, names, unreliable
+        return ids, names, unreliable, own
     elseif UnitBuff then
         for i = 1, 40 do
-            local name, _, _, _, _, _, _, _, _, id = UnitBuff("player", i)
+            local name, _, _, _, _, _, src, _, _, id = UnitBuff("player", i)
             if not name then break end
             names[name] = true
             if id then ids[id] = true end
+            if src == "player" then
+                own.names[name] = true
+                if id then own.ids[id] = true end
+            end
         end
-        return ids, names, false
+        return ids, names, false, own
     end
     return nil
 end
@@ -482,8 +739,13 @@ end
 ---------------------------------------------------------------------------
 -- Einblendung (Liste fehlender Buffs)
 ---------------------------------------------------------------------------
+-- Kampfsperre: Die Zeilen sind Secure Buttons. Sie und ihr Parent (anchor) werden in
+-- InCombatLockdown() weder gezeigt/versteckt, verschoben noch umattributiert.
+-- Änderungen an der Liste werden nach dem Kampf (PLAYER_REGEN_ENABLED) angewendet.
+local ROW_HEIGHT = 42
+
 local anchor = CreateFrame("Frame", "BuffReminderAnchor", UIParent)
-anchor:SetSize(300, 40)
+anchor:SetSize(300, ROW_HEIGHT)
 anchor:SetFrameStrata("HIGH")
 anchor:SetClampedToScreen(true)
 anchor:SetMovable(true)
@@ -503,7 +765,11 @@ local function SavePoint()
     db.point = { p, "UIParent", rp, x, y }
 end
 
+local layoutPending = false
+
 local function ApplyLayout()
+    if InCombatLockdown() then layoutPending = true; return end
+    layoutPending = false
     anchor:ClearAllPoints()
     local p = db.point
     anchor:SetPoint(p[1], UIParent, p[3], p[4], p[5])
@@ -513,10 +779,37 @@ end
 local rows = {}
 local OpenMuteMenu -- forward
 
+-- Secure Buttons im Mainline-Client lösen je nach CVar ActionButtonUseKeyDown beim
+-- Drücken ODER beim Loslassen aus. Daher werden beide Phasen registriert; die secure
+-- Aktion läuft genau einmal, und unser Rechtsklick reagiert nur in derselben Phase.
+local function GetCVarFlag(name)
+    if C_CVar and C_CVar.GetCVarBool then return C_CVar.GetCVarBool(name) and true or false end
+    if GetCVarBool then return GetCVarBool(name) and true or false end
+    return false
+end
+
+local function HasKeyDownCVar()
+    if C_CVar and C_CVar.GetCVar then return C_CVar.GetCVar("ActionButtonUseKeyDown") ~= nil end
+    if GetCVar then return GetCVar("ActionButtonUseKeyDown") ~= nil end
+    return false
+end
+
+local function IsActionPhase(down)
+    return (down and true or false) == GetCVarFlag("ActionButtonUseKeyDown")
+end
+
+-- Linksklick-Zauber einer Zeile setzen (nur außerhalb des Kampfes aufrufen)
+local function SetRowSpell(r, spell)
+    if r.castSpell == spell then return end
+    r.castSpell = spell
+    r:SetAttribute("type1", spell and "spell" or nil)
+    r:SetAttribute("spell1", spell)
+end
+
 local function GetRow(i)
     if rows[i] then return rows[i] end
-    local r = CreateFrame("Button", nil, anchor, "BackdropTemplate")
-    r:SetSize(300, 40)
+    local r = CreateFrame("Button", nil, anchor, "SecureActionButtonTemplate, BackdropTemplate")
+    r:SetSize(300, ROW_HEIGHT)
     r:SetBackdrop({
         bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -532,10 +825,18 @@ local function GetRow(i)
     r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
     r.text = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    r.text:SetPoint("LEFT", r.icon, "RIGHT", 10, 0)
-    r.text:SetPoint("RIGHT", -8, 0)
+    r.text:SetPoint("LEFT", r.icon, "RIGHT", 10, 7)
+    r.text:SetPoint("RIGHT", -8, 7)
     r.text:SetJustifyH("LEFT")
+    r.text:SetWordWrap(false)
     r.text:SetTextColor(1, 0.8, 0.2)
+
+    -- Hinweiszeile (klein, grau) unter dem Haupttext
+    r.hint = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    r.hint:SetPoint("LEFT", r.icon, "RIGHT", 10, -8)
+    r.hint:SetPoint("RIGHT", -8, -8)
+    r.hint:SetJustifyH("LEFT")
+    r.hint:SetWordWrap(false)
 
     if i == 1 then
         r:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
@@ -543,17 +844,29 @@ local function GetRow(i)
         r:SetPoint("TOPLEFT", rows[i - 1], "BOTTOMLEFT", 0, -3)
     end
 
-    r:RegisterForClicks("RightButtonUp")
+    -- Linksklick = secure Aktion (Zauber auf sich selbst), Rechtsklick = Stumm-Menü
+    r:SetAttribute("unit1", "player")
+    if HasKeyDownCVar() then
+        r:RegisterForClicks("AnyUp", "AnyDown")
+    else
+        r:RegisterForClicks("AnyUp")
+    end
     r:RegisterForDrag("LeftButton")
-    r:SetScript("OnClick", function(self, button)
-        if button == "RightButton" and self.entry and not unlocked then OpenMuteMenu(self) end
+    r:SetScript("PostClick", function(self, button, down)
+        if button ~= "RightButton" or not IsActionPhase(down) then return end
+        if self.entry and not unlocked then OpenMuteMenu(self) end
     end)
-    r:SetScript("OnDragStart", function() if unlocked then anchor:StartMoving() end end)
-    r:SetScript("OnDragStop", function() if unlocked then SavePoint() end end)
+    r:SetScript("OnDragStart", function()
+        if unlocked and not InCombatLockdown() then anchor:StartMoving() end
+    end)
+    r:SetScript("OnDragStop", function()
+        if unlocked and not InCombatLockdown() then SavePoint() end
+    end)
     r:SetScript("OnEnter", function(self)
         if not self.entry then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(EntryLabel(self.entry), 1, 0.82, 0)
+        if self.castSpell then GameTooltip:AddLine(L.LEFTCLICK, 0.8, 0.8, 0.8) end
         GameTooltip:AddLine(L.RIGHTCLICK, 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
@@ -563,15 +876,31 @@ local function GetRow(i)
     return r
 end
 
-local function ShowRows(list)
+-- dragMode: Verschiebe-Modus (eine Zeile "Ziehen zum Verschieben", Linksklick zaubert nicht)
+local function ShowRows(list, dragMode)
+    if InCombatLockdown() then return end   -- Secure Frames: nur außerhalb des Kampfes
     for i, e in ipairs(list) do
         local r = GetRow(i)
-        r.entry = e
         r.icon:SetTexture(EntryIcon(e))
-        r.text:SetText(L.MISSING:format(EntryLabel(e)))
+        if dragMode then
+            r.entry = nil
+            SetRowSpell(r, nil)
+            r.text:SetText(L.DRAG)
+            r.hint:SetText("")
+        else
+            r.entry = e
+            local spell = CastSpellFor(e)
+            SetRowSpell(r, spell)
+            r.text:SetText(L.MISSING:format(EntryLabel(e)))
+            r.hint:SetText(spell and L.HINT_CAST or L.HINT_MUTE)
+        end
         r:Show()
     end
-    for i = #list + 1, #rows do rows[i]:Hide(); rows[i].entry = nil end
+    for i = #list + 1, #rows do
+        rows[i]:Hide()
+        rows[i].entry = nil
+        SetRowSpell(rows[i], nil)
+    end
     if #list > 0 then
         if not anchor:IsShown() then
             anchor:SetAlpha(1)
@@ -627,6 +956,7 @@ for i, opt in ipairs(MENU_OPTIONS) do
     b:SetScript("OnClick", function()
         if opt[2] and menu.key then
             muted[menu.key] = (opt[2] == math.huge) and math.huge or (GetTime() + opt[2])
+            NoteDeferred()
             Evaluate()
         end
         menu:Hide()
@@ -658,11 +988,15 @@ end
 ---------------------------------------------------------------------------
 function Evaluate()
     if not db or not ready then return end
+    -- Im Kampf wird nur der Zustand aktualisiert; die Warnliste (Secure Buttons)
+    -- bleibt unverändert und wird bei PLAYER_REGEN_ENABLED neu aufgebaut.
+    local combat = InCombatLockdown()
+    if layoutPending and not combat then ApplyLayout() end
 
     if unlocked then
-        ShowRows({ { key = "_drag", label = "DRAG", icon = EntryIcon(entries[1] or {}) } })
-        rows[1].text:SetText(L.DRAG)
-        rows[1].entry = nil
+        if not combat then
+            ShowRows({ { key = "_drag", label = "DRAG", icon = EntryIcon(entries[1] or {}) } }, true)
+        end
         if RefreshConfig then RefreshConfig() end
         return
     end
@@ -679,8 +1013,9 @@ function Evaluate()
 
     local list, newOnes = {}, false
     if db.enabled and not Suppressed() then
-        local ids, names, unreliable = ScanAuras()
+        local ids, names, unreliable, own = ScanAuras()
         local scan = ids and { ids = ids, names = names, unreliable = unreliable } or nil
+        RememberFromAuras(own)
         local instOk = (not db.instanceOnly) or InGroupInstance()
 
         for _, e in ipairs(entries) do
@@ -693,12 +1028,18 @@ function Evaluate()
             end
             if missing[e.key] and not MuteRemaining(e.key) then
                 list[#list + 1] = e
-                if not shownKeys[e.key] then
+                if not combat and not shownKeys[e.key] then
                     newOnes = true
                     Print(L.CHAT:format(EntryLabel(e)))
                 end
             end
         end
+    end
+
+    if combat then
+        -- Meldung, Ton und Anzeige folgen nach dem Kampf
+        if RefreshConfig then RefreshConfig() end
+        return
     end
 
     wipe(shownKeys)
@@ -707,6 +1048,14 @@ function Evaluate()
     ShowRows(list)
 
     if RefreshConfig then RefreshConfig() end
+end
+
+-- Test-Erinnerung (5 Sek.); im Kampf nicht möglich (Secure Buttons)
+local function StartTest()
+    if InCombatLockdown() then Print(L.COMBAT); return end
+    testUntil = GetTime() + 5
+    PlayAlertSound()
+    Evaluate()
 end
 
 ---------------------------------------------------------------------------
@@ -760,6 +1109,7 @@ function RefreshConfig()
     end
     config.enabledCB:SetChecked(db.enabled)
     config.instCB:SetChecked(db.instanceOnly)
+    config.castCB:SetChecked(db.clickCast)
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
 end
@@ -778,6 +1128,7 @@ local function MakeEntryRow(parent, e, y)
     w.cb:SetPoint("TOPLEFT", 16, y)
     w.cb:SetScript("OnClick", function(self)
         cdb.buffs[e.key] = self:GetChecked() and true or false
+        NoteDeferred()
         Evaluate()
     end)
     w.icon = parent:CreateTexture(nil, "ARTWORK")
@@ -862,10 +1213,18 @@ local function BuildConfig()
     y = y - 12
     config.enabledCB = MakeCheck(config, L.ENABLED, 16, y, function(self)
         db.enabled = self:GetChecked() and true or false
+        NoteDeferred()
         Evaluate()
     end)
     config.instCB = MakeCheck(config, L.INSTANCE_ONLY, 160, y, function(self)
         db.instanceOnly = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+    end)
+    y = y - 26
+    config.castCB = MakeCheck(config, L.CLICKCAST, 16, y, function(self)
+        db.clickCast = self:GetChecked() and true or false
+        NoteDeferred()
         Evaluate()
     end)
     y = y - 32
@@ -883,6 +1242,7 @@ local function BuildConfig()
     config.moveBtn = MakeButton(config, L.MOVE, 90)
     config.moveBtn:SetPoint("LEFT", config.soundBtn, "RIGHT", 4, 0)
     config.moveBtn:SetScript("OnClick", function()
+        if InCombatLockdown() then Print(L.COMBAT); return end
         unlocked = not unlocked
         if not unlocked then wipe(shownKeys); ShowRows({}) end
         Evaluate()
@@ -890,16 +1250,12 @@ local function BuildConfig()
 
     local testBtn = MakeButton(config, L.TEST, 60)
     testBtn:SetPoint("LEFT", config.moveBtn, "RIGHT", 4, 0)
-    testBtn:SetScript("OnClick", function()
-        testUntil = GetTime() + 5
-        PlayAlertSound()
-        Evaluate()
-    end)
+    testBtn:SetScript("OnClick", StartTest)
 
     local unmuteBtn = MakeButton(config, L.UNMUTE, 110)
     unmuteBtn:SetPoint("LEFT", testBtn, "RIGHT", 4, 0)
     unmuteBtn:SetScript("OnClick", function()
-        wipe(muted); Print(L.UNMUTED); Evaluate()
+        wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
     end)
 
     config:SetSize(440, -y + 44)
@@ -959,9 +1315,7 @@ end)
 mm:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
 mm:SetScript("OnClick", function(_, button)
     if button == "RightButton" then
-        testUntil = GetTime() + 5
-        PlayAlertSound()
-        Evaluate()
+        StartTest()
     else
         ToggleConfig()
     end
@@ -999,7 +1353,7 @@ ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 
-ev:SetScript("OnEvent", function(self, event, arg1)
+ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then return end
         BuffReminderDB = BuffReminderDB or {}
@@ -1007,6 +1361,7 @@ ev:SetScript("OnEvent", function(self, event, arg1)
         db, cdb = BuffReminderDB, BuffReminderCharDB
         ApplyDefaults(db, DEFAULTS)
         cdb.buffs = cdb.buffs or {}
+        cdb.lastVariant = cdb.lastVariant or {}   -- Eintrag-Key -> zuletzt genutzte Variante
         self:UnregisterEvent("ADDON_LOADED")
         return
     end
@@ -1014,14 +1369,24 @@ ev:SetScript("OnEvent", function(self, event, arg1)
     if event == "PLAYER_LOGIN" then
         local _, class = UnitClass("player")
         classEntries = CLASS_BUFFS[class] or {}
-        for _, e in ipairs(classEntries) do PrepareEntry(e); entries[#entries + 1] = e end
+        for _, e in ipairs(classEntries) do
+            PrepareEntry(e); PrepareCast(e, class); entries[#entries + 1] = e
+        end
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
         RefreshKnown()
         ApplyLayout()
         UpdateMinimapPos()
         self:RegisterUnitEvent("UNIT_AURA", "player")
         self:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
+        self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
         C_Timer.NewTicker(1, Evaluate)
+        return
+    end
+
+    if event == "UNIT_SPELLCAST_SUCCEEDED" then
+        -- arg1 = unit, arg2 = castGUID, arg3 = spellID (kann ein Secret-Wert sein)
+        if cdb then RememberFromCast(arg3) end
+        Evaluate()
         return
     end
 
@@ -1051,14 +1416,12 @@ SlashCmdList.BUFFREMINDER = function(msg)
     if cmd == "" or cmd == "config" or cmd == "options" then
         ToggleConfig()
     elseif cmd == "test" then
-        testUntil = GetTime() + 5
-        PlayAlertSound()
-        Evaluate()
+        StartTest()
     elseif cmd == "minimap" then
         db.minimapHide = not db.minimapHide
         UpdateMinimapPos()
     elseif cmd == "unmute" then
-        wipe(muted); Print(L.UNMUTED); Evaluate()
+        wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
     elseif cmd == "debug" then
         local ids, names, unreliable = ScanAuras()
         Print(("ready=%s enabled=%s suppressed=%s instanceOnly=%s inInstance=%s scan=%s unreliable=%s"):format(
@@ -1090,6 +1453,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
             end
         end
     elseif cmd == "reset" then
+        if InCombatLockdown() then Print(L.COMBAT); return end
         for k in pairs(DEFAULTS) do db[k] = nil end
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)

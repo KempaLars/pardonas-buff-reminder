@@ -36,8 +36,15 @@ Built for **WoW Forever** (Interface `16001`).
 - **General buffs (optional, off by default)** – Well Fed, Flask, and Well-Rested (sleeping bag).
 - **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
 - **Right-click to mute** – right-click a reminder to mute it for 5, 15 or 60 minutes or for the rest of the session. Mutes can be cleared from the settings window or with `/br unmute`.
+- **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
+  - Directly castable: Priest (Fortitude, Inner Fire, Divine Spirit, Shadow Protection, Vampiric Embrace, Shadowform), Mage (Arcane Intellect), Druid (Mark of the Wild, Thorns), Hunter (Trueshot Aura), Death Knight (Horn of Winter).
+  - **"Any" reminders** (Paladin aura/seal/blessing, Hunter aspect, Mage and Warlock armor, Shaman shield and weapon imbues, Warrior shout): the addon remembers per character which variant you used last – either from a spell you cast or from a matching aura you applied yourself – and left-click casts that variant (Greater Blessings are remembered as the matching single-target blessing). Until a variant has been remembered, left-click does nothing.
+  - Not castable: Rogue poisons and all general buffs (Well Fed, Flask, Well-Rested).
+  - Can be turned off in the settings ("Left-click casts buff", on by default).
+- **Hint line** – every reminder shows a small grey second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, otherwise "Right-click: mute".
+- **Combat behaviour** – reminders are secure buttons, so the list cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
-- **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock".
+- **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock". While moving, left-click does not cast.
 - **Minimap button** – left-click opens the settings, right-click shows a test reminder, drag to move the button around the minimap.
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – German and English, picked automatically from the game client language.
@@ -49,11 +56,11 @@ Built for **WoW Forever** (Interface `16001`).
 | Command        | Description                                   |
 | -------------- | --------------------------------------------- |
 | `/br`          | Open or close the settings window             |
-| `/br test`     | Show a test reminder for 5 seconds            |
+| `/br test`     | Show a test reminder for 5 seconds (not in combat) |
 | `/br minimap`  | Show or hide the minimap button               |
 | `/br unmute`   | Clear all mutes                               |
 | `/br auras`    | List your active buffs with name and spell ID |
-| `/br reset`    | Reset position and settings                   |
+| `/br reset`    | Reset position and settings (not in combat)   |
 
 ## Releasing
 
