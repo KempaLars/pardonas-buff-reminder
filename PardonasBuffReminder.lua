@@ -1836,9 +1836,28 @@ local function GetItemButton(i)
         if itemPanel.entry and itemPanel.entry.itemKind == "flask" then cdb.lastFlask = self.itemID end
         menu:Hide()   -- schließt auch das itemPanel
     end)
+    -- Item-Tooltip beim Überfahren. HookScript statt SetScript: ergänzt nur die Anzeige,
+    -- die Secure-Klickfunktion des Buttons bleibt unberührt.
+    b:HookScript("OnEnter", function(self)
+        if not self.itemID then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetItemByID(self.itemID)
+        GameTooltip:Show()
+    end)
+    b:HookScript("OnLeave", function(self)
+        if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+    end)
     itemPanel.buttons[i] = b
     return b
 end
+
+-- Tooltip ausblenden, falls er zu einem Button der Item-Auswahl gehört
+local function HideItemTooltip()
+    for _, b in ipairs(itemPanel.buttons) do
+        if GameTooltip:IsOwned(b) then GameTooltip:Hide(); return end
+    end
+end
+itemPanel:SetScript("OnHide", HideItemTooltip)
 
 -- Item-Auswahl befüllen (nur außerhalb des Kampfes); false = nichts anzuzeigen
 local function FillItemPanel(e, choices)
@@ -1855,9 +1874,12 @@ local function FillItemPanel(e, choices)
         b.name:SetText(ItemName(c.id))
         b.count:SetText(c.count)
         b:Show()
+        -- Auswahl neu befüllt, während die Maus darauf steht: Tooltip nachziehen
+        if GameTooltip:IsOwned(b) then GameTooltip:SetItemByID(c.id); GameTooltip:Show() end
     end
     for i = n + 1, #itemPanel.buttons do
         local b = itemPanel.buttons[i]
+        if GameTooltip:IsOwned(b) then GameTooltip:Hide() end
         b:Hide()
         b.itemID = nil
         b:SetAttribute("item", nil)
@@ -1870,7 +1892,12 @@ local function HideItemPanel()
     if itemPanel:IsShown() and not InCombatLockdown() then itemPanel:Hide() end
 end
 
-menu:SetScript("OnHide", HideItemPanel)
+-- Menü geschlossen: Item-Auswahl und deren Tooltip ebenfalls schließen
+-- (im Kampf ist die Item-Auswahl nie offen, s. CloseItemPanelForCombat)
+menu:SetScript("OnHide", function()
+    HideItemTooltip()
+    HideItemPanel()
+end)
 
 -- Schließt sich, wenn die Maus Menü und Item-Auswahl 2 Sek. lang verlassen hat
 menu:SetScript("OnUpdate", function(self, el)
