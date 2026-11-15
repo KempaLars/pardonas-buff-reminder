@@ -399,6 +399,8 @@ local entries = {}            -- aktive Liste (Klasse + allgemein)
 local classEntries = {}
 local knownCache = {}
 local missing = {}            -- key -> bool (letzter lesbarer Zustand)
+local missingSince = {}       -- key -> GetTime(), seit dem der Buff durchgehend fehlt
+local MISSING_CONFIRM = 2     -- Sek. durchgehendes Fehlen, bevor gewarnt wird
 local shownKeys = {}          -- key -> true, aktuell eingeblendet
 local muted = {}              -- key -> Ablaufzeit (GetTime) | math.huge
 local ready, unlocked, testUntil = false, false, 0
@@ -1072,16 +1074,29 @@ function Evaluate()
             end
         end
         local instOk = (not db.instanceOnly) or InGroupInstance()
+        local now = GetTime()
 
         for _, e in ipairs(entries) do
             local relevant = knownCache[e.key] and IsEnabled(e) and (not e.general or instOk)
             if relevant then
                 local m = CheckMissing(e, scan)
                 if m ~= nil then missing[e.key] = m end   -- nil: Zustand beibehalten (Kampf/Secret)
+                -- Entprellung: nil (unbekannt) lässt missingSince unverändert
+                if m == true then
+                    missingSince[e.key] = missingSince[e.key] or now
+                elseif m == false then
+                    missingSince[e.key] = nil
+                end
             else
                 missing[e.key] = false
+                missingSince[e.key] = nil
             end
-            if missing[e.key] and not MuteRemaining(e.key) then
+            -- Angezeigt wird erst nach MISSING_CONFIRM Sek. durchgehendem Fehlen (eine
+            -- kurzzeitig leere Aura-Liste, z. B. nach Ladebildschirmen, löst nichts aus).
+            -- Bereits angezeigte Warnungen bleiben stehen, solange der Buff fehlt.
+            local since = missingSince[e.key]
+            local confirmed = shownKeys[e.key] or (since ~= nil and now - since >= MISSING_CONFIRM)
+            if missing[e.key] and confirmed and not MuteRemaining(e.key) then
                 list[#list + 1] = e
                 if not combat and not shownKeys[e.key] then
                     newOnes = true
@@ -1439,6 +1454,25 @@ ev:RegisterEvent("SPELLS_CHANGED")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+-- Ladebildschirm-Events gibt es nicht in jedem Client → Registrierung absichern
+pcall(ev.RegisterEvent, ev, "LOADING_SCREEN_ENABLED")
+pcall(ev.RegisterEvent, ev, "LOADING_SCREEN_DISABLED")
+
+-- Nach Login/Ladebildschirm liefert die Aura-API kurz unvollständige Daten → 3 Sek. warten.
+-- Generationszähler: nur der zuletzt gestartete Timer darf ready = true setzen.
+local GRACE_TIME = 3
+local graceGen = 0
+
+local function StartGrace()
+    ready = false
+    wipe(missingSince)
+    graceGen = graceGen + 1
+    local gen = graceGen
+    C_Timer.After(GRACE_TIME, function()
+        if gen ~= graceGen then return end
+        ready = true; RefreshKnown(); Evaluate()
+    end)
+end
 
 ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "ADDON_LOADED" then
@@ -1478,9 +1512,14 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         return
     end
 
-    if event == "PLAYER_ENTERING_WORLD" then
+    if event == "LOADING_SCREEN_ENABLED" then
         ready = false
-        C_Timer.After(3, function() ready = true; RefreshKnown(); Evaluate() end)
+        graceGen = graceGen + 1   -- laufende Grace-Timer verfallen
+        return
+    end
+
+    if event == "PLAYER_ENTERING_WORLD" or event == "LOADING_SCREEN_DISABLED" then
+        StartGrace()
         return
     end
 
