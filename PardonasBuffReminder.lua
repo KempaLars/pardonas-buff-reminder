@@ -1370,7 +1370,7 @@ RoundMask(mmBg)
 local mmIcon = mm:CreateTexture(nil, "ARTWORK")
 mmIcon:SetSize(18, 18)
 mmIcon:SetPoint("CENTER", mm, "CENTER")
-mmIcon:SetTexture("Interface\\AddOns\\PardonasBuffReminder\\Textures\\Icon")
+mmIcon:SetTexture("Interface\\AddOns\\PardonasBuffReminder\\Textures\\MinimapIcon")
 RoundMask(mmIcon)
 
 local mmBorder = mm:CreateTexture(nil, "OVERLAY")
