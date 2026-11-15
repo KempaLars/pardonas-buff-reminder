@@ -1279,25 +1279,57 @@ mm:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 mm:RegisterForDrag("LeftButton")
 mm:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
-local mmBg = mm:CreateTexture(nil, "BACKGROUND")
-mmBg:SetSize(20, 20)
-mmBg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-mmBg:SetPoint("TOPLEFT", 7, -5)
+-- Maße wie im Mainline-Client üblich (Vorbild: LibDBIcon). Die Rahmen-Textur ist so
+-- gezeichnet, dass ihr Ring bei 50x50 und TOPLEFT mittig um den 31x31-Button liegt.
+local MM_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 
+local function RoundMask(tex)
+    local mask = mm:CreateMaskTexture()
+    mask:SetTexture(MM_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetAllPoints(tex)   -- folgt der Textur (auch beim Klick-Versatz)
+    tex:AddMaskTexture(mask)
+end
+
+local mmBg = mm:CreateTexture(nil, "BACKGROUND")
+mmBg:SetSize(24, 24)
+mmBg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+mmBg:SetPoint("CENTER", mm, "CENTER")
+RoundMask(mmBg)
+
+-- Logo ist bereits rund mit transparenten Ecken → kein TexCoord-Zuschnitt
 local mmIcon = mm:CreateTexture(nil, "ARTWORK")
 mmIcon:SetSize(18, 18)
-mmIcon:SetPoint("TOPLEFT", 7, -6)
-mmIcon:SetTexture("Interface\\Icons\\Spell_Holy_WordFortitude")
-mmIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+mmIcon:SetPoint("CENTER", mm, "CENTER")
+mmIcon:SetTexture("Interface\\AddOns\\PardonasBuffReminder\\Textures\\Icon")
+RoundMask(mmIcon)
 
 local mmBorder = mm:CreateTexture(nil, "OVERLAY")
-mmBorder:SetSize(53, 53)
+mmBorder:SetSize(50, 50)
 mmBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-mmBorder:SetPoint("TOPLEFT")
+mmBorder:SetPoint("TOPLEFT", mm, "TOPLEFT")
+
+-- Klick-Feedback wie bei Standard-Minimap-Buttons: Icon versetzt und abgedunkelt
+local function MinimapIconPressed(pressed)
+    mmIcon:ClearAllPoints()
+    if pressed then
+        mmIcon:SetPoint("CENTER", mm, "CENTER", 1, -1)
+        mmIcon:SetVertexColor(0.75, 0.75, 0.75)
+    else
+        mmIcon:SetPoint("CENTER", mm, "CENTER")
+        mmIcon:SetVertexColor(1, 1, 1)
+    end
+end
+mm:SetScript("OnMouseDown", function() MinimapIconPressed(true) end)
+mm:SetScript("OnMouseUp", function() MinimapIconPressed(false) end)
+mm:SetScript("OnHide", function() MinimapIconPressed(false) end)
+
+-- Abstand Button-Mitte zur Minimap-Mitte: Radius + 5 setzt den Button mittig auf den
+-- Rand der Mainline-Minimap (LibDBIcon Mainline); +10 stammt aus Classic-Clients.
+local MM_RADIUS_OFFSET = 5
 
 local function UpdateMinimapPos()
     local a = math.rad(db.minimapAngle)
-    local r = (Minimap:GetWidth() / 2) + 10
+    local r = (Minimap:GetWidth() / 2) + MM_RADIUS_OFFSET
     mm:ClearAllPoints()
     mm:SetPoint("CENTER", Minimap, "CENTER", math.cos(a) * r, math.sin(a) * r)
     if db.minimapHide then mm:Hide() else mm:Show() end

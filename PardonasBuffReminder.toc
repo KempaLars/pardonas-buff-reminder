@@ -7,6 +7,6 @@
 ## X-Curse-Project-ID: 1806185
 ## SavedVariables: BuffReminderDB
 ## SavedVariablesPerCharacter: BuffReminderCharDB
-## IconTexture: Interface\Icons\Spell_Holy_WordFortitude
+## IconTexture: Interface\AddOns\PardonasBuffReminder\Textures\Icon
 
 PardonasBuffReminder.lua

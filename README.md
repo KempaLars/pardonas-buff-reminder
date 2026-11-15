@@ -74,6 +74,8 @@ It must report 0 warnings / 0 errors.
 
 On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
 
+**Testing in game:** WoW only picks up new files (e.g. textures such as `Textures/Icon.tga`) after a full restart of the game client – `/reload` is not enough. Changes to existing Lua files are picked up by `/reload`.
+
 ## Releasing
 
 Versions are not edited by hand: the version in the TOC is `@project-version@` and is filled in from the Git tag. To publish a new version, push a tag in the format `X.Y.Z`:
@@ -98,8 +100,11 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 │   ├── lint.yml                    # Lint workflow (luacheck on push to main and pull requests)
 │   └── release.yml                 # Release workflow (triggered by version tags, lint first)
 ├── media/
+│   ├── icon.svg                    # Source for the round in-game icon
 │   ├── logo-400.png                # Logo (PNG, 400 px)
 │   └── logo.svg                    # Logo (vector)
+├── Textures/
+│   └── Icon.tga                    # In-game icon (64x64, 32-bit TGA with alpha): minimap button and addon list
 ├── .gitignore
 ├── .luacheckrc                     # luacheck configuration
 ├── .pkgmeta                        # Packager configuration
