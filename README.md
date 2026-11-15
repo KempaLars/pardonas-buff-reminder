@@ -62,6 +62,18 @@ Built for **WoW Forever** (Interface `16001`).
 | `/br auras`    | List your active buffs with name and spell ID |
 | `/br reset`    | Reset position and settings (not in combat)   |
 
+## Development
+
+The code is linted with [luacheck](https://github.com/lunarmodules/luacheck). The configuration is in `.luacheckrc` (Lua 5.1, the WoW API globals the addon uses, and the globals it writes). Run it locally from the repository root before committing:
+
+```sh
+luacheck .
+```
+
+It must report 0 warnings / 0 errors.
+
+On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
+
 ## Releasing
 
 Versions are not edited by hand: the version in the TOC is `@project-version@` and is filled in from the Git tag. To publish a new version, push a tag in the format `X.Y.Z`:
@@ -71,7 +83,9 @@ git tag 1.0.1
 git push origin 1.0.1
 ```
 
-The GitHub Actions workflow (`.github/workflows/release.yml`) then uses the BigWigs packager to build the addon zip, upload it to CurseForge and create a GitHub release. The changelog is generated from the commit messages.
+The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck and, if it passes, uses the BigWigs packager to build the addon zip, upload it to CurseForge and create a GitHub release. The changelog is generated from the commit messages.
+
+- The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge is **Pardona's Buff Reminder X.Y.Z**.
 
 - **Requirement:** the repository secret `CF_API_KEY` must contain a CurseForge API token.
 - Tags containing `beta` or `alpha` (e.g. `1.1.0-beta1`) are published as beta or alpha releases.
@@ -80,15 +94,18 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then uses the BigW
 
 ```
 .
-├── .github/workflows/release.yml   # Release workflow (triggered by version tags)
+├── .github/workflows/
+│   ├── lint.yml                    # Lint workflow (luacheck on push to main and pull requests)
+│   └── release.yml                 # Release workflow (triggered by version tags, lint first)
 ├── media/
 │   ├── logo-400.png                # Logo (PNG, 400 px)
 │   └── logo.svg                    # Logo (vector)
 ├── .gitignore
+├── .luacheckrc                     # luacheck configuration
 ├── .pkgmeta                        # Packager configuration
 ├── PardonasBuffReminder.lua        # Addon code
 ├── PardonasBuffReminder.toc        # Addon metadata
 └── README.md
 ```
 
-`README.md` and `media/` are excluded from the packaged addon.
+`README.md`, `.luacheckrc` and `media/` are excluded from the packaged addon.

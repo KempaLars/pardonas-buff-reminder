@@ -1423,7 +1423,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
     elseif cmd == "unmute" then
         wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
     elseif cmd == "debug" then
-        local ids, names, unreliable = ScanAuras()
+        local ids, _, unreliable = ScanAuras()
         Print(("ready=%s enabled=%s suppressed=%s instanceOnly=%s inInstance=%s scan=%s unreliable=%s"):format(
             tostring(ready), tostring(db.enabled), tostring(Suppressed()), tostring(db.instanceOnly),
             tostring(InGroupInstance()), ids and "ok" or "nil", tostring(unreliable)))
