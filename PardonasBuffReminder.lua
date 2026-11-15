@@ -86,6 +86,9 @@ if GetLocale() == "deDE" then
         EATING        = "Isst … %d s",
         EATING_DONE   = "Gleich satt …",
         HINT_EATING   = "Sitzen bleiben",
+        -- Versionshinweis beim Login (Beta/Alpha/Entwicklerversion)
+        VERSION_LOADED = "%s geladen",
+        DEV_BUILD      = "Entwicklerversion geladen",
         -- Essen & Fläschchen
         HINT_ITEM     = "Linksklick: %s · Rechtsklick: Auswahl",
         HINT_NOITEM   = "Nicht in der Tasche · Rechtsklick: stumm",
@@ -175,6 +178,8 @@ else
         EATING        = "Eating … %d s",
         EATING_DONE   = "Almost well fed …",
         HINT_EATING   = "Stay seated",
+        VERSION_LOADED = "%s loaded",
+        DEV_BUILD      = "Development build loaded",
         HINT_ITEM     = "Left-click: %s · Right-click: choose",
         HINT_NOITEM   = "Not in bags · Right-click: mute",
         LEFTCLICK_USE = "Left-click: use %s",
@@ -680,6 +685,28 @@ local function NormName(n) return (n:lower():gsub("[%s%-]", "")) end
 
 local function IsSecret(v)
     return issecretvalue ~= nil and issecretvalue(v) == true
+end
+
+-- Addon-Version aus der TOC ("" = nicht lesbar)
+local function AddonVersion()
+    local fn = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    if not fn then return "" end
+    local ok, v = pcall(fn, ADDON_NAME, "Version")
+    if not ok or type(v) ~= "string" or IsSecret(v) then return "" end
+    return v
+end
+
+-- Versionshinweis beim Login: nur Beta/Alpha und Entwicklerversion (Platzhalter nicht ersetzt)
+local function PrintVersionNotice()
+    local v = AddonVersion()
+    if v == "" or v:find("@project-version@", 1, true) then
+        Print(L.DEV_BUILD)
+    else
+        local lv = v:lower()
+        if lv:find("beta", 1, true) or lv:find("alpha", 1, true) then
+            Print(L.VERSION_LOADED:format(L.TITLE .. " " .. v))
+        end
+    end
 end
 
 local function SpellName(id)
@@ -2646,6 +2673,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     end
 
     if event == "PLAYER_LOGIN" then
+        PrintVersionNotice()   -- einmal pro Login (nicht bei Ladebildschirmen)
         local _, class = UnitClass("player")
         classEntries = CLASS_BUFFS[class] or {}
         for _, e in ipairs(classEntries) do

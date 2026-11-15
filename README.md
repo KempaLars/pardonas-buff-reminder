@@ -97,6 +97,8 @@ It must report 0 warnings / 0 errors.
 
 On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` or `develop` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
 
+**Development build notice:** when the addon runs straight from the repository (the `@project-version@` placeholder in the TOC is not replaced), it prints "Development build loaded" to chat on login.
+
 **Testing in game:** WoW only picks up new files (e.g. textures such as `Textures/Icon.tga`) after a full restart of the game client – `/reload` is not enough. Changes to existing Lua files are picked up by `/reload`.
 
 ## Releasing
@@ -113,7 +115,7 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 - The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge is just the version number (e.g. **1.0.3**). The packager replaces spaces, apostrophes and other special characters in the label with `_`, so a label like "Pardona's Buff Reminder 1.0.3" would turn into `Pardona_s_Buff_Reminder_1.0.3`.
 
 - **Requirement:** the repository secret `CF_API_KEY` must contain a CurseForge API token.
-- Tags containing `beta` or `alpha` (e.g. `1.1.0-beta1`) are published as beta or alpha releases.
+- Tags containing `beta` or `alpha` (e.g. `1.1.0-beta1`) are published as beta or alpha releases. Beta and alpha versions print a short "Pardona's Buff Reminder 1.1.0-beta1 loaded" line to chat on login; release versions print nothing.
 
 ## Repository layout
 

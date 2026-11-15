@@ -19,6 +19,7 @@ globals = {
 read_globals = {
     -- namespaces
     "C_Container",
+    "C_AddOns",
     "C_CVar",
     "C_Item",
     "C_Spell",
@@ -34,6 +35,7 @@ read_globals = {
     "UIParent",
     "SOUNDKIT",
     -- functions
+    "GetAddOnMetadata",
     "GetCursorPosition",
     "GetCVar",
     "GetCVarBool",
