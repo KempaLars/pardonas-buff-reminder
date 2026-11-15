@@ -121,11 +121,13 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 │   ├── lint.yml                    # Lint workflow (luacheck on push to main/develop and pull requests)
 │   └── release.yml                 # Release workflow (triggered by version tags, lint first)
 ├── media/
-│   ├── icon.svg                    # Source for the round in-game icon
+│   ├── icon-minimap.svg            # Source for the minimap button icon (no ring)
+│   ├── icon.svg                    # Source for the round addon list icon
 │   ├── logo-400.png                # Logo (PNG, 400 px)
 │   └── logo.svg                    # Logo (vector)
 ├── Textures/
-│   └── Icon.tga                    # In-game icon (64x64, 32-bit TGA with alpha): minimap button and addon list
+│   ├── Icon.tga                    # Addon list icon (64x64, 32-bit TGA with alpha)
+│   └── MinimapIcon.tga             # Minimap button icon, no ring (64x64, 32-bit TGA with alpha)
 ├── .gitignore
 ├── .luacheckrc                     # luacheck configuration
 ├── .pkgmeta                        # Packager configuration
