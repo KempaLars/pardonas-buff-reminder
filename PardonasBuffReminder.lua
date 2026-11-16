@@ -2034,7 +2034,7 @@ end)
 
 -- Schließt sich, wenn die Maus Menü und Item-Auswahl 2 Sek. lang verlassen hat
 menu:SetScript("OnUpdate", function(self, el)
-    if MouseIsOver(self) or (itemPanel:IsShown() and MouseIsOver(itemPanel)) then self.away = 0 else
+    if self:IsMouseOver() or (itemPanel:IsShown() and itemPanel:IsMouseOver()) then self.away = 0 else
         self.away = (self.away or 0) + el
         if self.away > 2 then self:Hide() end
     end

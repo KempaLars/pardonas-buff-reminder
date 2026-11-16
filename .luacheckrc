@@ -57,7 +57,6 @@ read_globals = {
     "IsPlayerSpell",
     "issecretvalue",
     "IsSpellKnown",
-    "MouseIsOver",
     "NUM_BAG_SLOTS",
     "PlaySound",
     "tinsert",
