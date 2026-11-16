@@ -87,7 +87,7 @@ if GetLocale() == "deDE" then
         EATING_DONE   = "Gleich satt …",
         HINT_EATING   = "Sitzen bleiben",
         -- Versionshinweis beim Login (Beta/Alpha/Entwicklerversion)
-        VERSION_LOADED = "%s geladen",
+        VERSION_LOADED = "Version %s geladen",
         DEV_BUILD      = "Entwicklerversion geladen",
         -- Essen & Fläschchen
         HINT_ITEM     = "Linksklick: %s · Rechtsklick: Auswahl",
@@ -178,7 +178,7 @@ else
         EATING        = "Eating … %d s",
         EATING_DONE   = "Almost well fed …",
         HINT_EATING   = "Stay seated",
-        VERSION_LOADED = "%s loaded",
+        VERSION_LOADED = "Version %s loaded",
         DEV_BUILD      = "Development build loaded",
         HINT_ITEM     = "Left-click: %s · Right-click: choose",
         HINT_NOITEM   = "Not in bags · Right-click: mute",
@@ -704,7 +704,7 @@ local function PrintVersionNotice()
     else
         local lv = v:lower()
         if lv:find("beta", 1, true) or lv:find("alpha", 1, true) then
-            Print(L.VERSION_LOADED:format(L.TITLE .. " " .. v))
+            Print(L.VERSION_LOADED:format(v))
         end
     end
 end
