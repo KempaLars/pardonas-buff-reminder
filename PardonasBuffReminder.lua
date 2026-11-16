@@ -1016,7 +1016,7 @@ menu:SetSize(192, 26 + #MENU_OPTIONS * 19 + 8)
 
 -- Schließt sich, wenn die Maus das Menü 2 Sek. lang verlassen hat
 menu:SetScript("OnUpdate", function(self, el)
-    if MouseIsOver(self) then self.away = 0 else
+    if self:IsMouseOver() then self.away = 0 else
         self.away = (self.away or 0) + el
         if self.away > 2 then self:Hide() end
     end
