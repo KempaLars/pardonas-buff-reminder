@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks and low reagent warnings. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
 
 **CurseForge:** https://www.curseforge.com/wow/addons/pardonas-buff-reminder
 
@@ -33,21 +33,50 @@ Built for **WoW Forever** (Interface `16001`).
   - Death Knight: Horn of Winter
   - Situational buffs (e.g. Thorns, Shadowform, Righteous Fury, shouts) are off by default.
 - **Weapon imbues and poisons** – Shaman main-hand/off-hand weapon imbues and Rogue main-hand/off-hand poisons. Off-hand checks only apply when an actual weapon is equipped there.
-- **General buffs (optional, off by default)** – Well Fed, Flask, and Well-Rested (sleeping bag).
+- **General buffs (optional, off by default)** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag).
+- **Use food and flasks by click** – for the Well Fed and Flask reminders:
+  - **Left-click** uses the best matching item from your bags. The hint line shows which one ("Left-click: Smoked Desert Dumplings · Right-click: choose"), or "Not in bags · Right-click: mute" if you have none.
+  - **Right-click** (out of combat) opens a menu listing all matching items in your bags (icon, name, count) in the same order, with item tooltips; clicking one uses it. Below a separator are the usual mute options. In combat, right-click only shows the mute options.
+  - **Food** comes from a fixed list of WoW Forever cooking food that gives an XP buff (based on the beta, so it may still change). Only food you are high enough level for is offered. Best choice first: 1) food whose tooltip mentions an experience bonus, 2) score = category weight for your class × cooking skill level, 3) larger stack. Each class has its own category order (e.g. Warrior: Strength, Melee AP, Agility, Crit, Stamina; Priest: Spirit, Intellect, Spell Damage, Healing); categories not listed for your class count less, movement and profession food the least.
+  - **Flasks** are any flask in your bags (detected by item type, with a fallback list of the Classic flasks). The flask you used last (remembered per character) comes first, then higher item level. The addon also learns each flask's effect so that new flasks count as an active Flask buff.
+  - Uses the "Left-click casts buff" option: when it is off, left-click does nothing and right-click only mutes.
+- **Eating countdown** – while you are eating (started from the reminder or directly from your bags; detected by the food's eating aura by spell ID or name, or by the generic "Food" or "Drink" aura) and are not yet Well Fed, the Well Fed reminder shows "Eating … 7 s", counting down the 10 seconds until the buff appears, then "Almost well fed …", with the hint "Stay seated". This does not trigger a chat message or sound. If you stand up before getting Well Fed, the normal reminder comes back (again without a new chat message or sound).
 - **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
 - **Right-click to mute** – right-click a reminder to mute it for 5, 15 or 60 minutes or for the rest of the session. Mutes can be cleared from the settings window or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
   - Directly castable: Priest (Fortitude, Inner Fire, Divine Spirit, Shadow Protection, Vampiric Embrace, Shadowform), Mage (Arcane Intellect), Druid (Mark of the Wild, Thorns), Hunter (Trueshot Aura), Death Knight (Horn of Winter).
   - **"Any" reminders** (Paladin aura/seal/blessing, Hunter aspect, Mage and Warlock armor, Shaman shield and weapon imbues, Warrior shout): the addon remembers per character which variant you used last – either from a spell you cast or from a matching aura you applied yourself – and left-click casts that variant (Greater Blessings are remembered as the matching single-target blessing). Until a variant has been remembered, left-click does nothing.
-  - Not castable: Rogue poisons and all general buffs (Well Fed, Flask, Well-Rested).
+  - Not castable: Rogue poisons and Well-Rested. Well Fed and Flask use an item instead (see above).
   - Can be turned off in the settings ("Left-click casts buff", on by default).
-- **Hint line** – every reminder shows a small grey second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, otherwise "Right-click: mute".
-- **Combat behaviour** – reminders are secure buttons, so the list cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
+- **Hint line** – every reminder shows a small grey second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, "Left-click: <item> · Right-click: choose" for food and flasks, otherwise "Right-click: mute".
+- **Combat behaviour** – reminders are secure buttons, so the list (including click targets of group buff lines) cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
 - **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock". While moving, left-click does not cast.
 - **Minimap button** – left-click opens the settings, right-click shows a test reminder, drag to move the button around the minimap.
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – German and English, picked automatically from the game client language.
+
+## Experimental features (opt-in)
+
+These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings window, in the section **"Experimental (beta) – use at your own risk"** below the general options. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
+
+While a feature is off, it does nothing at all: no group lines, no group scans, no reagent lines and no reagent count checks; your own reminders work as usual. The detail settings below each checkbox are greyed out while it is off. Changes take effect immediately (in combat: when combat ends).
+
+- **Low reagent warning** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
+  - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
+  - Mage: Arcane Powder (Arcane Brilliance), Rune of Teleportation, Rune of Portals, Light Feather (Slow Fall)
+  - Druid: Wild Berries, Wild Thornroot (Gift of the Wild), Maple / Stranglethorn / Ashwood / Hornbeam / Ironwood Seed (Rebirth)
+  - Paladin: Symbol of Kings (Greater Blessings), Symbol of Divinity (Divine Intervention)
+  - Shaman: Ankh (Reincarnation), Fish Oil (Water Walking), Shiny Fish Scale (Water Breathing)
+  - Rogue: Flash Powder (Vanish), Blinding Powder (Blind)
+  - Below the "Low reagent warning" checkbox, the settings list your class's reagents, each with a threshold field (0–50, 0 = no warning) and the current count in your bags. Defaults: Ankh and seeds 1, runes and Blinding Powder 5, everything else 10. Thresholds are saved per character.
+  - Reagent warnings appear in the normal reminder list with the item's icon and name in your client language. Left-click does nothing; right-click mutes them like buff reminders.
+- **Group buffs** – in a party or raid, the addon also checks your group members (including yourself) for the buffs you can give: Power Word: Fortitude, Shadow Protection, Divine Spirit, Arcane Intellect and Mark of the Wild. A player counts as buffed with either the single-target or the group version (e.g. Prayer of Fortitude). Paladin blessings are not included.
+  - Only buffs whose single-target version you have learned are checked. Arcane Intellect and Divine Spirit are only checked on mana classes (Druid, Hunter, Mage, Paladin, Priest, Shaman, Warlock).
+  - Players who are dead, offline, not visible or out of range are skipped. Only checked out of combat.
+  - One line per buff replaces your own reminder for it, e.g. "Fortitude missing: 3". Below it are the names of the players without the buff (up to 5, then "+N"), then the click hints.
+  - **Left-click** casts the group version on the first player without the buff, which covers that player's party or raid subgroup. If you have not learned the group version or are out of its reagent (see reagent warnings), the single-target version is cast instead. **Ctrl+Left-click** casts the single-target version on the next player without the buff. After each cast or buff change the target is chosen again. Hint: "Left-click: group · Ctrl+Left-click: single · Right-click: mute".
+  - Detail settings below the "Group buffs" checkbox (Priest, Mage and Druid only): "Check group buffs" (on by default; both checkboxes must be on) and "Check in: Always / Dungeons & raids only / Raids only" (default Always). Each buff's own on/off checkbox still applies.
 
 ## Slash commands
 
@@ -60,6 +89,7 @@ Built for **WoW Forever** (Interface `16001`).
 | `/br minimap`  | Show or hide the minimap button               |
 | `/br unmute`   | Clear all mutes                               |
 | `/br auras`    | List your active buffs with name and spell ID |
+| `/br debug`    | Print diagnostic state (reminders, eating detection) |
 | `/br reset`    | Reset position and settings (not in combat)   |
 
 ## Development
@@ -72,7 +102,9 @@ luacheck .
 
 It must report 0 warnings / 0 errors.
 
-On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
+On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` or `develop` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
+
+**Development build notice:** when the addon runs straight from the repository (the `@project-version@` placeholder in the TOC is not replaced), it prints "Development build loaded" to chat on login.
 
 **Testing in game:** WoW only picks up new files (e.g. textures such as `Textures/Icon.tga`) after a full restart of the game client – `/reload` is not enough. Changes to existing Lua files are picked up by `/reload`.
 
@@ -90,14 +122,14 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 - The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge is just the version number (e.g. **1.0.3**). The packager replaces spaces, apostrophes and other special characters in the label with `_`, so a label like "Pardona's Buff Reminder 1.0.3" would turn into `Pardona_s_Buff_Reminder_1.0.3`.
 
 - **Requirement:** the repository secret `CF_API_KEY` must contain a CurseForge API token.
-- Tags containing `beta` or `alpha` (e.g. `1.1.0-beta1`) are published as beta or alpha releases.
+- Tags containing `beta` or `alpha` (e.g. `1.1.0-beta1`) are published as beta or alpha releases. Beta and alpha versions print a short "Pardona's Buff Reminder: Version 1.1.0-beta1 loaded" line to chat on login; release versions print nothing.
 
 ## Repository layout
 
 ```
 .
 ├── .github/workflows/
-│   ├── lint.yml                    # Lint workflow (luacheck on push to main and pull requests)
+│   ├── lint.yml                    # Lint workflow (luacheck on push to main/develop and pull requests)
 │   └── release.yml                 # Release workflow (triggered by version tags, lint first)
 ├── media/
 │   ├── icon-minimap.svg            # Source for the minimap button icon (no ring)
