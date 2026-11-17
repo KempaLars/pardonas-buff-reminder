@@ -36,25 +36,41 @@ Built for **WoW Forever** (Interface `16001`).
 - **General buffs (optional, off by default)** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag).
 - **Use food and flasks by click** – for the Well Fed and Flask reminders:
   - **Left-click** uses the best matching item from your bags. The hint line shows which one ("Left-click: Smoked Desert Dumplings · Right-click: choose"), or "Not in bags · Right-click: mute" if you have none.
-  - **Right-click** (out of combat) opens a menu listing all matching items in your bags (icon, name, count) in the same order, with item tooltips; clicking one uses it. Below a separator are the usual mute options. In combat, right-click only shows the mute options.
-  - **Food** comes from a fixed list of WoW Forever cooking food that gives an XP buff (based on the beta, so it may still change). Only food you are high enough level for is offered. Best choice first: 1) food whose tooltip mentions an experience bonus, 2) score = category weight for your class × cooking skill level, 3) larger stack. Each class has its own category order (e.g. Warrior: Strength, Melee AP, Agility, Crit, Stamina; Priest: Spirit, Intellect, Spell Damage, Healing); categories not listed for your class count less, movement and profession food the least.
-  - **Flasks** are any flask in your bags (detected by item type, with a fallback list of the Classic flasks). The flask you used last (remembered per character) comes first, then higher item level. The addon also learns each flask's effect so that new flasks count as an active Flask buff.
+  - **Right-click** opens the reminder menu (see [Right-click menu](#right-click-menu-beta)) with all matching items in your bags.
+  - **Favorites (beta)** – click the star next to an item in the menu to mark it as a favorite (saved per character). Left-click on the reminder always uses a favorite if one is in your bags; with several favorites the normal order below decides. Favorites are listed at the top of the menu. Click the star again to remove the favorite.
+  - **Food** comes from a fixed list of WoW Forever cooking food that gives an XP buff (based on the beta, so it may still change). Only food you are high enough level for is offered. Best choice first (after favorites): 1) food whose tooltip mentions an experience bonus, 2) score = category weight for your class × cooking skill level, 3) larger stack. Each class has its own category order (e.g. Warrior: Strength, Melee AP, Agility, Crit, Stamina; Priest: Spirit, Intellect, Spell Damage, Healing); categories not listed for your class count less, movement and profession food the least.
+  - **Flasks** are any flask in your bags (detected by item type, with a fallback list of the Classic flasks). After favorites, the flask you used last (remembered per character) comes first, then higher item level. The addon also learns each flask's effect so that new flasks count as an active Flask buff.
   - Uses the "Left-click casts buff" option: when it is off, left-click does nothing and right-click only mutes.
 - **Eating countdown** – while you are eating (started from the reminder or directly from your bags; detected by the food's eating aura by spell ID or name, or by the generic "Food" or "Drink" aura) and are not yet Well Fed, the Well Fed reminder shows "Eating … 7 s", counting down the 10 seconds until the buff appears, then "Almost well fed …", with the hint "Stay seated". This does not trigger a chat message or sound. If you stand up before getting Well Fed, the normal reminder comes back (again without a new chat message or sound).
 - **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
-- **Right-click to mute** – right-click a reminder to mute it for 5, 15 or 60 minutes or for the rest of the session. Mutes can be cleared from the settings or with `/br unmute`.
+- **Right-click to mute** – right-click a reminder and pick 5, 15 or 60 minutes or the rest of the session in the menu. Mutes can be cleared from the settings or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
   - Directly castable: Priest (Fortitude, Inner Fire, Divine Spirit, Shadow Protection, Vampiric Embrace, Shadowform), Mage (Arcane Intellect), Druid (Mark of the Wild, Thorns), Hunter (Trueshot Aura), Death Knight (Horn of Winter).
   - **"Any" reminders** (Paladin aura/seal/blessing, Hunter aspect, Mage and Warlock armor, Shaman shield and weapon imbues, Warrior shout): the addon remembers per character which variant you used last – either from a spell you cast or from a matching aura you applied yourself – and left-click casts that variant (Greater Blessings are remembered as the matching single-target blessing). Until a variant has been remembered, left-click does nothing.
   - Not castable: Rogue poisons and Well-Rested. Well Fed and Flask use an item instead (see above).
   - Can be turned off in the settings ("Left-click casts buff", on by default).
-- **Hint line** – every reminder shows a small grey second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, "Left-click: <item> · Right-click: choose" for food and flasks, otherwise "Right-click: mute".
+- **Hint line** – in the Pardona and Classic styles, every reminder shows a small second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, "Left-click: <item> · Right-click: choose" for food and flasks, otherwise "Right-click: mute".
+  In the Compact style these hints are shown in the tooltip only.
 - **Combat behaviour** – reminders are secure buttons, so the list (including click targets of group buff lines) cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
 - **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock". While moving, left-click does not cast.
+- **Styles (beta)** – choose the look of the reminders and the right-click menu in the settings ("Style"). Switching applies immediately (in combat: when combat ends).
+  - **Pardona** (default) – dark purple gradient, gold border with rounded corners, colored status stripe on the left (red = missing, orange = low reagent, green = eating), icon with gold frame, golden title, grey-purple hint line.
+  - **Classic** – stone/brown background, square gold frame, title in WoW yellow, beige hint line.
+  - **Compact** – slim dark bars with a status stripe on the left and "missing" on the right; hints only in the tooltip. The extra option **Icons only** (only available with Compact) shows just the icons side by side; name and hints are in the tooltip.
 - **Pardona's Addons entry point (beta)** – see [below](#pardonas-addons-beta).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – German and English, picked automatically from the game client language.
+
+## Right-click menu (beta)
+
+Right-clicking a reminder opens one window in the selected style:
+
+- **Header** – the reminder's icon and title with a short line below (e.g. "Use an item or mute", the players missing a group buff, or the reagent count).
+- **Food in your bags / Flasks** (Well Fed and Flask reminders only, with "Left-click casts buff" on) – one line per matching item: item icon, name, an **XP** badge if the food gives an experience bonus, the food's category (e.g. Spirit), and the count on the right. The line that left-click on the reminder would use is marked "best choice". Click a line to use the item; hovering shows the highlight and the item tooltip. The star on the right of each line marks or unmarks the item as a favorite – it never uses the item. If nothing matching is in your bags, the section says so.
+- **Mute** – four buttons side by side: 5 min, 15 min, 60 min, Session.
+- **Close (Esc)** – the footer closes the window; Esc closes it as well, and it closes on its own when the mouse has left it for 2 seconds.
+- **In combat** only the header and the mute buttons are shown (the item lines are secure buttons and cannot be created or changed in combat). An open window with items closes when combat starts.
 
 ## Pardona's Addons (beta)
 

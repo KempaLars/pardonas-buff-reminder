@@ -23,11 +23,6 @@ if GetLocale() == "deDE" then
         NOT_LEARNED   = "nicht erlernt",
         MUTED         = "stumm %s",
         SESSION       = "Sitzung",
-        MUTE5         = "5 Min. stumm",
-        MUTE15        = "15 Min. stumm",
-        MUTE60        = "60 Min. stumm",
-        MUTESESSION   = "Für diese Sitzung stumm",
-        CANCEL        = "Abbrechen",
         RIGHTCLICK    = "Rechtsklick: stummschalten",
         ENABLED       = "Addon aktiv",
         INSTANCE_ONLY = "Allgemeine Buffs nur in Instanzen",
@@ -109,6 +104,33 @@ if GetLocale() == "deDE" then
         LEFTCLICK_GROUP = "Linksklick: Gruppenversion auf %s",
         LEFTCLICK_SINGLE = "Linksklick: Einzelversion auf %s",
         CTRLCLICK_SINGLE = "Strg+Linksklick: Einzelversion auf %s",
+        -- Stile
+        STYLE         = "Stil: %s",
+        STYLE_NAMES   = { pardona = "Pardona", classic = "Classic", compact = "Compact" },
+        ICONS_ONLY    = "Nur Icons",
+        SHORT_MISSING = "fehlt",
+        -- Rechtsklick-Menü
+        MENU_FOOD     = "Essen in den Taschen",
+        MENU_FLASK    = "Fläschchen",
+        MENU_MUTE     = "Stummschalten",
+        MUTE_5        = "5 Min",
+        MUTE_15       = "15 Min",
+        MUTE_60       = "60 Min",
+        MUTE_SESSION  = "Sitzung",
+        CLOSE_ESC     = "Schließen (Esc)",
+        BEST          = "beste Wahl",
+        NONE_IN_BAGS  = "Nichts in den Taschen",
+        SUB_ITEMS     = "Item benutzen oder stummschalten",
+        SUB_MUTE      = "Erinnerung stummschalten",
+        SUB_COMBAT    = "Im Kampf: nur Stummschalten",
+        FAV_ADD       = "Als Favorit markieren",
+        FAV_REMOVE    = "Favorit entfernen",
+        FOOD_CATS     = {
+            MeleeAP = "Nahkampf-Angriffskraft", SpellDamage = "Zauberschaden", Healing = "Heilung",
+            Stamina = "Ausdauer", Strength = "Stärke", Agility = "Beweglichkeit", Intellect = "Intelligenz",
+            Spirit = "Willenskraft", Crit = "Kritische Treffer", Armor = "Rüstung", Movement = "Bewegung",
+            Profession = "Beruf",
+        },
     }
 else
     L = {
@@ -122,11 +144,6 @@ else
         NOT_LEARNED   = "not learned",
         MUTED         = "muted %s",
         SESSION       = "session",
-        MUTE5         = "Mute 5 min",
-        MUTE15        = "Mute 15 min",
-        MUTE60        = "Mute 60 min",
-        MUTESESSION   = "Mute for the session",
-        CANCEL        = "Cancel",
         RIGHTCLICK    = "Right-click: mute",
         ENABLED       = "Addon enabled",
         INSTANCE_ONLY = "General buffs only in instances",
@@ -200,6 +217,31 @@ else
         LEFTCLICK_GROUP = "Left-click: group version on %s",
         LEFTCLICK_SINGLE = "Left-click: single version on %s",
         CTRLCLICK_SINGLE = "Ctrl+Left-click: single version on %s",
+        STYLE         = "Style: %s",
+        STYLE_NAMES   = { pardona = "Pardona", classic = "Classic", compact = "Compact" },
+        ICONS_ONLY    = "Icons only",
+        SHORT_MISSING = "missing",
+        MENU_FOOD     = "Food in your bags",
+        MENU_FLASK    = "Flasks",
+        MENU_MUTE     = "Mute",
+        MUTE_5        = "5 min",
+        MUTE_15       = "15 min",
+        MUTE_60       = "60 min",
+        MUTE_SESSION  = "Session",
+        CLOSE_ESC     = "Close (Esc)",
+        BEST          = "best choice",
+        NONE_IN_BAGS  = "None in your bags",
+        SUB_ITEMS     = "Use an item or mute",
+        SUB_MUTE      = "Mute this reminder",
+        SUB_COMBAT    = "In combat: mute only",
+        FAV_ADD       = "Mark as favorite",
+        FAV_REMOVE    = "Remove favorite",
+        FOOD_CATS     = {
+            MeleeAP = "Melee attack power", SpellDamage = "Spell damage", Healing = "Healing",
+            Stamina = "Stamina", Strength = "Strength", Agility = "Agility", Intellect = "Intellect",
+            Spirit = "Spirit", Crit = "Critical strike", Armor = "Armor", Movement = "Movement",
+            Profession = "Profession",
+        },
     }
 end
 
@@ -655,6 +697,8 @@ local DEFAULTS = {
     groupCheck   = true,       -- Gruppen-Buffs bei Party-/Raid-Mitgliedern prüfen
     groupMode    = "always",   -- "always" | "instance" (Dungeon & Raid) | "raid"
     clickCast    = true,   -- Linksklick auf Erinnerung zaubert den Buff
+    style        = "pardona",   -- Stil von Warnanzeige und Menü (STYLES)
+    iconsOnly    = false,       -- nur bei Stil "compact": nur Icons zeigen
 }
 
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -822,6 +866,7 @@ end
 ---------------------------------------------------------------------------
 local bagCounts = {}      -- Item-ID -> Anzahl in den Taschen (Scan bei BAG_UPDATE_DELAYED)
 local foodScore = {}      -- Item-ID -> Kategorie-Gewicht x Kochkunst-Stufe (Klasse des Spielers)
+local foodCat = {}        -- Item-ID -> FOOD-Kategorie mit dem höchsten Score (Anzeige im Menü)
 local xpCache = {}        -- Item-ID -> true/false: Tooltip nennt XP-Bonus (nur geladene Items)
 local flaskBySpell = {}   -- Spell-ID des Fläschchen-Effekts -> Item-ID
 local flaskEntry          -- Eintrag gen_flask (idSet wird zur Laufzeit ergänzt)
@@ -916,10 +961,14 @@ local function BuildFoodScores(class)
         weights.Healing = math.max(weights.Healing, FOOD_HEALING_MIN[class])
     end
     wipe(foodScore)
+    wipe(foodCat)
     for cat, list in pairs(FOOD) do
         for _, v in ipairs(list) do
             local score = weights[cat] * v[2]
-            if not foodScore[v[1]] or score > foodScore[v[1]] then foodScore[v[1]] = score end
+            if not foodScore[v[1]] or score > foodScore[v[1]] then
+                foodScore[v[1]] = score
+                foodCat[v[1]] = cat
+            end
         end
     end
 end
@@ -997,20 +1046,24 @@ local function ScanBags()
     end
 end
 
--- passende Items aus den Taschen, beste Wahl zuerst: { { id, count }, ... }
+-- passende Items aus den Taschen, beste Wahl zuerst: { { id, count, fav, ... }, ... }
+-- Favoriten (pro Charakter) stehen immer vorn; untereinander gilt die normale Sortierung.
 local function ItemChoices(e)
     local list = {}
+    local favs = cdb and cdb.favorites or {}
     if e.itemKind == "food" then
         local lvl = UnitLevel("player") or 1
         for id, n in pairs(bagCounts) do
             if foodScore[id] then
                 local _, minLevel = ItemLevels(id)
                 if not minLevel or minLevel <= lvl then
-                    list[#list + 1] = { id = id, count = n, xp = HasXPBonus(id), score = foodScore[id] }
+                    list[#list + 1] = { id = id, count = n, xp = HasXPBonus(id), score = foodScore[id],
+                        cat = foodCat[id], fav = favs[id] == true }
                 end
             end
         end
         table.sort(list, function(a, b)
+            if a.fav ~= b.fav then return a.fav end
             if a.xp ~= b.xp then return a.xp end
             if a.score ~= b.score then return a.score > b.score end
             if a.count ~= b.count then return a.count > b.count end
@@ -1020,10 +1073,11 @@ local function ItemChoices(e)
         local last = cdb and cdb.lastFlask
         for id, n in pairs(bagCounts) do
             if IsFlaskItem(id) then
-                list[#list + 1] = { id = id, count = n, ilvl = ItemLevels(id) or 0 }
+                list[#list + 1] = { id = id, count = n, ilvl = ItemLevels(id) or 0, fav = favs[id] == true }
             end
         end
         table.sort(list, function(a, b)
+            if a.fav ~= b.fav then return a.fav end
             if (a.id == last) ~= (b.id == last) then return a.id == last end
             if a.ilvl ~= b.ilvl then return a.ilvl > b.ilvl end
             if a.count ~= b.count then return a.count > b.count end
@@ -1597,15 +1651,171 @@ local function MissingNames(e)
 end
 
 ---------------------------------------------------------------------------
+-- Stile (Warnanzeige + Rechtsklick-Menü)
+-- Alle Farben, Größen und Abstände stehen hier; ein neuer Stil = neuer Eintrag in
+-- STYLES + Name in STYLE_ORDER + L.STYLE_NAMES. Farben: { r, g, b [, a] }.
+-- Texturen: nur Standard-UI-Elemente (Backdrop-Kanten, WHITE8X8, Highlight).
+---------------------------------------------------------------------------
+local WHITE = "Interface\\Buttons\\WHITE8X8"
+local ROUND_EDGE = "Interface\\Tooltips\\UI-Tooltip-Border"
+local HIGHLIGHT = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
+
+-- Farbe des Statusstreifens links je Zeilenzustand (gemeinsam für alle Stile)
+local STATUS_COLORS = {
+    missing = { 0.9, 0.15, 0.15 },   -- Buff fehlt
+    low     = { 1, 0.55, 0.1 },      -- Reagenz knapp
+    eating  = { 0.35, 0.8, 0.3 },    -- isst gerade
+    neutral = { 0.55, 0.55, 0.55 },  -- Verschiebe-Modus
+}
+
+local STYLE_ORDER = { "pardona", "classic", "compact" }
+local STYLES = {
+    pardona = {
+        -- Warnzeile
+        row = { width = 300, height = 42, heightGroup = 56, gap = 3, pad = 6 },
+        edge = ROUND_EDGE, edgeSize = 12, inset = 3,          -- abgerundete Ecken
+        bgTop = { 0.20, 0.09, 0.30, 0.94 }, bgBottom = { 0.08, 0.03, 0.13, 0.94 },   -- Verlauf
+        border = { 0.85, 0.68, 0.25, 1 },                     -- Goldrand
+        stripe = 4, status = STATUS_COLORS,
+        icon = 30, iconBorder = { 0.85, 0.68, 0.25, 1 },
+        titleFont = "GameFontNormal", titleColor = { 1, 0.82, 0.25 },
+        hintFont = "GameFontDisableSmall", hintColor = { 0.66, 0.58, 0.76 },
+        namesColor = { 0.9, 0.88, 0.95 },
+        hints = true,          -- Hinweiszeile in der Zeile (false: nur im Tooltip)
+        rightText = false,     -- Kurztext "fehlt" rechtsbündig
+        iconsOnly = false,     -- Option "Nur Icons" verfügbar
+        -- Rechtsklick-Menü
+        menu = {
+            width = 300, pad = 10, gap = 8, headerIcon = 28, itemHeight = 30, itemTwoLines = true,
+            sectionColor = { 0.85, 0.68, 0.25 }, sepColor = { 0.85, 0.68, 0.25, 0.35 },
+            textColor = { 0.95, 0.93, 1 }, subColor = { 0.66, 0.58, 0.76 },
+            buttonBg = { 0.28, 0.14, 0.40, 0.9 }, buttonBorder = { 0.85, 0.68, 0.25, 0.8 },
+            xpBg = { 0.45, 0.25, 0.65, 1 }, starOff = 0.35,
+        },
+    },
+    classic = {
+        row = { width = 300, height = 42, heightGroup = 56, gap = 3, pad = 6 },
+        edge = WHITE, edgeSize = 2, inset = 2,                -- kantiger Goldrahmen
+        bgTop = { 0.27, 0.21, 0.14, 0.95 }, bgBottom = { 0.17, 0.13, 0.09, 0.95 },  -- Stein/Braun
+        border = { 0.78, 0.62, 0.22, 1 },
+        stripe = 0, status = STATUS_COLORS,
+        icon = 30, iconBorder = { 0, 0, 0, 1 },
+        titleFont = "GameFontNormal", titleColor = { 1, 0.82, 0 },   -- WoW-Gelb
+        hintFont = "GameFontHighlightSmall", hintColor = { 0.87, 0.80, 0.64 },  -- beige
+        namesColor = { 1, 1, 1 },
+        hints = true, rightText = false, iconsOnly = false,
+        menu = {
+            width = 300, pad = 10, gap = 8, headerIcon = 28, itemHeight = 30, itemTwoLines = true,
+            sectionColor = { 1, 0.82, 0 }, sepColor = { 0.78, 0.62, 0.22, 0.5 },
+            textColor = { 1, 1, 1 }, subColor = { 0.87, 0.80, 0.64 },
+            buttonBg = { 0.36, 0.28, 0.18, 0.95 }, buttonBorder = { 0.78, 0.62, 0.22, 1 },
+            xpBg = { 0.15, 0.45, 0.15, 1 }, starOff = 0.35,
+        },
+    },
+    compact = {
+        row = { width = 220, height = 22, heightGroup = 22, gap = 2, pad = 4 },
+        edge = WHITE, edgeSize = 1, inset = 1,
+        bgTop = { 0.06, 0.06, 0.08, 0.88 }, bgBottom = nil,   -- schmale dunkle Balken
+        border = { 0, 0, 0, 0.9 },
+        stripe = 3, status = STATUS_COLORS,
+        icon = 16, iconBorder = nil,
+        titleFont = "GameFontHighlightSmall", titleColor = { 1, 1, 1 },
+        hintFont = "GameFontDisableSmall", hintColor = { 0.6, 0.6, 0.6 },
+        namesColor = { 0.8, 0.8, 0.8 },
+        hints = false, rightText = true, iconsOnly = true,
+        menu = {
+            width = 250, pad = 6, gap = 5, headerIcon = 20, itemHeight = 20, itemTwoLines = false,
+            sectionColor = { 0.8, 0.8, 0.8 }, sepColor = { 1, 1, 1, 0.12 },
+            textColor = { 1, 1, 1 }, subColor = { 0.6, 0.6, 0.6 },
+            buttonBg = { 0.14, 0.14, 0.17, 0.95 }, buttonBorder = { 0, 0, 0, 1 },
+            xpBg = { 0.25, 0.45, 0.25, 1 }, starOff = 0.3,
+        },
+    },
+}
+
+local function CurrentStyle()
+    return STYLES[db and db.style] or STYLES.pardona
+end
+
+local function IconsOnly(st)
+    return st.iconsOnly and db ~= nil and db.iconsOnly == true
+end
+
+local function SetColor(obj, method, c)
+    if c then obj[method](obj, c[1], c[2], c[3], c[4] or 1) end
+end
+
+-- Hintergrund: Verlauf (bgBottom gesetzt) oder einfarbig
+local function SetGradientBg(tex, top, bottom)
+    if bottom and tex.SetGradient and CreateColor then
+        tex:SetColorTexture(1, 1, 1, 1)
+        local ok = pcall(tex.SetGradient, tex, "VERTICAL",
+            CreateColor(bottom[1], bottom[2], bottom[3], bottom[4] or 1),
+            CreateColor(top[1], top[2], top[3], top[4] or 1))
+        if ok then return end
+    end
+    tex:SetColorTexture(top[1], top[2], top[3], top[4] or 1)
+    tex:SetVertexColor(1, 1, 1, 1)   -- evtl. alten Verlauf zurücksetzen
+end
+
+-- Rahmen (Backdrop-Kante) + eigener Hintergrund-Texture innerhalb der Kante
+local function StyleFrame(f, st, bgTex)
+    f:SetBackdrop({ edgeFile = st.edge, edgeSize = st.edgeSize })
+    SetColor(f, "SetBackdropBorderColor", st.border)
+    bgTex:ClearAllPoints()
+    bgTex:SetPoint("TOPLEFT", st.inset, -st.inset)
+    bgTex:SetPoint("BOTTOMRIGHT", -st.inset, st.inset)
+    SetGradientBg(bgTex, st.bgTop, st.bgBottom)
+end
+
+-- Schriftobjekt per Name (z. B. "GameFontNormal")
+local function SetFont(fs, name)
+    fs:SetFontObject(_G[name] or name)
+end
+
+-- Rand um ein Icon (Texture hinter dem Icon, 1 px größer)
+local function StyleIconBorder(border, icon, color)
+    border:ClearAllPoints()
+    border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+    if color then
+        border:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+        border:Show()
+    else
+        border:Hide()
+    end
+end
+
+-- Favoriten-Stern: Atlas des Spiels (Sammlungen), sonst Text "*"
+local STAR_ATLASES = { "collections-icon-favorites", "PetJournal-FavoritesIcon" }
+local starAtlas   -- false = keiner verfügbar, nil = noch nicht geprüft
+local function StarAtlas()
+    if starAtlas ~= nil then return starAtlas or nil end
+    starAtlas = false
+    if C_Texture and C_Texture.GetAtlasInfo then
+        for _, a in ipairs(STAR_ATLASES) do
+            local ok, info = pcall(C_Texture.GetAtlasInfo, a)
+            if ok and info then starAtlas = a; break end
+        end
+    end
+    return starAtlas or nil
+end
+
+-- Stern als Inline-Markup für FontStrings
+local function StarMarkup(size)
+    local a = StarAtlas()
+    if a then return ("|A:%s:%d:%d|a"):format(a, size, size) end
+    return "*"
+end
+
+---------------------------------------------------------------------------
 -- Einblendung (Liste fehlender Buffs)
 ---------------------------------------------------------------------------
 -- Kampfsperre: Die Zeilen sind Secure Buttons. Sie und ihr Parent (anchor) werden in
--- InCombatLockdown() weder gezeigt/versteckt, verschoben noch umattributiert.
+-- InCombatLockdown() weder gezeigt/versteckt, verschoben, umgestaltet noch umattributiert.
 -- Änderungen an der Liste werden nach dem Kampf (PLAYER_REGEN_ENABLED) angewendet.
-local ROW_HEIGHT = 42
-
 local anchor = CreateFrame("Frame", "BuffReminderAnchor", UIParent)
-anchor:SetSize(300, ROW_HEIGHT)
+anchor:SetSize(300, 42)
 anchor:SetFrameStrata("HIGH")
 anchor:SetClampedToScreen(true)
 anchor:SetMovable(true)
@@ -1638,6 +1848,8 @@ end
 
 local rows = {}
 local OpenMuteMenu -- forward
+local styleGen = 0      -- erhöht bei jedem Stilwechsel; Zeilen mit älterem Stand werden neu gestaltet
+local stylePending = false
 
 -- Secure Buttons im Mainline-Client lösen je nach CVar ActionButtonUseKeyDown beim
 -- Drücken ODER beim Loslassen aus. Daher werden beide Phasen registriert; die secure
@@ -1689,53 +1901,102 @@ local function SetRowAction(r, a)
     r:SetAttribute("ctrl-unit1", a.ctrlUnit)
 end
 
--- Zeilenhöhe: 2 Textzeilen (Standard) oder 3 (Gruppen-Zeile mit Namenszeile)
-local ROW_HEIGHT_GROUP = 56
+-- Zeile im aktuellen Stil gestalten (nur außerhalb des Kampfes). Gruppen-Zeilen haben
+-- in Stilen mit Hinweiszeile 3 Textzeilen (Namenszeile), sonst 2; Compact ist einzeilig.
+local function LayoutRow(r)
+    local st = CurrentStyle()
+    local rs = st.row
+    local iconsOnly = IconsOnly(st)
+    local three = r.threeLines and st.hints
+    local h = three and rs.heightGroup or rs.height
+    r.styleGen = styleGen
+    r.layoutThree = r.threeLines
+    if iconsOnly then r:SetSize(h + st.stripe, h) else r:SetSize(rs.width, h) end
+    StyleFrame(r, st, r.bg)
+
+    r.stripe:ClearAllPoints()
+    r.stripe:SetPoint("TOPLEFT", st.inset, -st.inset)
+    r.stripe:SetPoint("BOTTOMLEFT", st.inset, st.inset)
+    if st.stripe > 0 then r.stripe:SetWidth(st.stripe); r.stripe:Show() else r.stripe:Hide() end
+
+    r.icon:SetSize(st.icon, st.icon)
+    r.icon:ClearAllPoints()
+    if iconsOnly then
+        r.icon:SetPoint("CENTER", st.stripe / 2, 0)
+    else
+        r.icon:SetPoint("LEFT", st.inset + st.stripe + rs.pad, 0)
+    end
+    StyleIconBorder(r.iconBorder, r.icon, st.iconBorder)
+
+    SetFont(r.text, st.titleFont)
+    SetColor(r.text, "SetTextColor", st.titleColor)
+    SetFont(r.hint, st.hintFont)
+    SetColor(r.hint, "SetTextColor", st.hintColor)
+    SetColor(r.names, "SetTextColor", st.namesColor)
+    SetColor(r.right, "SetTextColor", st.status.missing)
+    r.text:ClearAllPoints(); r.hint:ClearAllPoints(); r.names:ClearAllPoints(); r.right:ClearAllPoints()
+
+    if iconsOnly then
+        r.text:Hide(); r.hint:Hide(); r.names:Hide(); r.right:Hide()
+    elseif not st.hints then
+        -- einzeilig: Titel links, Kurztext rechts; Hinweise nur im Tooltip
+        r.right:SetPoint("RIGHT", -(st.inset + rs.pad), 0)
+        r.text:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
+        r.text:SetPoint("RIGHT", r.right, "LEFT", -6, 0)
+        r.text:Show(); r.right:Show(); r.hint:Hide(); r.names:Hide()
+    else
+        local top, mid, bottom = 7, 0, -8
+        if three then top, mid, bottom = 14, 0, -14 end
+        r.text:SetPoint("LEFT", r.icon, "RIGHT", 10, top)
+        r.text:SetPoint("RIGHT", -8, top)
+        r.names:SetPoint("LEFT", r.icon, "RIGHT", 10, mid)
+        r.names:SetPoint("RIGHT", -8, mid)
+        r.hint:SetPoint("LEFT", r.icon, "RIGHT", 10, bottom)
+        r.hint:SetPoint("RIGHT", -8, bottom)
+        r.text:Show(); r.hint:Show(); r.right:Hide()
+        if three then r.names:Show() else r.names:Hide() end
+    end
+end
+
+-- Zeile i anordnen: untereinander, bei "Nur Icons" nebeneinander
+local function PositionRow(i)
+    local r = rows[i]
+    local st = CurrentStyle()
+    r:ClearAllPoints()
+    if i == 1 then
+        r:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
+    elseif IconsOnly(st) then
+        r:SetPoint("TOPLEFT", rows[i - 1], "TOPRIGHT", st.row.gap, 0)
+    else
+        r:SetPoint("TOPLEFT", rows[i - 1], "BOTTOMLEFT", 0, -st.row.gap)
+    end
+end
 
 local function SetRowLines(r, three)
-    if r.threeLines == three then return end
     r.threeLines = three
-    local top, mid, bottom = 7, 0, -8
-    if three then top, mid, bottom = 14, 0, -14 end
-    r:SetHeight(three and ROW_HEIGHT_GROUP or ROW_HEIGHT)
-    r.text:SetPoint("LEFT", r.icon, "RIGHT", 10, top)
-    r.text:SetPoint("RIGHT", -8, top)
-    r.names:SetPoint("LEFT", r.icon, "RIGHT", 10, mid)
-    r.names:SetPoint("RIGHT", -8, mid)
-    r.hint:SetPoint("LEFT", r.icon, "RIGHT", 10, bottom)
-    r.hint:SetPoint("RIGHT", -8, bottom)
-    if three then r.names:Show() else r.names:Hide() end
+    if r.layoutThree ~= three or r.styleGen ~= styleGen then LayoutRow(r) end
+end
+
+local function SetRowStatus(r, status)
+    local c = CurrentStyle().status[status] or STATUS_COLORS.missing
+    r.stripe:SetColorTexture(c[1], c[2], c[3], 1)
 end
 
 local function GetRow(i)
     if rows[i] then return rows[i] end
     local r = CreateFrame("Button", nil, anchor, "SecureActionButtonTemplate, BackdropTemplate")
-    r:SetSize(300, ROW_HEIGHT)
-    r:SetBackdrop({
-        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    r:SetBackdropColor(0.08, 0.04, 0, 0.75)
-    r:SetBackdropBorderColor(1, 0.7, 0.1, 0.9)
-
+    r.bg = r:CreateTexture(nil, "BACKGROUND")
+    r.stripe = r:CreateTexture(nil, "BORDER")
+    r.iconBorder = r:CreateTexture(nil, "ARTWORK", nil, -1)
     r.icon = r:CreateTexture(nil, "ARTWORK")
-    r.icon:SetSize(30, 30)
-    r.icon:SetPoint("LEFT", 6, 0)
     r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
     r.text = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    r.text:SetPoint("LEFT", r.icon, "RIGHT", 10, 7)
-    r.text:SetPoint("RIGHT", -8, 7)
     r.text:SetJustifyH("LEFT")
     r.text:SetWordWrap(false)
-    r.text:SetTextColor(1, 0.8, 0.2)
 
-    -- Hinweiszeile (klein, grau) unter dem Haupttext
+    -- Hinweiszeile (klein) unter dem Haupttext
     r.hint = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    r.hint:SetPoint("LEFT", r.icon, "RIGHT", 10, -8)
-    r.hint:SetPoint("RIGHT", -8, -8)
     r.hint:SetJustifyH("LEFT")
     r.hint:SetWordWrap(false)
 
@@ -1743,16 +2004,17 @@ local function GetRow(i)
     r.names = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     r.names:SetJustifyH("LEFT")
     r.names:SetWordWrap(false)
-    r.names:Hide()
+
+    -- Kurztext rechts (Compact: "fehlt")
+    r.right = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.right:SetJustifyH("RIGHT")
+
     r.threeLines = false
+    rows[i] = r
+    LayoutRow(r)
+    PositionRow(i)
 
-    if i == 1 then
-        r:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
-    else
-        r:SetPoint("TOPLEFT", rows[i - 1], "BOTTOMLEFT", 0, -3)
-    end
-
-    -- Linksklick = secure Aktion (Zauber auf sich selbst), Rechtsklick = Stumm-Menü
+    -- Linksklick = secure Aktion (Zauber auf sich selbst), Rechtsklick = Menü
     r:SetAttribute("unit1", "player")
     if HasKeyDownCVar() then
         r:RegisterForClicks("AnyUp", "AnyDown")
@@ -1778,9 +2040,26 @@ local function GetRow(i)
         if unlocked and not InCombatLockdown() then SavePoint() end
     end)
     r:SetScript("OnEnter", function(self)
-        if not self.entry then return end
+        local st = CurrentStyle()
+        if not self.entry then
+            -- Verschiebe-Modus: bei "Nur Icons" steht der Text nur im Tooltip
+            if IconsOnly(st) and unlocked then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(L.DRAG, 1, 0.82, 0)
+                GameTooltip:Show()
+            end
+            return
+        end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(EntryLabel(self.entry), 1, 0.82, 0)
+        -- Stile ohne Hinweiszeile: Zeilentext/Namen im Tooltip
+        if not st.hints or IconsOnly(st) then
+            if self.text:GetText() and self.text:GetText() ~= EntryLabel(self.entry) then
+                GameTooltip:AddLine(self.text:GetText(), 1, 1, 1)
+            end
+            if self.entry.groupActive then GameTooltip:AddLine(MissingNames(self.entry), 1, 1, 1) end
+            if self.hintText then GameTooltip:AddLine(self.hintText, 0.7, 0.7, 0.7) end
+        end
         local a = self.action or {}
         if a.ctrlSpell then
             -- Gruppen-Zeile: Ziel nennen
@@ -1800,34 +2079,42 @@ local function GetRow(i)
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    rows[i] = r
     return r
+end
+
+local function SetRowHint(r, text)
+    r.hintText = text
+    r.hint:SetText(text or "")
 end
 
 -- dragMode: Verschiebe-Modus (eine Zeile "Ziehen zum Verschieben", Linksklick zaubert nicht)
 local function ShowRows(list, dragMode)
     if InCombatLockdown() then return end   -- Secure Frames: nur außerhalb des Kampfes
+    local st = CurrentStyle()
     for i, e in ipairs(list) do
         local r = GetRow(i)
         r.icon:SetTexture(EntryIcon(e))
+        r.right:SetText("")
         if dragMode then
             r.entry = nil
             SetRowAction(r, nil)
             SetRowLines(r, false)
+            SetRowStatus(r, "neutral")
             r.text:SetText(L.DRAG)
-            r.hint:SetText("")
+            SetRowHint(r, nil)
         elseif e.groupActive then
             -- Gruppen-Zeile: Anzahl, Namen, Gruppen-/Einzel-Klick auf den ersten Spieler ohne Buff
             r.entry = e
             local a = GroupActionFor(e)
             SetRowAction(r, a)
             SetRowLines(r, true)
+            SetRowStatus(r, "missing")
             r.text:SetText(L.GROUP_MISSING:format(EntryLabel(e), #(e.groupMissing or {})))
             r.names:SetText(MissingNames(e))
             if a then
-                r.hint:SetText(a.isGroup and L.HINT_GROUP or L.HINT_SINGLE)
+                SetRowHint(r, a.isGroup and L.HINT_GROUP or L.HINT_SINGLE)
             else
-                r.hint:SetText(L.HINT_MUTE)
+                SetRowHint(r, L.HINT_MUTE)
             end
         else
             r.entry = e
@@ -1842,22 +2129,30 @@ local function ShowRows(list, dragMode)
             end
             SetRowAction(r, (spell or item) and { spell = spell, item = item } or nil)
             if e.kind == "reagent" then
+                SetRowStatus(r, "low")
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
             elseif e.eatStart then
+                SetRowStatus(r, "eating")
                 r.text:SetText(EatText(e))   -- Ess-Countdown (OnUpdate des anchor zählt weiter)
             else
-                r.text:SetText(L.MISSING:format(EntryLabel(e)))
+                SetRowStatus(r, "missing")
+                if st.rightText then
+                    r.text:SetText(EntryLabel(e))
+                    r.right:SetText(L.SHORT_MISSING)
+                else
+                    r.text:SetText(L.MISSING:format(EntryLabel(e)))
+                end
             end
             if e.eatStart then
-                r.hint:SetText(L.HINT_EATING)
+                SetRowHint(r, L.HINT_EATING)
             elseif spell then
-                r.hint:SetText(L.HINT_CAST)
+                SetRowHint(r, L.HINT_CAST)
             elseif item then
-                r.hint:SetText(L.HINT_ITEM:format(ItemName(item)))
+                SetRowHint(r, L.HINT_ITEM:format(ItemName(item)))
             elseif noItem then
-                r.hint:SetText(L.HINT_NOITEM)
+                SetRowHint(r, L.HINT_NOITEM)
             else
-                r.hint:SetText(L.HINT_MUTE)
+                SetRowHint(r, L.HINT_MUTE)
             end
         end
         r:Show()
@@ -1897,51 +2192,66 @@ local function PlayAlertSound()
 end
 
 ---------------------------------------------------------------------------
--- Rechtsklick-Menü (Stummschalten, bei Essen/Fläschchen mit Item-Auswahl darüber)
--- Die Item-Auswahl (itemPanel) enthält Secure Buttons und ist daher ein eigener
--- Frame: Sie wird nur außerhalb des Kampfes gezeigt, befüllt und versteckt. Das
--- Stumm-Menü (menu) ist unsicher und funktioniert auch im Kampf; mit Item-Auswahl
--- hängt es ohne Titel unter dem itemPanel.
+-- Rechtsklick-Menü: ein Fenster mit Kopf, Item-Auswahl (nur Essen/Fläschchen),
+-- Stummschalten und Fußzeile.
+-- Das Fenster (menu) ist unsicher und funktioniert auch im Kampf. Die Item-Zeilen sind
+-- Secure Buttons; sie liegen in einem eigenen Frame (itemPanel, Parent UIParent, NICHT
+-- an menu verankert), der über den Item-Abschnitt des Fensters gelegt wird. So wird
+-- menu nie geschützt. itemPanel wird nur außerhalb des Kampfes gezeigt, befüllt und
+-- versteckt; bei Kampfbeginn schließt CloseItemPanelForCombat beides.
+-- Die Favoriten-Sterne sind unsichere Buttons im menu neben den Item-Zeilen.
 ---------------------------------------------------------------------------
-local MENU_WIDTH = 230
-local MENU_BACKDROP = {
-    bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    tile = true, tileSize = 16, edgeSize = 14,
-    insets = { left = 3, right = 3, top = 3, bottom = 3 },
-}
+local MAX_ITEM_CHOICES = 10
+local STAR_SIZE = 16
 
-local menu = CreateFrame("Frame", "BuffReminderMuteMenu", UIParent, "BackdropTemplate")
+local menu = CreateFrame("Frame", "BuffReminderMenu", UIParent, "BackdropTemplate")
 menu:SetFrameStrata("DIALOG")
-menu:SetClampedToScreen(true)
 menu:EnableMouse(true)
 menu:Hide()
-menu:SetBackdrop(MENU_BACKDROP)
-menu:SetBackdropColor(0, 0, 0, 0.92)
-tinsert(UISpecialFrames, "BuffReminderMuteMenu")   -- ESC schließt
+tinsert(UISpecialFrames, "BuffReminderMenu")   -- Esc schließt
+menu.bg = menu:CreateTexture(nil, "BACKGROUND")
 
+menu.iconBorder = menu:CreateTexture(nil, "ARTWORK", nil, -1)
+menu.icon = menu:CreateTexture(nil, "ARTWORK")
+menu.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 menu.title = menu:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-menu.title:SetPoint("TOPLEFT", 10, -9)
-menu.title:SetPoint("RIGHT", -10, 0)
 menu.title:SetJustifyH("LEFT")
+menu.title:SetWordWrap(false)
+menu.sub = menu:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+menu.sub:SetJustifyH("LEFT")
+menu.sub:SetWordWrap(false)
 
-local MENU_OPTIONS = {
-    { L.MUTE5, 300 }, { L.MUTE15, 900 }, { L.MUTE60, 3600 },
-    { L.MUTESESSION, math.huge }, { L.CANCEL, nil },
+local function MenuText(font)
+    local fs = menu:CreateFontString(nil, "OVERLAY", font)
+    fs:SetJustifyH("LEFT")
+    return fs
+end
+menu.itemHead = MenuText("GameFontNormalSmall")
+menu.itemNone = MenuText("GameFontDisableSmall")
+menu.muteHead = MenuText("GameFontNormalSmall")
+menu.seps = {}
+for i = 1, 3 do menu.seps[i] = menu:CreateTexture(nil, "ARTWORK") end
+
+-- kleine Schaltfläche im Stil (Rahmen + Hintergrund + Text)
+local function MenuButton(text, onClick)
+    local b = CreateFrame("Button", nil, menu, "BackdropTemplate")
+    b.bg = b:CreateTexture(nil, "BACKGROUND")
+    b:SetHighlightTexture(HIGHLIGHT, "ADD")
+    b.label = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.label:SetPoint("CENTER")
+    b.label:SetText(text)
+    b:SetScript("OnClick", onClick)
+    return b
+end
+
+local MUTE_OPTIONS = {
+    { L.MUTE_5, 300 }, { L.MUTE_15, 900 }, { L.MUTE_60, 3600 }, { L.MUTE_SESSION, math.huge },
 }
-menu.buttons = {}
-for i, opt in ipairs(MENU_OPTIONS) do
-    local b = CreateFrame("Button", nil, menu)
-    b:SetSize(MENU_WIDTH - 12, 18)
-    menu.buttons[i] = b
-    b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-    local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    fs:SetPoint("LEFT", 6, 0)
-    fs:SetText(opt[1])
-    if not opt[2] then fs:SetTextColor(0.7, 0.7, 0.7) end
-    b:SetScript("OnClick", function()
-        if opt[2] and menu.key then
-            muted[menu.key] = (opt[2] == math.huge) and math.huge or (GetTime() + opt[2])
+menu.muteButtons = {}
+for i, opt in ipairs(MUTE_OPTIONS) do
+    menu.muteButtons[i] = MenuButton(opt[1], function()
+        if menu.entry then
+            muted[menu.entry.key] = (opt[2] == math.huge) and math.huge or (GetTime() + opt[2])
             NoteDeferred()
             Evaluate()
         end
@@ -1949,59 +2259,42 @@ for i, opt in ipairs(MENU_OPTIONS) do
     end)
 end
 
--- mit Titel (eigenständig) oder ohne (unter der Item-Auswahl)
-local function LayoutMenu(withTitle)
-    local top = withTitle and -26 or -8
-    for i, b in ipairs(menu.buttons) do
-        b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", 6, top - (i - 1) * 19)
-    end
-    if withTitle then menu.title:Show() else menu.title:Hide() end
-    menu:SetSize(MENU_WIDTH, -top + #MENU_OPTIONS * 19 + 8)
-end
-LayoutMenu(true)
+menu.close = CreateFrame("Button", nil, menu)
+menu.close:SetHighlightTexture(HIGHLIGHT, "ADD")
+menu.close.label = menu.close:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+menu.close.label:SetPoint("CENTER")
+menu.close.label:SetText(L.CLOSE_ESC)
+menu.close:SetScript("OnClick", function() menu:Hide() end)
 
--- Item-Auswahl (Secure Buttons: type "item")
-local MAX_ITEM_CHOICES = 12
-local itemPanel = CreateFrame("Frame", "BuffReminderItemMenu", UIParent, "BackdropTemplate")
+-- Item-Zeilen (Secure Buttons: type "item")
+local itemPanel = CreateFrame("Frame", "BuffReminderItemMenu", UIParent)
 itemPanel:SetFrameStrata("DIALOG")
-itemPanel:SetClampedToScreen(true)
-itemPanel:EnableMouse(true)
 itemPanel:Hide()
-itemPanel:SetBackdrop(MENU_BACKDROP)
-itemPanel:SetBackdropColor(0, 0, 0, 0.92)
 itemPanel.buttons = {}
+menu.stars = {}
 
-itemPanel.title = itemPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-itemPanel.title:SetPoint("TOPLEFT", 10, -9)
-itemPanel.title:SetPoint("RIGHT", -10, 0)
-itemPanel.title:SetJustifyH("LEFT")
-
--- Trenner zu den Stumm-Optionen
-itemPanel.sep = itemPanel:CreateTexture(nil, "ARTWORK")
-itemPanel.sep:SetColorTexture(1, 0.8, 0.2, 0.35)
-itemPanel.sep:SetHeight(1)
-itemPanel.sep:SetPoint("BOTTOMLEFT", 10, 6)
-itemPanel.sep:SetPoint("BOTTOMRIGHT", -10, 6)
+local LayoutMenu -- forward
 
 local function GetItemButton(i)
     if itemPanel.buttons[i] then return itemPanel.buttons[i] end
     local b = CreateFrame("Button", nil, itemPanel, "SecureActionButtonTemplate")
-    b:SetSize(MENU_WIDTH - 12, 20)
-    b:SetPoint("TOPLEFT", 6, -26 - (i - 1) * 21)
-    b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+    b:SetHighlightTexture(HIGHLIGHT, "ADD")
+    b.iconBorder = b:CreateTexture(nil, "ARTWORK", nil, -1)
     b.icon = b:CreateTexture(nil, "ARTWORK")
-    b.icon:SetSize(16, 16)
-    b.icon:SetPoint("LEFT", 4, 0)
     b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     b.count = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    b.count:SetPoint("RIGHT", -6, 0)
     b.count:SetJustifyH("RIGHT")
     b.name = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, 0)
-    b.name:SetPoint("RIGHT", b.count, "LEFT", -6, 0)
     b.name:SetJustifyH("LEFT")
     b.name:SetWordWrap(false)
+    b.xpBg = b:CreateTexture(nil, "ARTWORK")
+    b.xp = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    b.xp:SetText("XP")
+    b.xpBg:SetPoint("TOPLEFT", b.xp, "TOPLEFT", -3, 2)
+    b.xpBg:SetPoint("BOTTOMRIGHT", b.xp, "BOTTOMRIGHT", 3, -2)
+    b.info = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    b.info:SetJustifyH("LEFT")
+    b.info:SetWordWrap(false)
     b:SetAttribute("type", "item")
     if HasKeyDownCVar() then
         b:RegisterForClicks("AnyUp", "AnyDown")
@@ -2010,7 +2303,7 @@ local function GetItemButton(i)
     end
     b:SetScript("PostClick", function(self, _, down)
         if not IsActionPhase(down) then return end
-        if itemPanel.entry and itemPanel.entry.itemKind == "flask" then cdb.lastFlask = self.itemID end
+        if menu.entry and menu.entry.itemKind == "flask" then cdb.lastFlask = self.itemID end
         menu:Hide()   -- schließt auch das itemPanel
     end)
     -- Item-Tooltip beim Überfahren. HookScript statt SetScript: ergänzt nur die Anzeige,
@@ -2028,55 +2321,299 @@ local function GetItemButton(i)
     return b
 end
 
--- Tooltip ausblenden, falls er zu einem Button der Item-Auswahl gehört
-local function HideItemTooltip()
+-- Favoriten-Stern (unsicher, Kind von menu, neben der Item-Zeile): löst nie ein Item aus
+local function GetStar(i)
+    if menu.stars[i] then return menu.stars[i] end
+    local s = CreateFrame("Button", nil, menu)
+    s:SetSize(STAR_SIZE + 4, STAR_SIZE + 4)
+    s.tex = s:CreateTexture(nil, "ARTWORK")
+    s.tex:SetSize(STAR_SIZE, STAR_SIZE)
+    s.tex:SetPoint("CENTER")
+    s.text = s:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    s.text:SetPoint("CENTER")
+    s:SetScript("OnClick", function(self)
+        if not self.itemID or not cdb then return end
+        cdb.favorites[self.itemID] = (not cdb.favorites[self.itemID]) or nil
+        if not InCombatLockdown() then
+            LayoutMenu(menu.entry)   -- Reihenfolge und Markierung neu
+            Evaluate()               -- Linksklick der Warnung nimmt ggf. den neuen Favoriten
+        end
+        if GameTooltip:IsOwned(self) then self:GetScript("OnEnter")(self) end
+    end)
+    s:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(cdb.favorites[self.itemID] and L.FAV_REMOVE or L.FAV_ADD, 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    s:SetScript("OnLeave", function(self)
+        if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+    end)
+    menu.stars[i] = s
+    return s
+end
+
+local function SetStar(s, on, st)
+    local a = StarAtlas()
+    if a then
+        s.tex:SetAtlas(a)
+        s.tex:SetDesaturated(not on)
+        s.tex:SetAlpha(on and 1 or st.menu.starOff)
+        s.tex:Show(); s.text:Hide()
+    else
+        s.text:SetText("*")
+        if on then s.text:SetTextColor(1, 0.82, 0) else s.text:SetTextColor(0.5, 0.5, 0.5) end
+        s.tex:Hide(); s.text:Show()
+    end
+end
+
+-- Tooltip ausblenden, falls er zu einem Element des Menüs gehört
+local function HideMenuTooltip()
     for _, b in ipairs(itemPanel.buttons) do
         if GameTooltip:IsOwned(b) then GameTooltip:Hide(); return end
     end
-end
-itemPanel:SetScript("OnHide", HideItemTooltip)
-
--- Item-Auswahl befüllen (nur außerhalb des Kampfes); false = nichts anzuzeigen
-local function FillItemPanel(e, choices)
-    if InCombatLockdown() then return false end
-    local n = math.min(#choices, MAX_ITEM_CHOICES)
-    if n == 0 then return false end
-    itemPanel.entry = e
-    itemPanel.title:SetText(EntryLabel(e))
-    for i = 1, n do
-        local c, b = choices[i], GetItemButton(i)
-        b.itemID = c.id
-        b:SetAttribute("item", "item:" .. c.id)
-        b.icon:SetTexture(ItemIcon(c.id) or FALLBACK_ICON)
-        b.name:SetText(ItemName(c.id))
-        b.count:SetText(c.count)
-        b:Show()
-        -- Auswahl neu befüllt, während die Maus darauf steht: Tooltip nachziehen
-        if GameTooltip:IsOwned(b) then GameTooltip:SetItemByID(c.id); GameTooltip:Show() end
+    for _, s in ipairs(menu.stars) do
+        if GameTooltip:IsOwned(s) then GameTooltip:Hide(); return end
     end
-    for i = n + 1, #itemPanel.buttons do
-        local b = itemPanel.buttons[i]
-        if GameTooltip:IsOwned(b) then GameTooltip:Hide() end
-        b:Hide()
-        b.itemID = nil
-        b:SetAttribute("item", nil)
-    end
-    itemPanel:SetSize(MENU_WIDTH, 26 + n * 21 + 10)
-    return true
 end
+itemPanel:SetScript("OnHide", HideMenuTooltip)
 
 local function HideItemPanel()
     if itemPanel:IsShown() and not InCombatLockdown() then itemPanel:Hide() end
 end
 
--- Menü geschlossen: Item-Auswahl und deren Tooltip ebenfalls schließen
--- (im Kampf ist die Item-Auswahl nie offen, s. CloseItemPanelForCombat)
+-- Kategorie (Essen) bzw. leer (Fläschchen) für die Info-Zeile
+local function ItemInfoText(c)
+    if c.cat then return L.FOOD_CATS[c.cat] or c.cat end
+    return ""
+end
+
+-- Menü für Eintrag e aufbauen und an menu.x/menu.y (UIParent-Koordinaten) anzeigen.
+-- Im Kampf nur Kopf + Stummschalten; die Secure-Item-Zeilen werden dann nicht angefasst.
+function LayoutMenu(e)
+    if not e then return end
+    local st = CurrentStyle()
+    local ms = st.menu
+    local combat = InCombatLockdown()
+    local width, pad = ms.width, ms.pad
+    local inner = width - 2 * pad
+    menu.entry = e
+
+    StyleFrame(menu, st, menu.bg)
+
+    -- Kopf: Icon, Titel, Unterzeile
+    local y = -pad - st.inset
+    menu.icon:SetSize(ms.headerIcon, ms.headerIcon)
+    menu.icon:ClearAllPoints()
+    menu.icon:SetPoint("TOPLEFT", pad, y)
+    menu.icon:SetTexture(EntryIcon(e))
+    StyleIconBorder(menu.iconBorder, menu.icon, st.iconBorder)
+    local textWidth = inner - ms.headerIcon - 8
+    SetFont(menu.title, st.titleFont)
+    SetColor(menu.title, "SetTextColor", st.titleColor)
+    menu.title:ClearAllPoints()
+    if ms.itemTwoLines then
+        menu.title:SetPoint("TOPLEFT", menu.icon, "TOPRIGHT", 8, -1)
+    else
+        menu.title:SetPoint("LEFT", menu.icon, "RIGHT", 8, 0)
+    end
+    menu.title:SetWidth(textWidth)
+    menu.title:SetText(EntryLabel(e))
+    SetColor(menu.sub, "SetTextColor", ms.subColor)
+    menu.sub:ClearAllPoints()
+    menu.sub:SetPoint("BOTTOMLEFT", menu.icon, "BOTTOMRIGHT", 8, 1)
+    menu.sub:SetWidth(textWidth)
+
+    local withItems = e.itemKind and db.clickCast and not combat
+    local sub
+    if combat then
+        sub = L.SUB_COMBAT
+    elseif e.groupActive then
+        sub = MissingNames(e)
+    elseif e.kind == "reagent" then
+        sub = L.REAGENT_LOW:format(EntryLabel(e), e.count or 0)
+    elseif withItems then
+        sub = L.SUB_ITEMS
+    else
+        sub = L.SUB_MUTE
+    end
+    menu.sub:SetText(sub)
+    if ms.itemTwoLines then menu.sub:Show() else menu.sub:Hide() end
+    y = y - ms.headerIcon - ms.gap
+
+    local sepIndex = 0
+    local function Separator()
+        sepIndex = sepIndex + 1
+        local t = menu.seps[sepIndex]
+        local c = ms.sepColor
+        t:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+        t:SetHeight(1)
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", pad, y)
+        t:SetPoint("TOPRIGHT", -pad, y)
+        t:Show()
+        y = y - ms.gap
+    end
+    local function Head(fs, text)
+        SetColor(fs, "SetTextColor", ms.sectionColor)
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", pad, y)
+        fs:SetText(text)
+        fs:Show()
+        y = y - 16
+    end
+
+    -- Item-Auswahl
+    local n, itemTop, rowsWidth = 0, 0, inner - STAR_SIZE - 8
+    local h = ms.itemHeight
+    if withItems then
+        Separator()
+        Head(menu.itemHead, e.itemKind == "flask" and L.MENU_FLASK or L.MENU_FOOD)
+        local choices = ItemChoices(e)
+        n = math.min(#choices, MAX_ITEM_CHOICES)
+        itemTop = y
+        if n == 0 then
+            menu.itemNone:ClearAllPoints()
+            menu.itemNone:SetPoint("TOPLEFT", pad + 4, y)
+            menu.itemNone:SetText(L.NONE_IN_BAGS)
+            menu.itemNone:Show()
+            y = y - 18
+        else
+            menu.itemNone:Hide()
+        end
+        for i = 1, n do
+            local c, b = choices[i], GetItemButton(i)
+            b.itemID = c.id
+            b:SetAttribute("item", "item:" .. c.id)
+            b:SetSize(rowsWidth, h)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", 0, -(i - 1) * (h + 1))
+            local iconSize = h - 6
+            b.icon:SetSize(iconSize, iconSize)
+            b.icon:ClearAllPoints()
+            b.icon:SetPoint("LEFT", 4, 0)
+            b.icon:SetTexture(ItemIcon(c.id) or FALLBACK_ICON)
+            StyleIconBorder(b.iconBorder, b.icon, st.iconBorder)
+            b.count:ClearAllPoints()
+            b.count:SetPoint("RIGHT", -4, 0)
+            b.count:SetText(c.count)
+            -- Zeile 1: Name (+ XP-Abzeichen); Zeile 2: Kategorie + "beste Wahl"
+            local best = i == 1
+            local info = ItemInfoText(c)
+            local nameY = ms.itemTwoLines and 6 or 0
+            b.name:ClearAllPoints()
+            b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, nameY)
+            SetColor(b.name, "SetTextColor", ms.textColor)
+            local name = ItemName(c.id)
+            if best and not ms.itemTwoLines then name = StarMarkup(12) .. " " .. name end
+            b.name:SetText(name)
+            local maxName = rowsWidth - iconSize - 50 - (c.xp and 26 or 0)
+            local w = (b.name.GetUnboundedStringWidth and b.name:GetUnboundedStringWidth()) or b.name:GetStringWidth()
+            b.name:SetWidth(math.max(20, math.min(w + 2, maxName)))
+            if c.xp then
+                b.xp:ClearAllPoints()
+                b.xp:SetPoint("LEFT", b.name, "RIGHT", 6, 0)
+                SetColor(b.xpBg, "SetColorTexture", ms.xpBg)
+                b.xp:Show(); b.xpBg:Show()
+            else
+                b.xp:Hide(); b.xpBg:Hide()
+            end
+            if ms.itemTwoLines then
+                local line = info
+                if best then
+                    local mark = "|cffffd100" .. StarMarkup(10) .. " " .. L.BEST .. "|r"
+                    line = (line ~= "" and (line .. "  ") or "") .. mark
+                end
+                b.info:ClearAllPoints()
+                b.info:SetPoint("LEFT", b.icon, "RIGHT", 6, -7)
+                b.info:SetWidth(rowsWidth - iconSize - 50)
+                b.info:SetText(line)
+                b.info:Show()
+            else
+                b.info:Hide()
+            end
+            b:Show()
+            -- Auswahl neu befüllt, während die Maus darauf steht: Tooltip nachziehen
+            if GameTooltip:IsOwned(b) then GameTooltip:SetItemByID(c.id); GameTooltip:Show() end
+
+            local s = GetStar(i)
+            s.itemID = c.id
+            SetStar(s, cdb.favorites[c.id] == true, st)
+            s:ClearAllPoints()
+            s:SetPoint("TOPLEFT", pad + rowsWidth + 4, itemTop - (i - 1) * (h + 1) - (h - STAR_SIZE - 4) / 2)
+            s:Show()
+        end
+        y = y - n * (h + 1)
+    else
+        menu.itemHead:Hide()
+        menu.itemNone:Hide()
+    end
+    if not combat then
+        for i = n + 1, #itemPanel.buttons do
+            local b = itemPanel.buttons[i]
+            if GameTooltip:IsOwned(b) then GameTooltip:Hide() end
+            b:Hide()
+            b.itemID = nil
+            b:SetAttribute("item", nil)
+        end
+    end
+    for i = n + 1, #menu.stars do menu.stars[i]:Hide() end
+
+    -- Stummschalten: vier Schaltflächen nebeneinander
+    Separator()
+    Head(menu.muteHead, L.MENU_MUTE)
+    local bw = (inner - 3 * 4) / 4
+    for i, b in ipairs(menu.muteButtons) do
+        b:SetSize(bw, 20)
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", pad + (i - 1) * (bw + 4), y)
+        b:SetBackdrop({ edgeFile = WHITE, edgeSize = 1 })
+        SetColor(b, "SetBackdropBorderColor", ms.buttonBorder)
+        b.bg:ClearAllPoints()
+        b.bg:SetPoint("TOPLEFT", 1, -1)
+        b.bg:SetPoint("BOTTOMRIGHT", -1, 1)
+        SetColor(b.bg, "SetColorTexture", ms.buttonBg)
+        SetColor(b.label, "SetTextColor", ms.textColor)
+    end
+    y = y - 20 - ms.gap
+
+    -- Fußzeile
+    Separator()
+    for i = sepIndex + 1, #menu.seps do menu.seps[i]:Hide() end
+    menu.close:SetSize(inner, 16)
+    menu.close:ClearAllPoints()
+    menu.close:SetPoint("TOPLEFT", pad, y + 2)
+    SetColor(menu.close.label, "SetTextColor", ms.subColor)
+    y = y - 16
+
+    local height = -y + pad + st.inset
+    menu:SetSize(width, height)
+
+    -- Position: an der gespeicherten Stelle, innerhalb des Bildschirms
+    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    local x = math.max(0, math.min(menu.x or 0, sw - width))
+    local top = math.min(sh, math.max(menu.y or sh, height))
+    menu:ClearAllPoints()
+    menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, top)
+
+    if withItems and n > 0 then
+        itemPanel:ClearAllPoints()
+        itemPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x + pad, top + itemTop)
+        itemPanel:SetSize(rowsWidth, n * (h + 1))
+        itemPanel:SetFrameLevel(menu:GetFrameLevel() + 10)
+        itemPanel:Show()
+    elseif not combat then
+        itemPanel:Hide()
+    end
+end
+
+-- Menü geschlossen: Item-Zeilen und deren Tooltip ebenfalls schließen
+-- (im Kampf ist das itemPanel nie offen, s. CloseItemPanelForCombat)
 menu:SetScript("OnHide", function()
-    HideItemTooltip()
+    HideMenuTooltip()
     HideItemPanel()
 end)
 
--- Schließt sich, wenn die Maus Menü und Item-Auswahl 2 Sek. lang verlassen hat
+-- Schließt sich, wenn die Maus das Fenster 2 Sek. lang verlassen hat
 menu:SetScript("OnUpdate", function(self, el)
     if self:IsMouseOver() or (itemPanel:IsShown() and itemPanel:IsMouseOver()) then self.away = 0 else
         self.away = (self.away or 0) + el
@@ -2084,44 +2621,46 @@ menu:SetScript("OnUpdate", function(self, el)
     end
 end)
 
--- Rechtsklick auf eine Erinnerung. Essen/Fläschchen (außerhalb des Kampfes und mit
--- "Linksklick zaubert Buff"): passende Items oben, darunter die Stumm-Optionen.
+-- Rechtsklick auf eine Erinnerung
 function OpenMuteMenu(row)
-    local e = row.entry
-    menu.key = e.key
     local x, y = GetCursorPosition()
     local s = UIParent:GetEffectiveScale()
-    local withItems = e.itemKind and db.clickCast and not InCombatLockdown()
-        and FillItemPanel(e, ItemChoices(e))
-    menu:ClearAllPoints()
-    if withItems then
-        itemPanel:ClearAllPoints()
-        itemPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s - 10, y / s + 10)
-        itemPanel:Show()
-        LayoutMenu(false)
-        menu:SetPoint("TOPLEFT", itemPanel, "BOTTOMLEFT", 0, 3)
-    else
-        HideItemPanel()
-        LayoutMenu(true)
-        menu.title:SetText(EntryLabel(e))
-        menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / s - 10, y / s + 10)
-    end
+    menu.x, menu.y = x / s - 10, y / s + 10
+    LayoutMenu(row.entry)
     menu.away = 0
     menu:Show()
 end
 
--- Taschen geändert: offene Item-Auswahl neu befüllen (oder schließen, wenn leer)
+-- Taschen geändert: offene Item-Auswahl neu aufbauen
 local function RefreshItemPanel()
-    if not itemPanel:IsShown() or InCombatLockdown() then return end
-    if not FillItemPanel(itemPanel.entry, ItemChoices(itemPanel.entry)) then menu:Hide() end
+    if not menu:IsShown() or not itemPanel:IsShown() or InCombatLockdown() then return end
+    LayoutMenu(menu.entry)
 end
 
--- Kampfbeginn: Item-Auswahl (Secure Buttons) schließen, solange das noch erlaubt ist
+-- Kampfbeginn: Item-Zeilen (Secure Buttons) schließen, solange das noch erlaubt ist
 local function CloseItemPanelForCombat()
     if itemPanel:IsShown() then
         itemPanel:Hide()
         menu:Hide()
     end
+end
+
+-- Stil anwenden (Warnzeilen + Menü); im Kampf erst nach Kampfende
+local function ApplyStyle()
+    if InCombatLockdown() then stylePending = true; return end
+    stylePending = false
+    styleGen = styleGen + 1
+    for i, r in ipairs(rows) do
+        LayoutRow(r)
+        PositionRow(i)
+    end
+    local st = CurrentStyle()
+    if IconsOnly(st) then
+        anchor:SetSize(st.row.height + st.stripe, st.row.height)
+    else
+        anchor:SetSize(st.row.width, st.row.height)
+    end
+    if menu:IsShown() then menu:Hide() end   -- nächstes Öffnen im neuen Stil
 end
 
 ---------------------------------------------------------------------------
@@ -2133,6 +2672,7 @@ function Evaluate()
     -- bleibt unverändert und wird bei PLAYER_REGEN_ENABLED neu aufgebaut.
     local combat = InCombatLockdown()
     if layoutPending and not combat then ApplyLayout() end
+    if stylePending and not combat then ApplyStyle() end
 
     if unlocked then
         if not combat then
@@ -2358,6 +2898,9 @@ function RefreshConfig()
         if expGroup then config.groupModeBtn:Enable() else config.groupModeBtn:Disable() end
     end
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
+    config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
+    config.iconsCB:SetChecked(db.iconsOnly)
+    SetCheckEnabled(config.iconsCB, STYLES[db.style] ~= nil and STYLES[db.style].iconsOnly)
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
 end
 
@@ -2540,7 +3083,27 @@ local function BuildConfig()
         NoteDeferred()
         Evaluate()
     end)
-    y = y - 32
+    y = y - 30
+
+    -- Stil von Warnanzeige und Rechtsklick-Menü; "Nur Icons" nur bei Compact
+    config.styleBtn = MakeButton(config, "", 160)
+    config.styleBtn:SetPoint("TOPLEFT", 18, y)
+    config.styleBtn:SetScript("OnClick", function()
+        local idx = 1
+        for i, k in ipairs(STYLE_ORDER) do if k == db.style then idx = i end end
+        db.style = STYLE_ORDER[idx % #STYLE_ORDER + 1]
+        NoteDeferred()
+        ApplyStyle()
+        Evaluate()
+        RefreshConfig()
+    end)
+    config.iconsCB = MakeCheck(config, L.ICONS_ONLY, 190, y + 1, function(self)
+        db.iconsOnly = self:GetChecked() and true or false
+        NoteDeferred()
+        ApplyStyle()
+        Evaluate()
+    end)
+    y = y - 34
 
     -- Experimentelle Funktionen: klar abgesetzter Abschnitt; Detail-Einstellungen direkt
     -- unter dem jeweiligen Schalter, ausgegraut solange dieser aus ist
@@ -2710,25 +3273,7 @@ end
 
 -- /br minimap: gemeinsamen Pardona-Button ein-/ausblenden (gilt für alle Pardona-Addons)
 local function TogglePardonaMinimap()
-    if not LP or type(db.pardona) ~= "table" then return end
-    local mm = db.pardona.minimap
-    local hide = not (type(mm) == "table" and mm.hide == true)
-    if type(LP.SetMinimapHidden) == "function" then
-        LP:SetMinimapHidden(hide)
-        return
-    end
-    -- LibPardona-1.0 (MINOR 1) hat dafür keine öffentliche Funktion: Datensatz so wie die
-    -- Übersichts-Checkbox der Bibliothek in alle registrierten dbs schreiben.
-    local now = type(time) == "function" and time() or 0
-    for _, id in ipairs(LP.order or {}) do
-        local entry = LP.entries and LP.entries[id]
-        local edb = entry and entry.info and entry.info.db
-        if type(edb) == "table" then
-            if type(edb.minimap) ~= "table" then edb.minimap = {} end
-            edb.minimap.hide, edb.minimap.changed = hide, now
-        end
-    end
-    LP:RefreshStatus()
+    if LP then LP:ToggleMinimap() end
 end
 
 ---------------------------------------------------------------------------
@@ -2797,6 +3342,8 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         cdb.buffs = cdb.buffs or {}
         cdb.lastVariant = cdb.lastVariant or {}   -- Eintrag-Key -> zuletzt genutzte Variante
         cdb.reagents = cdb.reagents or {}         -- Reagenz-Item-ID -> Warnschwelle (0 = aus)
+        cdb.favorites = cdb.favorites or {}       -- Item-ID -> true: Favorit (Essen/Fläschchen)
+        if not STYLES[db.style] then db.style = DEFAULTS.style end
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
         db.flaskSpells = db.flaskSpells or {}     -- gelernte Spell-IDs von Fläschchen-Effekten
@@ -2841,6 +3388,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         end
         RefreshKnown()
         ApplyLayout()
+        ApplyStyle()
         RegisterPardonaSettings()
         -- UNIT_AURA für alle Units; gefiltert auf player / party* / raid* (siehe unten)
         SafeRegisterEvent(self, "UNIT_AURA")
@@ -3005,7 +3553,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
-        ApplyLayout(); Print(L.RESET); Evaluate()
+        ApplyLayout(); ApplyStyle(); Print(L.RESET); Evaluate()
     else
         for _, line in ipairs(L.HELP) do Print(line) end
     end

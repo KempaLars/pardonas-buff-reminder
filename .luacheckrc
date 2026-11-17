@@ -24,11 +24,13 @@ read_globals = {
     "C_CVar",
     "C_Item",
     "C_Spell",
+    "C_Texture",
     "C_SpellBook",
     "C_Timer",
     "C_TooltipInfo",
     "C_UnitAuras",
     -- frames and UI objects
+    "CreateColor",
     "CreateFrame",
     "Enum",
     "GameTooltip",
