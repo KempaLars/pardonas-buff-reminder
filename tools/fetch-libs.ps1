@@ -5,7 +5,8 @@
 #   1. sibling repository ..\lib-pardona (local development)
 #   2. git clone --depth 1 https://github.com/KempaLars/lib-pardona
 #
-# Repository-only files (.git, .github, README, media, lint/packager configs, CLAUDE.md) are skipped.
+# Repository-only files (.git, .github, media, lint/packager configs and all *.md files
+# in the library root) are skipped.
 # Safe to run repeatedly: Libs\lib-pardona is replaced completely on every run.
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +16,12 @@ $libsDir  = Join-Path $repoRoot 'Libs'
 $target   = Join-Path $libsDir 'lib-pardona'
 $sibling  = Join-Path (Split-Path -Parent $repoRoot) 'lib-pardona'
 $url      = 'https://github.com/KempaLars/lib-pardona'
-$skip     = @('.git', '.github', '.gitignore', '.luacheckrc', '.pkgmeta', '.release', 'media', 'README.md', 'CLAUDE.md')
+$skip     = @('.git', '.github', '.gitignore', '.luacheckrc', '.pkgmeta', '.release', 'media')
+
+function Test-Skipped($item) {
+    if ($skip -contains $item.Name) { return $true }
+    return (-not $item.PSIsContainer) -and ($item.Extension -eq '.md')
+}
 
 Write-Host "LibPardona-1.0 -> $target"
 
@@ -31,7 +37,7 @@ if (Test-Path (Join-Path $sibling 'lib-pardona.xml')) {
     Write-Host "  Copying from sibling repository $sibling"
     New-Item -ItemType Directory -Path $target | Out-Null
     Get-ChildItem -Path $sibling -Force |
-        Where-Object { $skip -notcontains $_.Name } |
+        Where-Object { -not (Test-Skipped $_) } |
         ForEach-Object { Copy-Item -Path $_.FullName -Destination $target -Recurse -Force }
 } else {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -40,10 +46,9 @@ if (Test-Path (Join-Path $sibling 'lib-pardona.xml')) {
     Write-Host "  Sibling repository not found, cloning $url"
     & git clone --quiet --depth 1 $url $target
     if ($LASTEXITCODE -ne 0) { throw "git clone failed (exit code $LASTEXITCODE)." }
-    foreach ($name in $skip) {
-        $path = Join-Path $target $name
-        if (Test-Path $path) { Remove-Item -Recurse -Force $path }
-    }
+    Get-ChildItem -Path $target -Force |
+        Where-Object { Test-Skipped $_ } |
+        ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
 }
 
 if (-not (Test-Path (Join-Path $target 'lib-pardona.xml'))) {

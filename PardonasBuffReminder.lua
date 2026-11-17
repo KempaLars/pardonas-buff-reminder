@@ -3259,6 +3259,7 @@ local function RegisterPardona()
     if type(db.pardona) ~= "table" then db.pardona = {} end
     LP:RegisterAddon(PARDONA_ID, {
         name    = L.TITLE,
+        addon   = "PardonasBuffReminder",
         icon    = "Interface\\AddOns\\PardonasBuffReminder\\Textures\\Icon",
         db      = db.pardona,
         onClick = function() ToggleConfig() end,

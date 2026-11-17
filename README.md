@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/logo-400.png" alt="Pardona's Buff Reminder logo" width="200">
+  <img src="media/logo.svg" alt="Pardona's Buff Reminder logo" width="200">
 </p>
 
 # Pardona's Buff Reminder
@@ -167,8 +167,7 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 ├── media/
 │   ├── icon-minimap.svg            # Source for the former minimap button icon (no longer used)
 │   ├── icon.svg                    # Source for the round addon list icon
-│   ├── logo-400.png                # Logo (PNG, 400 px)
-│   └── logo.svg                    # Logo (vector)
+│   └── logo.svg                    # Logo (vector, shown at the top of this README)
 ├── Textures/
 │   └── Icon.tga                    # Addon list and Pardona menu icon (64x64, 32-bit TGA with alpha)
 ├── tools/
