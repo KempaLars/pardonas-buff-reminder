@@ -77,7 +77,6 @@ if GetLocale() == "deDE" then
         COMBAT        = "Im Kampf nicht möglich.",
         AFTER_COMBAT  = "Änderung wird nach dem Kampf angezeigt.",
         -- Reagenzien
-        REAGENTS      = "Reagenzien",
         REAGENT_HINT  = "Warnen unter (0 = aus)",
         REAGENT_LOW   = "%s: %d übrig",
         REAGENT_CHAT  = "|cffffb000Reagenz knapp: %s – nur noch %d!|r",
@@ -94,8 +93,12 @@ if GetLocale() == "deDE" then
         HINT_NOITEM   = "Nicht in der Tasche · Rechtsklick: stumm",
         LEFTCLICK_USE = "Linksklick: %s benutzen",
         RIGHTCLICK_CHOOSE = "Rechtsklick: Auswahl / stummschalten",
+        -- Experimentelle Funktionen
+        EXP_SECTION   = "Experimentell (Beta) – Nutzung auf eigene Gefahr",
+        EXP_NOTE      = "Diese Funktionen sind noch nicht vollständig getestet.",
+        EXP_GROUP     = "Gruppen-Buffs",
+        EXP_REAGENTS  = "Reagenzien-Warnung",
         -- Gruppen-Buffs
-        GROUP_SECTION = "Gruppen-Buffs",
         GROUP_CHECK   = "Gruppen-Buffs prüfen",
         GROUP_MODE    = "Prüfen in: %s",
         GROUP_MODES   = { always = "Immer", instance = "Nur Dungeon & Raid", raid = "Nur Raid" },
@@ -170,7 +173,6 @@ else
         CLICKCAST     = "Left-click casts buff",
         COMBAT        = "Not possible in combat.",
         AFTER_COMBAT  = "Change will be shown after combat.",
-        REAGENTS      = "Reagents",
         REAGENT_HINT  = "Warn below (0 = off)",
         REAGENT_LOW   = "%s: %d left",
         REAGENT_CHAT  = "|cffffb000Reagent running low: %s – only %d left!|r",
@@ -184,7 +186,10 @@ else
         HINT_NOITEM   = "Not in bags · Right-click: mute",
         LEFTCLICK_USE = "Left-click: use %s",
         RIGHTCLICK_CHOOSE = "Right-click: choose / mute",
-        GROUP_SECTION = "Group buffs",
+        EXP_SECTION   = "Experimental (beta) – use at your own risk",
+        EXP_NOTE      = "These features are not fully tested yet.",
+        EXP_GROUP     = "Group buffs",
+        EXP_REAGENTS  = "Low reagent warning",
         GROUP_CHECK   = "Check group buffs",
         GROUP_MODE    = "Check in: %s",
         GROUP_MODES   = { always = "Always", instance = "Dungeons & raids only", raid = "Raids only" },
@@ -696,17 +701,41 @@ local function AddonVersion()
     return v
 end
 
--- Versionshinweis beim Login: nur Beta/Alpha und Entwicklerversion (Platzhalter nicht ersetzt)
-local function PrintVersionNotice()
+-- Build-Art: "dev" (Platzhalter nicht ersetzt / nicht lesbar), "test" (Beta/Alpha), "release"
+local function BuildKind()
     local v = AddonVersion()
-    if v == "" or v:find("@project-version@", 1, true) then
+    if v == "" or v:find("@project-version@", 1, true) then return "dev", v end
+    local lv = v:lower()
+    if lv:find("beta", 1, true) or lv:find("alpha", 1, true) then return "test", v end
+    return "release", v
+end
+
+-- Beta/Alpha oder Entwicklerversion?
+local function IsTestBuild()
+    return BuildKind() ~= "release"
+end
+
+-- Versionshinweis beim Login: nur Beta/Alpha und Entwicklerversion
+local function PrintVersionNotice()
+    local kind, v = BuildKind()
+    if kind == "dev" then
         Print(L.DEV_BUILD)
-    else
-        local lv = v:lower()
-        if lv:find("beta", 1, true) or lv:find("alpha", 1, true) then
-            Print(L.VERSION_LOADED:format(v))
-        end
+    elseif kind == "test" then
+        Print(L.VERSION_LOADED:format(v))
     end
+end
+
+-- Experimentelle Funktionen (account-weit): nil = nicht vom Nutzer gesetzt →
+-- in Test-Builds an, in Release-Versionen aus
+local function ExpOn(key)
+    local v = db and db[key]
+    if v == nil then return IsTestBuild() end
+    return v and true or false
+end
+
+-- Gruppen-Buffs laufen nur, wenn der Experimental-Schalter UND groupCheck aktiv sind
+local function GroupFeatureOn()
+    return ExpOn("expGroup") and db.groupCheck and true or false
 end
 
 local function SpellName(id)
@@ -1086,7 +1115,8 @@ local function RefreshKnown()
 end
 
 local function IsEnabled(e)
-    if e.kind == "reagent" then return ReagentThreshold(e.item) > 0 end
+    -- Reagenzien: nur mit aktivem Experimental-Schalter (sonst keine Zeile, keine Mengenprüfung)
+    if e.kind == "reagent" then return ExpOn("expReagents") and ReagentThreshold(e.item) > 0 end
     local v = cdb.buffs[e.key]
     if v == nil then return not e.defaultOff end
     return v
@@ -1406,7 +1436,7 @@ end
 
 -- Gruppen-Check für einen (erlernten, aktivierten) Eintrag aktiv?
 local function GroupActive(e)
-    return e.groupIds ~= nil and db.groupCheck and IsInGroup ~= nil and IsInGroup() and GroupModeOk()
+    return e.groupIds ~= nil and GroupFeatureOn() and IsInGroup ~= nil and IsInGroup() and GroupModeOk()
 end
 
 local function GroupUnits()
@@ -2123,7 +2153,7 @@ function Evaluate()
         local instOk = (not db.instanceOnly) or InGroupInstance()
         local now = GetTime()
         -- Gruppen-Buffs: nur außerhalb des Kampfes auswerten (gedrosselt)
-        if not combat and db.groupCheck then GroupScanIfDue(now) end
+        if not combat and GroupFeatureOn() then GroupScanIfDue(now) end
         -- Isst der Spieler gerade? (nil auch bei nicht lesbarer Aura → normale Anzeige)
         if foodEntry then foodEntry.eatStart = FindEatStart(scan) end
 
@@ -2209,6 +2239,22 @@ local function FormatMute(left)
     return ("%d:%02d"):format(math.floor(left / 60), left % 60)
 end
 
+-- Detail-Einstellung (de)aktivieren: Häkchen samt Beschriftung
+local function SetCheckEnabled(cb, on)
+    if on then cb:Enable() else cb:Disable() end
+    if cb.label then
+        if on then cb.label:SetTextColor(1, 1, 1) else cb.label:SetTextColor(0.5, 0.5, 0.5) end
+    end
+end
+
+-- Eingabefeld sperren/freigeben (SetEnabled nicht in jedem Client garantiert → Maus als Fallback)
+local function SetEditEnabled(edit, on)
+    if not on and edit:HasFocus() then edit:ClearFocus() end
+    if edit.SetEnabled then edit:SetEnabled(on) end
+    edit:EnableMouse(on)
+    edit:SetAlpha(on and 1 or 0.5)
+end
+
 function RefreshConfig()
     if not config or not config:IsShown() then return end
     for _, w in ipairs(configRows) do
@@ -2246,6 +2292,7 @@ function RefreshConfig()
             w.status:SetTextColor(0.5, 0.5, 0.5)
         end
     end
+    local expReag = ExpOn("expReagents")
     for _, w in ipairs(reagentRows) do
         local e = w.entry
         w.icon:SetTexture(EntryIcon(e))
@@ -2268,13 +2315,26 @@ function RefreshConfig()
             w.status:SetText(L.NOT_LEARNED)
             w.status:SetTextColor(0.5, 0.5, 0.5)
         end
+        -- Experimental-Schalter aus: Zeile ausgrauen, Eingabe sperren
+        SetEditEnabled(w.edit, expReag)
+        if not expReag then
+            w.icon:SetDesaturated(true)
+            w.name:SetTextColor(0.5, 0.5, 0.5)
+            w.status:SetTextColor(0.5, 0.5, 0.5)
+        end
     end
     config.enabledCB:SetChecked(db.enabled)
     config.instCB:SetChecked(db.instanceOnly)
     config.castCB:SetChecked(db.clickCast)
+    local expGroup = ExpOn("expGroup")
+    config.expGroupCB:SetChecked(expGroup)
+    config.expReagCB:SetChecked(expReag)
+    if config.reagentHint then config.reagentHint:SetAlpha(expReag and 1 or 0.5) end
     if config.groupCB then
         config.groupCB:SetChecked(db.groupCheck)
+        SetCheckEnabled(config.groupCB, expGroup)
         config.groupModeBtn:SetText(L.GROUP_MODE:format(L.GROUP_MODES[db.groupMode] or db.groupMode))
+        if expGroup then config.groupModeBtn:Enable() else config.groupModeBtn:Disable() end
     end
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
@@ -2362,6 +2422,7 @@ local function MakeCheck(parent, text, x, y, onClick)
     local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     fs:SetPoint("LEFT", cb, "RIGHT", 2, 0)
     fs:SetText(text)
+    cb.label = fs
     cb:SetScript("OnClick", onClick)
     return cb
 end
@@ -2414,50 +2475,6 @@ local function BuildConfig()
         y = y - 26
     end
 
-    -- Gruppen-Buffs: nur für Klassen mit Gruppen-Buffs (Priester, Magier, Druide)
-    local hasGroup = false
-    for _, e in ipairs(classEntries) do
-        if e.groupIds then hasGroup = true end
-    end
-    if hasGroup then
-        y = y - 10
-        MakeHeader(config, L.GROUP_SECTION, y)
-        y = y - 22
-        config.groupCB = MakeCheck(config, L.GROUP_CHECK, 16, y, function(self)
-            db.groupCheck = self:GetChecked() and true or false
-            MarkGroupDirty()
-            NoteDeferred()
-            Evaluate()
-        end)
-        config.groupModeBtn = MakeButton(config, "", 200)
-        config.groupModeBtn:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
-        config.groupModeBtn:SetScript("OnClick", function()
-            local idx = 1
-            for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
-            db.groupMode = GROUP_MODE_ORDER[idx % #GROUP_MODE_ORDER + 1]
-            MarkGroupDirty()
-            NoteDeferred()
-            Evaluate()
-            RefreshConfig()
-        end)
-        y = y - 26
-    end
-
-    -- Reagenzien: nur die der eigenen Klasse; Abschnitt entfällt ohne Reagenzien
-    if #reagentEntries > 0 then
-        y = y - 10
-        MakeHeader(config, L.REAGENTS, y)
-        local hint = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        hint:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y - 2)
-        hint:SetJustifyH("RIGHT")
-        hint:SetText(L.REAGENT_HINT)
-        y = y - 22
-        for _, e in ipairs(reagentEntries) do
-            MakeReagentRow(config, e, y)
-            y = y - 26
-        end
-    end
-
     y = y - 12
     config.enabledCB = MakeCheck(config, L.ENABLED, 16, y, function(self)
         db.enabled = self:GetChecked() and true or false
@@ -2476,6 +2493,80 @@ local function BuildConfig()
         Evaluate()
     end)
     y = y - 32
+
+    -- Experimentelle Funktionen: klar abgesetzter Abschnitt; Detail-Einstellungen direkt
+    -- unter dem jeweiligen Schalter, ausgegraut solange dieser aus ist
+    local sep = config:CreateTexture(nil, "ARTWORK")
+    sep:SetColorTexture(1, 0.5, 0, 0.6)
+    sep:SetHeight(1)
+    sep:SetPoint("TOPLEFT", 16, y)
+    sep:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
+    y = y - 8
+    local expHead = MakeHeader(config, L.EXP_SECTION, y)
+    expHead:SetTextColor(1, 0.5, 0)
+    y = y - 16
+    local expNote = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    expNote:SetPoint("TOPLEFT", 16, y)
+    expNote:SetText(L.EXP_NOTE)
+    y = y - 20
+
+    -- Gruppen-Buffs
+    config.expGroupCB = MakeCheck(config, L.EXP_GROUP, 16, y, function(self)
+        db.expGroup = self:GetChecked() and true or false
+        if not GroupFeatureOn() then wipe(groupState) else MarkGroupDirty() end
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
+    -- Detail-Einstellungen nur für Klassen mit Gruppen-Buffs (Priester, Magier, Druide)
+    local hasGroup = false
+    for _, e in ipairs(classEntries) do
+        if e.groupIds then hasGroup = true end
+    end
+    if hasGroup then
+        config.groupCB = MakeCheck(config, L.GROUP_CHECK, 36, y, function(self)
+            db.groupCheck = self:GetChecked() and true or false
+            if not GroupFeatureOn() then wipe(groupState) else MarkGroupDirty() end
+            NoteDeferred()
+            Evaluate()
+        end)
+        config.groupModeBtn = MakeButton(config, "", 200)
+        config.groupModeBtn:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
+        config.groupModeBtn:SetScript("OnClick", function()
+            local idx = 1
+            for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
+            db.groupMode = GROUP_MODE_ORDER[idx % #GROUP_MODE_ORDER + 1]
+            MarkGroupDirty()
+            NoteDeferred()
+            Evaluate()
+            RefreshConfig()
+        end)
+        y = y - 26
+    end
+
+    -- Reagenzien-Warnung
+    y = y - 4
+    config.expReagCB = MakeCheck(config, L.EXP_REAGENTS, 16, y, function(self)
+        db.expReagents = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
+    -- Schwellenwerte: nur die Reagenzien der eigenen Klasse
+    if #reagentEntries > 0 then
+        config.reagentHint = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        config.reagentHint:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y - 2)
+        config.reagentHint:SetJustifyH("RIGHT")
+        config.reagentHint:SetText(L.REAGENT_HINT)
+        y = y - 18
+        for _, e in ipairs(reagentEntries) do
+            MakeReagentRow(config, e, y)
+            y = y - 26
+        end
+    end
+    y = y - 10
 
     config.soundBtn = MakeButton(config, "", 100)
     config.soundBtn:SetPoint("TOPLEFT", 18, y)
@@ -2754,31 +2845,34 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "UNIT_AURA" then
         -- arg1 = Unit. Spieler: sofort auswerten (wie bisher); Gruppen-/Raid-Mitglieder:
         -- gedrosselt (MarkGroupDirty); alle anderen Units (Ziel, Namensplaketten …) ignorieren.
+        -- Gruppen-Buffs aus (Experimental-Schalter oder groupCheck): Gruppen-Units ignorieren.
         if arg1 == nil or IsSecret(arg1) then return end
         if arg1 == "player" then
-            MarkGroupDirty()
+            if GroupFeatureOn() then MarkGroupDirty() end
             Evaluate()
-        elseif arg1:find("^party%d") or arg1:find("^raid%d") then
+        elseif GroupFeatureOn() and (arg1:find("^party%d") or arg1:find("^raid%d")) then
             MarkGroupDirty()
         end
         return
     end
 
     if event == "GROUP_ROSTER_UPDATE" then
+        if not GroupFeatureOn() then return end
         MarkGroupDirty()
         return
     end
 
     if event == "PLAYER_REGEN_ENABLED" then
         -- nach dem Kampf: Gruppe sofort neu prüfen, Zeilen/Attribute nachziehen
-        groupDirty = true
+        if GroupFeatureOn() then groupDirty = true end
         Evaluate()
         return
     end
 
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- arg1 = unit, arg2 = castGUID, arg3 = spellID (kann ein Secret-Wert sein)
-        MarkGroupDirty()   -- Ziel der Gruppen-Zeilen nach jedem Cast neu bestimmen
+        -- Ziel der Gruppen-Zeilen nach jedem Cast neu bestimmen
+        if GroupFeatureOn() then MarkGroupDirty() end
         if cdb then
             RememberFromCast(arg3)
             -- Fläschchen-Effekt (auch über Aktionsleiste/Taschen benutzt) -> zuletzt benutzt
@@ -2864,6 +2958,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
     elseif cmd == "reset" then
         if InCombatLockdown() then Print(L.COMBAT); return end
         for k in pairs(DEFAULTS) do db[k] = nil end
+        db.expGroup, db.expReagents = nil, nil   -- Experimental-Schalter: wieder Build-abhängig
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
