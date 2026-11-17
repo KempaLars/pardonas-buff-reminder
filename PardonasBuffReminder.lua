@@ -7,6 +7,16 @@
 
 local ADDON_NAME = ...
 
+-- Lua 5.1 erlaubt max. 200 lokale Variablen im Hauptchunk und 60 Upvalues pro Funktion.
+-- Zusammengehörige Funktionen/Daten liegen deshalb in diesen Tabellen statt in eigenen locals.
+local Items   = {}   -- Essen & Fläschchen: Daten, Taschen-Scan, Auswahl
+local Eat     = {}   -- Ess-Countdown
+local Group   = {}   -- Gruppen-Buffs
+local Style   = {}   -- Stil-Tabelle und Gestaltungs-Helfer
+local Display = {}   -- Warnzeilen (Secure Buttons)
+local Menu    = {}   -- Rechtsklick-Menü
+local Cfg     = {}   -- Einstellungsfenster
+
 ---------------------------------------------------------------------------
 -- Texte
 ---------------------------------------------------------------------------
@@ -489,7 +499,7 @@ local CAST_DATA = {
 --   1) XP-Bonus laut Tooltip, 2) Score = Kategorie-Gewicht x Kochkunst-Stufe, 3) Anzahl.
 --   Nur Items, deren benötigte Stufe <= Spielerstufe.
 ---------------------------------------------------------------------------
-local FOOD = {
+Items.FOOD = {
     MeleeAP = { { 6290, 1 }, { 787, 50 }, { 4592, 50 }, { 8364, 175 }, { 13927, 225 }, { 13932, 250 },
         { 13934, 275 } },
     SpellDamage = { { 5095, 50 }, { 21072, 80 }, { 21217, 175 }, { 274971, 200 }, { 13931, 250 },
@@ -519,7 +529,7 @@ local FOOD = {
 
 -- Kategorie-Reihenfolge je Klasse; Gewicht nach Position (FOOD_WEIGHTS).
 -- Nicht genannte Kampf-Kategorien: FOOD_WEIGHT_OTHER; Movement/Profession fest.
-local FOOD_PRIORITY = {
+Items.FOOD_PRIORITY = {
     WARRIOR = { "Strength", "MeleeAP", "Agility", "Crit", "Stamina" },
     ROGUE   = { "Agility", "MeleeAP", "Crit", "Strength", "Stamina" },
     HUNTER  = { "Agility", "Crit", "Intellect", "Stamina" },
@@ -530,14 +540,14 @@ local FOOD_PRIORITY = {
     MAGE    = { "SpellDamage", "Intellect", "Spirit", "Stamina" },
     WARLOCK = { "SpellDamage", "Stamina", "Spirit", "Intellect" },
 }
-local FOOD_WEIGHTS = { 1.0, 0.85, 0.7, 0.55, 0.55 }
-local FOOD_WEIGHT_OTHER = 0.35
-local FOOD_WEIGHT_FIXED = { Movement = 0.25, Profession = 0.1 }
+Items.FOOD_WEIGHTS = { 1.0, 0.85, 0.7, 0.55, 0.55 }
+Items.FOOD_WEIGHT_OTHER = 0.35
+Items.FOOD_WEIGHT_FIXED = { Movement = 0.25, Profession = 0.1 }
 -- Heiler: Healing mindestens 0.55
-local FOOD_HEALING_MIN = { PRIEST = 0.55, PALADIN = 0.55, DRUID = 0.55, SHAMAN = 0.55 }
+Items.FOOD_HEALING_MIN = { PRIEST = 0.55, PALADIN = 0.55, DRUID = 0.55, SHAMAN = 0.55 }
 
 -- Fläschchen-Fallback (Classic), falls die Item-Klasse nicht ermittelbar ist
-local FLASK_IDS = { [13506] = true, [13510] = true, [13511] = true, [13512] = true, [13513] = true }
+Items.FLASK_IDS = { [13506] = true, [13510] = true, [13511] = true, [13512] = true, [13513] = true }
 
 ---------------------------------------------------------------------------
 -- Reagenzien (Classic-Daten)
@@ -864,11 +874,11 @@ end
 ---------------------------------------------------------------------------
 -- Essen & Fläschchen: Taschen-Inhalt, Auswahl und Sortierung
 ---------------------------------------------------------------------------
-local bagCounts = {}      -- Item-ID -> Anzahl in den Taschen (Scan bei BAG_UPDATE_DELAYED)
-local foodScore = {}      -- Item-ID -> Kategorie-Gewicht x Kochkunst-Stufe (Klasse des Spielers)
-local foodCat = {}        -- Item-ID -> FOOD-Kategorie mit dem höchsten Score (Anzeige im Menü)
-local xpCache = {}        -- Item-ID -> true/false: Tooltip nennt XP-Bonus (nur geladene Items)
-local flaskBySpell = {}   -- Spell-ID des Fläschchen-Effekts -> Item-ID
+Items.bagCounts = {}      -- Item-ID -> Anzahl in den Taschen (Scan bei BAG_UPDATE_DELAYED)
+Items.foodScore = {}      -- Item-ID -> Kategorie-Gewicht x Kochkunst-Stufe (Klasse des Spielers)
+Items.foodCat = {}        -- Item-ID -> FOOD-Kategorie mit dem höchsten Score (Anzeige im Menü)
+Items.xpCache = {}        -- Item-ID -> true/false: Tooltip nennt XP-Bonus (nur geladene Items)
+Items.flaskBySpell = {}   -- Spell-ID des Fläschchen-Effekts -> Item-ID
 local flaskEntry          -- Eintrag gen_flask (idSet wird zur Laufzeit ergänzt)
 local foodEntry           -- Eintrag gen_wellfed (eatStart = Beginn des Essens, nil = isst nicht)
 
@@ -877,60 +887,60 @@ local foodEntry           -- Eintrag gen_wellfed (eatStart = Beginn des Essens, 
 -- ob über die Warnung oder direkt aus der Tasche gegessen wird.
 ---------------------------------------------------------------------------
 -- Well Fed kommt laut Item-Tooltip nach "at least 10 seconds" Essen
-local EAT_WELLFED_TIME = 10
-local eatSpells = {}      -- Spell-ID der Ess-Aura -> true
-local eatNames = {}       -- Name der Ess-Aura -> true (die Aura-ID kann vom Item-Spell abweichen)
-local eatNorm = {}        -- NormName(Name) -> true
-local eatPending = {}     -- Item-ID -> true: Item-Daten noch nicht geladen, Spell folgt
-local eatAura             -- zuletzt gefundene Ess-Aura { id, name } (für /br debug)
+Eat.EAT_WELLFED_TIME = 10
+Eat.eatSpells = {}      -- Spell-ID der Ess-Aura -> true
+Eat.eatNames = {}       -- Name der Ess-Aura -> true (die Aura-ID kann vom Item-Spell abweichen)
+Eat.eatNorm = {}        -- NormName(Name) -> true
+Eat.eatPending = {}     -- Item-ID -> true: Item-Daten noch nicht geladen, Spell folgt
+-- Eat.eatAura: zuletzt gefundene Ess-Aura { id, name } (für /br debug)
 -- generische Auren, die Essen/Trinken anlegen (WoW Forever: "Food" 433)
-local EAT_GENERIC_AURAS = { 433, 430 }   -- Food, Drink
+Eat.EAT_GENERIC_AURAS = { 433, 430 }   -- Food, Drink
 
-local function AddEatName(name)
+function Eat.AddEatName(name)
     if type(name) ~= "string" or name == "" or IsSecret(name) then return end
-    eatNames[name] = true
-    eatNorm[NormName(name)] = true
+    Eat.eatNames[name] = true
+    Eat.eatNorm[NormName(name)] = true
 end
 
 -- Ess-Aura eines Essens ermitteln und cachen; nicht geladene Items nachfordern
 -- (GET_ITEM_INFO_RECEIVED ruft mit loaded = true erneut auf; hat das geladene Item
 -- keinen Spell, wird es nicht erneut angefordert – keine Endlosschleife)
-local function ResolveEatSpell(item, loaded)
+function Eat.ResolveEatSpell(item, loaded)
     if not (C_Item and C_Item.GetItemSpell) then return end
     local ok, spellName, spellID = pcall(C_Item.GetItemSpell, item)
     if ok and type(spellID) == "number" and not IsSecret(spellID) then
-        eatSpells[spellID] = true
-        AddEatName(spellName)
-        eatPending[item] = nil
+        Eat.eatSpells[spellID] = true
+        Eat.AddEatName(spellName)
+        Eat.eatPending[item] = nil
         return
     end
-    if loaded then eatPending[item] = nil; return end
-    eatPending[item] = true
+    if loaded then Eat.eatPending[item] = nil; return end
+    Eat.eatPending[item] = true
     if C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, item) end
 end
 
-local function ResolveAllEatSpells()
-    for _, id in ipairs(EAT_GENERIC_AURAS) do AddEatName(SpellName(id)) end
-    for _, list in pairs(FOOD) do
-        for _, v in ipairs(list) do ResolveEatSpell(v[1]) end
+function Eat.ResolveAllEatSpells()
+    for _, id in ipairs(Eat.EAT_GENERIC_AURAS) do Eat.AddEatName(SpellName(id)) end
+    for _, list in pairs(Items.FOOD) do
+        for _, v in ipairs(list) do Eat.ResolveEatSpell(v[1]) end
     end
 end
 
-local function IsEatAura(a)
-    if a.id and eatSpells[a.id] then return true end
+function Eat.IsEatAura(a)
+    if a.id and Eat.eatSpells[a.id] then return true end
     local n = a.name
     if type(n) ~= "string" or IsSecret(n) then return false end
-    return eatNames[n] == true or eatNorm[NormName(n)] == true
+    return Eat.eatNames[n] == true or Eat.eatNorm[NormName(n)] == true
 end
 
 -- Startzeit einer aktiven Ess-Aura (expirationTime - duration), nil = isst nicht oder
 -- Laufzeit nicht lesbar (Secret) -> normale Anzeige ohne Countdown
-local function FindEatStart(scan)
-    eatAura = nil
+function Eat.FindEatStart(scan)
+    Eat.eatAura = nil
     if not scan then return nil end
     for _, a in ipairs(scan.list) do
-        if IsEatAura(a) then
-            eatAura = { id = a.id, name = a.name }
+        if Eat.IsEatAura(a) then
+            Eat.eatAura = { id = a.id, name = a.name }
             local dur, exp = a.duration, a.expirationTime
             if type(dur) == "number" and type(exp) == "number" and dur > 0 then return exp - dur end
             return nil
@@ -945,36 +955,36 @@ local function CountKeys(t)
 end
 
 -- Haupttext während des Essens
-local function EatText(e)
-    local left = (e.eatStart or 0) + EAT_WELLFED_TIME - GetTime()
+function Eat.EatText(e)
+    local left = (e.eatStart or 0) + Eat.EAT_WELLFED_TIME - GetTime()
     if left > 0 then return L.EATING:format(math.ceil(left)) end
     return L.EATING_DONE
 end
 
-local function BuildFoodScores(class)
+function Items.BuildFoodScores(class)
     local weights = {}
-    for cat in pairs(FOOD) do weights[cat] = FOOD_WEIGHT_FIXED[cat] or FOOD_WEIGHT_OTHER end
-    for i, cat in ipairs(FOOD_PRIORITY[class] or {}) do
-        weights[cat] = FOOD_WEIGHTS[i] or FOOD_WEIGHT_OTHER
+    for cat in pairs(Items.FOOD) do weights[cat] = Items.FOOD_WEIGHT_FIXED[cat] or Items.FOOD_WEIGHT_OTHER end
+    for i, cat in ipairs(Items.FOOD_PRIORITY[class] or {}) do
+        weights[cat] = Items.FOOD_WEIGHTS[i] or Items.FOOD_WEIGHT_OTHER
     end
-    if FOOD_HEALING_MIN[class] then
-        weights.Healing = math.max(weights.Healing, FOOD_HEALING_MIN[class])
+    if Items.FOOD_HEALING_MIN[class] then
+        weights.Healing = math.max(weights.Healing, Items.FOOD_HEALING_MIN[class])
     end
-    wipe(foodScore)
-    wipe(foodCat)
-    for cat, list in pairs(FOOD) do
+    wipe(Items.foodScore)
+    wipe(Items.foodCat)
+    for cat, list in pairs(Items.FOOD) do
         for _, v in ipairs(list) do
             local score = weights[cat] * v[2]
-            if not foodScore[v[1]] or score > foodScore[v[1]] then
-                foodScore[v[1]] = score
-                foodCat[v[1]] = cat
+            if not Items.foodScore[v[1]] or score > Items.foodScore[v[1]] then
+                Items.foodScore[v[1]] = score
+                Items.foodCat[v[1]] = cat
             end
         end
     end
 end
 
 -- Item-Level und benötigte Stufe (nil, falls das Item noch nicht geladen ist)
-local function ItemLevels(item)
+function Items.ItemLevels(item)
     local fn = (C_Item and C_Item.GetItemInfo) or GetItemInfo
     if not fn then return nil end
     local ok, name, _, _, ilvl, minLevel = pcall(fn, item)
@@ -983,8 +993,8 @@ local function ItemLevels(item)
 end
 
 -- Nennt der Tooltip einen XP-Bonus? (enUS "experience", deDE "Erfahrung")
-local function HasXPBonus(item)
-    if xpCache[item] ~= nil then return xpCache[item] end
+function Items.HasXPBonus(item)
+    if Items.xpCache[item] ~= nil then return Items.xpCache[item] end
     if not (C_TooltipInfo and C_TooltipInfo.GetItemByID) then return false end
     local ok, data = pcall(C_TooltipInfo.GetItemByID, item)
     if not ok or type(data) ~= "table" or IsSecret(data) or type(data.lines) ~= "table" then return false end
@@ -998,12 +1008,12 @@ local function HasXPBonus(item)
         end
     end
     -- nur cachen, wenn das Item geladen ist (sonst ist der Tooltip unvollständig)
-    if ItemLevels(item) then xpCache[item] = found end
+    if Items.ItemLevels(item) then Items.xpCache[item] = found end
     return found
 end
 
-local function IsFlaskItem(item)
-    if FLASK_IDS[item] then return true end
+function Items.IsFlaskItem(item)
+    if Items.FLASK_IDS[item] then return true end
     local flaskSub = Enum and Enum.ItemConsumableSubclass and Enum.ItemConsumableSubclass.Flask
     if not flaskSub then return false end
     local consumable = (Enum.ItemClass and Enum.ItemClass.Consumable) or 0
@@ -1014,19 +1024,19 @@ local function IsFlaskItem(item)
 end
 
 -- Spell-ID des Fläschchen-Effekts lernen, damit auch neue Fläschchen als aktiv erkannt werden
-local function LearnFlaskSpell(item)
+function Items.LearnFlaskSpell(item)
     if not (C_Item and C_Item.GetItemSpell) then return end
     local ok, _, spellID = pcall(C_Item.GetItemSpell, item)
     if not ok or type(spellID) ~= "number" or IsSecret(spellID) then return end
-    flaskBySpell[spellID] = item
+    Items.flaskBySpell[spellID] = item
     if flaskEntry then flaskEntry.idSet[spellID] = true end
     if db then db.flaskSpells[spellID] = true end
 end
 
 -- Taschen 0..NUM_BAG_SLOTS durchgehen (ohne Bank)
-local function ScanBags()
+function Items.ScanBags()
     if not (C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo) then return end
-    wipe(bagCounts)
+    wipe(Items.bagCounts)
     for bag = 0, NUM_BAG_SLOTS or 4 do
         local okN, slots = pcall(C_Container.GetContainerNumSlots, bag)
         if okN and type(slots) == "number" and not IsSecret(slots) then
@@ -1035,30 +1045,30 @@ local function ScanBags()
                 if ok and type(info) == "table" and not IsSecret(info) then
                     local id, n = info.itemID, info.stackCount or 1
                     if type(id) == "number" and not IsSecret(id) and not IsSecret(n) then
-                        bagCounts[id] = (bagCounts[id] or 0) + n
+                        Items.bagCounts[id] = (Items.bagCounts[id] or 0) + n
                     end
                 end
             end
         end
     end
-    for id in pairs(bagCounts) do
-        if IsFlaskItem(id) then LearnFlaskSpell(id) end
+    for id in pairs(Items.bagCounts) do
+        if Items.IsFlaskItem(id) then Items.LearnFlaskSpell(id) end
     end
 end
 
 -- passende Items aus den Taschen, beste Wahl zuerst: { { id, count, fav, ... }, ... }
 -- Favoriten (pro Charakter) stehen immer vorn; untereinander gilt die normale Sortierung.
-local function ItemChoices(e)
+function Items.ItemChoices(e)
     local list = {}
     local favs = cdb and cdb.favorites or {}
     if e.itemKind == "food" then
         local lvl = UnitLevel("player") or 1
-        for id, n in pairs(bagCounts) do
-            if foodScore[id] then
-                local _, minLevel = ItemLevels(id)
+        for id, n in pairs(Items.bagCounts) do
+            if Items.foodScore[id] then
+                local _, minLevel = Items.ItemLevels(id)
                 if not minLevel or minLevel <= lvl then
-                    list[#list + 1] = { id = id, count = n, xp = HasXPBonus(id), score = foodScore[id],
-                        cat = foodCat[id], fav = favs[id] == true }
+                    list[#list + 1] = { id = id, count = n, xp = Items.HasXPBonus(id), score = Items.foodScore[id],
+                        cat = Items.foodCat[id], fav = favs[id] == true }
                 end
             end
         end
@@ -1071,9 +1081,9 @@ local function ItemChoices(e)
         end)
     elseif e.itemKind == "flask" then
         local last = cdb and cdb.lastFlask
-        for id, n in pairs(bagCounts) do
-            if IsFlaskItem(id) then
-                list[#list + 1] = { id = id, count = n, ilvl = ItemLevels(id) or 0, fav = favs[id] == true }
+        for id, n in pairs(Items.bagCounts) do
+            if Items.IsFlaskItem(id) then
+                list[#list + 1] = { id = id, count = n, ilvl = Items.ItemLevels(id) or 0, fav = favs[id] == true }
             end
         end
         table.sort(list, function(a, b)
@@ -1481,19 +1491,19 @@ end
 -- gedrosselt (höchstens alle GROUP_THROTTLE Sek.), ohne Event spätestens alle
 -- GROUP_POLL Sek. (Reichweite/Sichtbarkeit ändern sich ohne Event).
 ---------------------------------------------------------------------------
-local groupState = {}         -- key -> { missing = { { unit, name }, ... }, unknown = bool }
-local groupDirty, groupLastScan, groupTimerPending = true, 0, false
-local GROUP_THROTTLE, GROUP_POLL = 0.5, 2
+Group.groupState = {}         -- key -> { missing = { { unit, name }, ... }, unknown = bool }
+Group.groupDirty, Group.groupLastScan, Group.groupTimerPending = true, 0, false
+Group.GROUP_THROTTLE, Group.GROUP_POLL = 0.5, 2
 
 -- Ja/Nein-Abfrage einer Unit-Funktion; nil = nicht verfügbar oder Secret-Wert
-local function UnitFlag(fn, ...)
+function Group.UnitFlag(fn, ...)
     if not fn then return nil end
     local ok, v = pcall(fn, ...)
     if not ok or IsSecret(v) then return nil end
     return v and true or false
 end
 
-local function GroupModeOk()
+function Group.GroupModeOk()
     if db.groupMode == "instance" then return InGroupInstance() end
     if db.groupMode == "raid" then
         local inInst, t = IsInInstance()
@@ -1503,11 +1513,11 @@ local function GroupModeOk()
 end
 
 -- Gruppen-Check für einen (erlernten, aktivierten) Eintrag aktiv?
-local function GroupActive(e)
-    return e.groupIds ~= nil and GroupFeatureOn() and IsInGroup ~= nil and IsInGroup() and GroupModeOk()
+function Group.GroupActive(e)
+    return e.groupIds ~= nil and GroupFeatureOn() and IsInGroup ~= nil and IsInGroup() and Group.GroupModeOk()
 end
 
-local function GroupUnits()
+function Group.GroupUnits()
     local units = {}
     local n = GetNumGroupMembers and GetNumGroupMembers() or 0
     if IsInRaid and IsInRaid() then
@@ -1521,12 +1531,12 @@ end
 
 -- Prüf- und Zielbarkeit: existiert, online, lebt, sichtbar, in Reichweite.
 -- Unbekannte (Secret-)Werte zählen als "nicht prüfbar" → Spieler wird übersprungen.
-local function UnitUsable(unit)
-    if UnitFlag(UnitExists, unit) ~= true then return false end
-    if UnitIsConnected and UnitFlag(UnitIsConnected, unit) ~= true then return false end
-    if UnitFlag(UnitIsDeadOrGhost, unit) ~= false then return false end
-    if UnitIsVisible and UnitFlag(UnitIsVisible, unit) ~= true then return false end
-    if UnitFlag(UnitIsUnit, unit, "player") == true then return true end
+function Group.UnitUsable(unit)
+    if Group.UnitFlag(UnitExists, unit) ~= true then return false end
+    if UnitIsConnected and Group.UnitFlag(UnitIsConnected, unit) ~= true then return false end
+    if Group.UnitFlag(UnitIsDeadOrGhost, unit) ~= false then return false end
+    if UnitIsVisible and Group.UnitFlag(UnitIsVisible, unit) ~= true then return false end
+    if Group.UnitFlag(UnitIsUnit, unit, "player") == true then return true end
     if UnitInRange then
         local ok, inRange, checked = pcall(UnitInRange, unit)
         if not ok or IsSecret(inRange) or IsSecret(checked) then return false end
@@ -1535,39 +1545,39 @@ local function UnitUsable(unit)
     return true
 end
 
-local function UnitClassFile(unit)
+function Group.UnitClassFile(unit)
     local ok, _, class = pcall(UnitClass, unit)
     if ok and class and not IsSecret(class) then return class end
 end
 
-local function UnitDisplayName(unit)
+function Group.UnitDisplayName(unit)
     local ok, n = pcall(UnitName, unit)
     if ok and n and not IsSecret(n) then return n end
     return "?"
 end
 
-local function ScanGroup()
-    wipe(groupState)
+function Group.ScanGroup()
+    wipe(Group.groupState)
     local list = {}
     for _, e in ipairs(entries) do
         if e.groupIds and knownCache[e.key] and IsEnabled(e) then
             list[#list + 1] = e
-            groupState[e.key] = { missing = {}, unknown = false }
+            Group.groupState[e.key] = { missing = {}, unknown = false }
         end
     end
     if #list == 0 then return end
-    for _, unit in ipairs(GroupUnits()) do
-        if UnitUsable(unit) then
+    for _, unit in ipairs(Group.GroupUnits()) do
+        if Group.UnitUsable(unit) then
             local ids, names, unreliable, _, auras = ScanAuras(unit)
             local scan = ids and { ids = ids, names = names, unreliable = unreliable, list = auras } or nil
-            local class = UnitClassFile(unit)
+            local class = Group.UnitClassFile(unit)
             for _, e in ipairs(list) do
                 if not e.manaOnly or (class and MANA_CLASSES[class]) then
-                    local st = groupState[e.key]
+                    local st = Group.groupState[e.key]
                     -- Gruppen- und Einzelversion stehen beide in e.idSet / e.names
                     local m = CheckMissing(e, scan)
                     if m == true then
-                        st.missing[#st.missing + 1] = { unit = unit, name = UnitDisplayName(unit) }
+                        st.missing[#st.missing + 1] = { unit = unit, name = Group.UnitDisplayName(unit) }
                     elseif m == nil then
                         st.unknown = true
                     end
@@ -1578,28 +1588,28 @@ local function ScanGroup()
 end
 
 -- Auswertung, wenn fällig (nie im Kampf)
-local function GroupScanIfDue(now)
+function Group.GroupScanIfDue(now)
     if InCombatLockdown() then return end
-    if (groupDirty or now - groupLastScan >= GROUP_POLL) and now - groupLastScan >= GROUP_THROTTLE then
-        ScanGroup()
-        groupLastScan, groupDirty = now, false
+    if (Group.groupDirty or now - Group.groupLastScan >= Group.GROUP_POLL) and now - Group.groupLastScan >= Group.GROUP_THROTTLE then
+        Group.ScanGroup()
+        Group.groupLastScan, Group.groupDirty = now, false
     end
 end
 
 -- Aura/Roster geändert: neu auswerten, aber höchstens alle GROUP_THROTTLE Sek.
-local function MarkGroupDirty()
-    groupDirty = true
-    if groupTimerPending then return end
-    groupTimerPending = true
-    C_Timer.After(GROUP_THROTTLE, function()
-        groupTimerPending = false
+function Group.MarkGroupDirty()
+    Group.groupDirty = true
+    if Group.groupTimerPending then return end
+    Group.groupTimerPending = true
+    C_Timer.After(Group.GROUP_THROTTLE, function()
+        Group.groupTimerPending = false
         Evaluate()
     end)
 end
 
 -- true = jemandem fehlt der Buff, false = alle haben ihn, nil = unbekannt
-local function GroupMissing(e)
-    local st = groupState[e.key]
+function Group.GroupMissing(e)
+    local st = Group.groupState[e.key]
     if not st then return nil end
     e.groupMissing = st.missing
     if #st.missing > 0 then return true end
@@ -1608,7 +1618,7 @@ local function GroupMissing(e)
 end
 
 -- höchster erlernter Rang der Gruppenversion + dessen Reagenz; Namens-Fallback wie bei Reagenzien
-local function GroupSpellFor(e)
+function Group.GroupSpellFor(e)
     local ids = e.groupIds
     for i = #ids, 1, -1 do
         if SpellKnown(ids[i]) then return ids[i], RANK_INFO[ids[i]] and RANK_INFO[ids[i]].item end
@@ -1627,12 +1637,12 @@ end
 -- Klick-Aktion einer Gruppen-Zeile, Ziel = erster Spieler ohne Buff (Roster-Reihenfolge):
 --   Linksklick      : Gruppenversion; Einzelversion, wenn nicht erlernt oder Reagenz fehlt
 --   Strg+Linksklick : Einzelversion
-local function GroupActionFor(e)
+function Group.GroupActionFor(e)
     local target = e.groupMissing and e.groupMissing[1]
     local single = CastSpellFor(e)
     if not target or not single then return nil end
     local a = { unit = target.unit, targetName = target.name, ctrlSpell = single, ctrlUnit = target.unit }
-    local gspell, item = GroupSpellFor(e)
+    local gspell, item = Group.GroupSpellFor(e)
     if gspell and (not item or (ItemCount(item) or 1) > 0) then
         a.spell, a.isGroup = gspell, true
     else
@@ -1642,7 +1652,7 @@ local function GroupActionFor(e)
 end
 
 -- Namen der Spieler ohne Buff: max. 5, dann "+N"
-local function MissingNames(e)
+function Group.MissingNames(e)
     local list, out = e.groupMissing or {}, {}
     for i = 1, math.min(5, #list) do out[i] = list[i].name end
     local s = table.concat(out, ", ")
@@ -1656,27 +1666,27 @@ end
 -- STYLES + Name in STYLE_ORDER + L.STYLE_NAMES. Farben: { r, g, b [, a] }.
 -- Texturen: nur Standard-UI-Elemente (Backdrop-Kanten, WHITE8X8, Highlight).
 ---------------------------------------------------------------------------
-local WHITE = "Interface\\Buttons\\WHITE8X8"
-local ROUND_EDGE = "Interface\\Tooltips\\UI-Tooltip-Border"
-local HIGHLIGHT = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
+Style.WHITE = "Interface\\Buttons\\WHITE8X8"
+Style.ROUND_EDGE = "Interface\\Tooltips\\UI-Tooltip-Border"
+Style.HIGHLIGHT = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
 
 -- Farbe des Statusstreifens links je Zeilenzustand (gemeinsam für alle Stile)
-local STATUS_COLORS = {
+Style.STATUS_COLORS = {
     missing = { 0.9, 0.15, 0.15 },   -- Buff fehlt
     low     = { 1, 0.55, 0.1 },      -- Reagenz knapp
     eating  = { 0.35, 0.8, 0.3 },    -- isst gerade
     neutral = { 0.55, 0.55, 0.55 },  -- Verschiebe-Modus
 }
 
-local STYLE_ORDER = { "pardona", "classic", "compact" }
-local STYLES = {
+Style.STYLE_ORDER = { "pardona", "classic", "compact" }
+Style.STYLES = {
     pardona = {
         -- Warnzeile
         row = { width = 300, height = 42, heightGroup = 56, gap = 3, pad = 6 },
-        edge = ROUND_EDGE, edgeSize = 12, inset = 3,          -- abgerundete Ecken
+        edge = Style.ROUND_EDGE, edgeSize = 12, inset = 3,          -- abgerundete Ecken
         bgTop = { 0.20, 0.09, 0.30, 0.94 }, bgBottom = { 0.08, 0.03, 0.13, 0.94 },   -- Verlauf
         border = { 0.85, 0.68, 0.25, 1 },                     -- Goldrand
-        stripe = 4, status = STATUS_COLORS,
+        stripe = 4, status = Style.STATUS_COLORS,
         icon = 30, iconBorder = { 0.85, 0.68, 0.25, 1 },
         titleFont = "GameFontNormal", titleColor = { 1, 0.82, 0.25 },
         hintFont = "GameFontDisableSmall", hintColor = { 0.66, 0.58, 0.76 },
@@ -1695,10 +1705,10 @@ local STYLES = {
     },
     classic = {
         row = { width = 300, height = 42, heightGroup = 56, gap = 3, pad = 6 },
-        edge = WHITE, edgeSize = 2, inset = 2,                -- kantiger Goldrahmen
+        edge = Style.WHITE, edgeSize = 2, inset = 2,                -- kantiger Goldrahmen
         bgTop = { 0.27, 0.21, 0.14, 0.95 }, bgBottom = { 0.17, 0.13, 0.09, 0.95 },  -- Stein/Braun
         border = { 0.78, 0.62, 0.22, 1 },
-        stripe = 0, status = STATUS_COLORS,
+        stripe = 0, status = Style.STATUS_COLORS,
         icon = 30, iconBorder = { 0, 0, 0, 1 },
         titleFont = "GameFontNormal", titleColor = { 1, 0.82, 0 },   -- WoW-Gelb
         hintFont = "GameFontHighlightSmall", hintColor = { 0.87, 0.80, 0.64 },  -- beige
@@ -1714,10 +1724,10 @@ local STYLES = {
     },
     compact = {
         row = { width = 220, height = 22, heightGroup = 22, gap = 2, pad = 4 },
-        edge = WHITE, edgeSize = 1, inset = 1,
+        edge = Style.WHITE, edgeSize = 1, inset = 1,
         bgTop = { 0.06, 0.06, 0.08, 0.88 }, bgBottom = nil,   -- schmale dunkle Balken
         border = { 0, 0, 0, 0.9 },
-        stripe = 3, status = STATUS_COLORS,
+        stripe = 3, status = Style.STATUS_COLORS,
         icon = 16, iconBorder = nil,
         titleFont = "GameFontHighlightSmall", titleColor = { 1, 1, 1 },
         hintFont = "GameFontDisableSmall", hintColor = { 0.6, 0.6, 0.6 },
@@ -1733,20 +1743,20 @@ local STYLES = {
     },
 }
 
-local function CurrentStyle()
-    return STYLES[db and db.style] or STYLES.pardona
+function Style.CurrentStyle()
+    return Style.STYLES[db and db.style] or Style.STYLES.pardona
 end
 
-local function IconsOnly(st)
+function Style.IconsOnly(st)
     return st.iconsOnly and db ~= nil and db.iconsOnly == true
 end
 
-local function SetColor(obj, method, c)
+function Style.SetColor(obj, method, c)
     if c then obj[method](obj, c[1], c[2], c[3], c[4] or 1) end
 end
 
 -- Hintergrund: Verlauf (bgBottom gesetzt) oder einfarbig
-local function SetGradientBg(tex, top, bottom)
+function Style.SetGradientBg(tex, top, bottom)
     if bottom and tex.SetGradient and CreateColor then
         tex:SetColorTexture(1, 1, 1, 1)
         local ok = pcall(tex.SetGradient, tex, "VERTICAL",
@@ -1759,22 +1769,22 @@ local function SetGradientBg(tex, top, bottom)
 end
 
 -- Rahmen (Backdrop-Kante) + eigener Hintergrund-Texture innerhalb der Kante
-local function StyleFrame(f, st, bgTex)
+function Style.StyleFrame(f, st, bgTex)
     f:SetBackdrop({ edgeFile = st.edge, edgeSize = st.edgeSize })
-    SetColor(f, "SetBackdropBorderColor", st.border)
+    Style.SetColor(f, "SetBackdropBorderColor", st.border)
     bgTex:ClearAllPoints()
     bgTex:SetPoint("TOPLEFT", st.inset, -st.inset)
     bgTex:SetPoint("BOTTOMRIGHT", -st.inset, st.inset)
-    SetGradientBg(bgTex, st.bgTop, st.bgBottom)
+    Style.SetGradientBg(bgTex, st.bgTop, st.bgBottom)
 end
 
 -- Schriftobjekt per Name (z. B. "GameFontNormal")
-local function SetFont(fs, name)
+function Style.SetFont(fs, name)
     fs:SetFontObject(_G[name] or name)
 end
 
 -- Rand um ein Icon (Texture hinter dem Icon, 1 px größer)
-local function StyleIconBorder(border, icon, color)
+function Style.StyleIconBorder(border, icon, color)
     border:ClearAllPoints()
     border:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)
     border:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
@@ -1787,23 +1797,23 @@ local function StyleIconBorder(border, icon, color)
 end
 
 -- Favoriten-Stern: Atlas des Spiels (Sammlungen), sonst Text "*"
-local STAR_ATLASES = { "collections-icon-favorites", "PetJournal-FavoritesIcon" }
-local starAtlas   -- false = keiner verfügbar, nil = noch nicht geprüft
-local function StarAtlas()
-    if starAtlas ~= nil then return starAtlas or nil end
-    starAtlas = false
+Style.STAR_ATLASES = { "collections-icon-favorites", "PetJournal-FavoritesIcon" }
+-- Style.starAtlas: false = keiner verfügbar, nil = noch nicht geprüft
+function Style.StarAtlas()
+    if Style.starAtlas ~= nil then return Style.starAtlas or nil end
+    Style.starAtlas = false
     if C_Texture and C_Texture.GetAtlasInfo then
-        for _, a in ipairs(STAR_ATLASES) do
+        for _, a in ipairs(Style.STAR_ATLASES) do
             local ok, info = pcall(C_Texture.GetAtlasInfo, a)
-            if ok and info then starAtlas = a; break end
+            if ok and info then Style.starAtlas = a; break end
         end
     end
-    return starAtlas or nil
+    return Style.starAtlas or nil
 end
 
 -- Stern als Inline-Markup für FontStrings
-local function StarMarkup(size)
-    local a = StarAtlas()
+function Style.StarMarkup(size)
+    local a = Style.StarAtlas()
     if a then return ("|A:%s:%d:%d|a"):format(a, size, size) end
     return "*"
 end
@@ -1829,7 +1839,7 @@ fade:SetToAlpha(0.55)
 fade:SetDuration(0.9)
 fade:SetSmoothing("IN_OUT")
 
-local function SavePoint()
+function Display.SavePoint()
     anchor:StopMovingOrSizing()
     local p, _, rp, x, y = anchor:GetPoint()
     db.point = { p, "UIParent", rp, x, y }
@@ -1847,34 +1857,33 @@ local function ApplyLayout()
 end
 
 local rows = {}
-local OpenMuteMenu -- forward
-local styleGen = 0      -- erhöht bei jedem Stilwechsel; Zeilen mit älterem Stand werden neu gestaltet
-local stylePending = false
+Display.styleGen = 0      -- erhöht bei jedem Stilwechsel; Zeilen mit älterem Stand werden neu gestaltet
+Display.stylePending = false
 
 -- Secure Buttons im Mainline-Client lösen je nach CVar ActionButtonUseKeyDown beim
 -- Drücken ODER beim Loslassen aus. Daher werden beide Phasen registriert; die secure
 -- Aktion läuft genau einmal, und unser Rechtsklick reagiert nur in derselben Phase.
-local function GetCVarFlag(name)
+function Display.GetCVarFlag(name)
     if C_CVar and C_CVar.GetCVarBool then return C_CVar.GetCVarBool(name) and true or false end
     if GetCVarBool then return GetCVarBool(name) and true or false end
     return false
 end
 
-local function HasKeyDownCVar()
+function Display.HasKeyDownCVar()
     if C_CVar and C_CVar.GetCVar then return C_CVar.GetCVar("ActionButtonUseKeyDown") ~= nil end
     if GetCVar then return GetCVar("ActionButtonUseKeyDown") ~= nil end
     return false
 end
 
-local function IsActionPhase(down)
-    return (down and true or false) == GetCVarFlag("ActionButtonUseKeyDown")
+function Display.IsActionPhase(down)
+    return (down and true or false) == Display.GetCVarFlag("ActionButtonUseKeyDown")
 end
 
 -- Klick-Aktion einer Zeile setzen (nur außerhalb des Kampfes aufrufen). a = nil oder
 --   { spell = ID/Name | item = Item-ID, unit = Ziel (Standard "player"),
 --     ctrlSpell, ctrlUnit = Strg+Linksklick (Gruppen-Zeilen), isGroup, targetName }
 -- Ohne spell/item tut Linksklick nichts.
-local function SetRowAction(r, a)
+function Display.SetRowAction(r, a)
     a = a or {}
     local sig = table.concat({ tostring(a.spell), tostring(a.item), tostring(a.unit),
         tostring(a.ctrlSpell), tostring(a.ctrlUnit) }, "|")
@@ -1903,16 +1912,16 @@ end
 
 -- Zeile im aktuellen Stil gestalten (nur außerhalb des Kampfes). Gruppen-Zeilen haben
 -- in Stilen mit Hinweiszeile 3 Textzeilen (Namenszeile), sonst 2; Compact ist einzeilig.
-local function LayoutRow(r)
-    local st = CurrentStyle()
+function Display.LayoutRow(r)
+    local st = Style.CurrentStyle()
     local rs = st.row
-    local iconsOnly = IconsOnly(st)
+    local iconsOnly = Style.IconsOnly(st)
     local three = r.threeLines and st.hints
     local h = three and rs.heightGroup or rs.height
-    r.styleGen = styleGen
+    r.styleGen = Display.styleGen
     r.layoutThree = r.threeLines
     if iconsOnly then r:SetSize(h + st.stripe, h) else r:SetSize(rs.width, h) end
-    StyleFrame(r, st, r.bg)
+    Style.StyleFrame(r, st, r.bg)
 
     r.stripe:ClearAllPoints()
     r.stripe:SetPoint("TOPLEFT", st.inset, -st.inset)
@@ -1926,14 +1935,14 @@ local function LayoutRow(r)
     else
         r.icon:SetPoint("LEFT", st.inset + st.stripe + rs.pad, 0)
     end
-    StyleIconBorder(r.iconBorder, r.icon, st.iconBorder)
+    Style.StyleIconBorder(r.iconBorder, r.icon, st.iconBorder)
 
-    SetFont(r.text, st.titleFont)
-    SetColor(r.text, "SetTextColor", st.titleColor)
-    SetFont(r.hint, st.hintFont)
-    SetColor(r.hint, "SetTextColor", st.hintColor)
-    SetColor(r.names, "SetTextColor", st.namesColor)
-    SetColor(r.right, "SetTextColor", st.status.missing)
+    Style.SetFont(r.text, st.titleFont)
+    Style.SetColor(r.text, "SetTextColor", st.titleColor)
+    Style.SetFont(r.hint, st.hintFont)
+    Style.SetColor(r.hint, "SetTextColor", st.hintColor)
+    Style.SetColor(r.names, "SetTextColor", st.namesColor)
+    Style.SetColor(r.right, "SetTextColor", st.status.missing)
     r.text:ClearAllPoints(); r.hint:ClearAllPoints(); r.names:ClearAllPoints(); r.right:ClearAllPoints()
 
     if iconsOnly then
@@ -1959,30 +1968,30 @@ local function LayoutRow(r)
 end
 
 -- Zeile i anordnen: untereinander, bei "Nur Icons" nebeneinander
-local function PositionRow(i)
+function Display.PositionRow(i)
     local r = rows[i]
-    local st = CurrentStyle()
+    local st = Style.CurrentStyle()
     r:ClearAllPoints()
     if i == 1 then
         r:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
-    elseif IconsOnly(st) then
+    elseif Style.IconsOnly(st) then
         r:SetPoint("TOPLEFT", rows[i - 1], "TOPRIGHT", st.row.gap, 0)
     else
         r:SetPoint("TOPLEFT", rows[i - 1], "BOTTOMLEFT", 0, -st.row.gap)
     end
 end
 
-local function SetRowLines(r, three)
+function Display.SetRowLines(r, three)
     r.threeLines = three
-    if r.layoutThree ~= three or r.styleGen ~= styleGen then LayoutRow(r) end
+    if r.layoutThree ~= three or r.styleGen ~= Display.styleGen then Display.LayoutRow(r) end
 end
 
-local function SetRowStatus(r, status)
-    local c = CurrentStyle().status[status] or STATUS_COLORS.missing
+function Display.SetRowStatus(r, status)
+    local c = Style.CurrentStyle().status[status] or Style.STATUS_COLORS.missing
     r.stripe:SetColorTexture(c[1], c[2], c[3], 1)
 end
 
-local function GetRow(i)
+function Display.GetRow(i)
     if rows[i] then return rows[i] end
     local r = CreateFrame("Button", nil, anchor, "SecureActionButtonTemplate, BackdropTemplate")
     r.bg = r:CreateTexture(nil, "BACKGROUND")
@@ -2011,19 +2020,19 @@ local function GetRow(i)
 
     r.threeLines = false
     rows[i] = r
-    LayoutRow(r)
-    PositionRow(i)
+    Display.LayoutRow(r)
+    Display.PositionRow(i)
 
     -- Linksklick = secure Aktion (Zauber auf sich selbst), Rechtsklick = Menü
     r:SetAttribute("unit1", "player")
-    if HasKeyDownCVar() then
+    if Display.HasKeyDownCVar() then
         r:RegisterForClicks("AnyUp", "AnyDown")
     else
         r:RegisterForClicks("AnyUp")
     end
     r:RegisterForDrag("LeftButton")
     r:SetScript("PostClick", function(self, button, down)
-        if not IsActionPhase(down) then return end
+        if not Display.IsActionPhase(down) then return end
         if button == "LeftButton" then
             -- per Linksklick benutztes Fläschchen als "zuletzt benutzt" merken
             if self.useItem and self.entry and self.entry.itemKind == "flask" then
@@ -2031,19 +2040,19 @@ local function GetRow(i)
             end
             return
         end
-        if button == "RightButton" and self.entry and not unlocked then OpenMuteMenu(self) end
+        if button == "RightButton" and self.entry and not unlocked then Display.OpenMuteMenu(self) end
     end)
     r:SetScript("OnDragStart", function()
         if unlocked and not InCombatLockdown() then anchor:StartMoving() end
     end)
     r:SetScript("OnDragStop", function()
-        if unlocked and not InCombatLockdown() then SavePoint() end
+        if unlocked and not InCombatLockdown() then Display.SavePoint() end
     end)
     r:SetScript("OnEnter", function(self)
-        local st = CurrentStyle()
+        local st = Style.CurrentStyle()
         if not self.entry then
             -- Verschiebe-Modus: bei "Nur Icons" steht der Text nur im Tooltip
-            if IconsOnly(st) and unlocked then
+            if Style.IconsOnly(st) and unlocked then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText(L.DRAG, 1, 0.82, 0)
                 GameTooltip:Show()
@@ -2053,11 +2062,11 @@ local function GetRow(i)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(EntryLabel(self.entry), 1, 0.82, 0)
         -- Stile ohne Hinweiszeile: Zeilentext/Namen im Tooltip
-        if not st.hints or IconsOnly(st) then
+        if not st.hints or Style.IconsOnly(st) then
             if self.text:GetText() and self.text:GetText() ~= EntryLabel(self.entry) then
                 GameTooltip:AddLine(self.text:GetText(), 1, 1, 1)
             end
-            if self.entry.groupActive then GameTooltip:AddLine(MissingNames(self.entry), 1, 1, 1) end
+            if self.entry.groupActive then GameTooltip:AddLine(Group.MissingNames(self.entry), 1, 1, 1) end
             if self.hintText then GameTooltip:AddLine(self.hintText, 0.7, 0.7, 0.7) end
         end
         local a = self.action or {}
@@ -2082,60 +2091,60 @@ local function GetRow(i)
     return r
 end
 
-local function SetRowHint(r, text)
+function Display.SetRowHint(r, text)
     r.hintText = text
     r.hint:SetText(text or "")
 end
 
 -- dragMode: Verschiebe-Modus (eine Zeile "Ziehen zum Verschieben", Linksklick zaubert nicht)
-local function ShowRows(list, dragMode)
+function Display.ShowRows(list, dragMode)
     if InCombatLockdown() then return end   -- Secure Frames: nur außerhalb des Kampfes
-    local st = CurrentStyle()
+    local st = Style.CurrentStyle()
     for i, e in ipairs(list) do
-        local r = GetRow(i)
+        local r = Display.GetRow(i)
         r.icon:SetTexture(EntryIcon(e))
         r.right:SetText("")
         if dragMode then
             r.entry = nil
-            SetRowAction(r, nil)
-            SetRowLines(r, false)
-            SetRowStatus(r, "neutral")
+            Display.SetRowAction(r, nil)
+            Display.SetRowLines(r, false)
+            Display.SetRowStatus(r, "neutral")
             r.text:SetText(L.DRAG)
-            SetRowHint(r, nil)
+            Display.SetRowHint(r, nil)
         elseif e.groupActive then
             -- Gruppen-Zeile: Anzahl, Namen, Gruppen-/Einzel-Klick auf den ersten Spieler ohne Buff
             r.entry = e
-            local a = GroupActionFor(e)
-            SetRowAction(r, a)
-            SetRowLines(r, true)
-            SetRowStatus(r, "missing")
+            local a = Group.GroupActionFor(e)
+            Display.SetRowAction(r, a)
+            Display.SetRowLines(r, true)
+            Display.SetRowStatus(r, "missing")
             r.text:SetText(L.GROUP_MISSING:format(EntryLabel(e), #(e.groupMissing or {})))
-            r.names:SetText(MissingNames(e))
+            r.names:SetText(Group.MissingNames(e))
             if a then
-                SetRowHint(r, a.isGroup and L.HINT_GROUP or L.HINT_SINGLE)
+                Display.SetRowHint(r, a.isGroup and L.HINT_GROUP or L.HINT_SINGLE)
             else
-                SetRowHint(r, L.HINT_MUTE)
+                Display.SetRowHint(r, L.HINT_MUTE)
             end
         else
             r.entry = e
-            SetRowLines(r, false)
+            Display.SetRowLines(r, false)
             local spell = CastSpellFor(e)
             -- Essen/Fläschchen: Linksklick benutzt die beste Wahl aus den Taschen
             local item, noItem
             if not spell and e.itemKind and db.clickCast then
-                local choices = ItemChoices(e)
+                local choices = Items.ItemChoices(e)
                 item = choices[1] and choices[1].id
                 noItem = item == nil
             end
-            SetRowAction(r, (spell or item) and { spell = spell, item = item } or nil)
+            Display.SetRowAction(r, (spell or item) and { spell = spell, item = item } or nil)
             if e.kind == "reagent" then
-                SetRowStatus(r, "low")
+                Display.SetRowStatus(r, "low")
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
             elseif e.eatStart then
-                SetRowStatus(r, "eating")
-                r.text:SetText(EatText(e))   -- Ess-Countdown (OnUpdate des anchor zählt weiter)
+                Display.SetRowStatus(r, "eating")
+                r.text:SetText(Eat.EatText(e))   -- Ess-Countdown (OnUpdate des anchor zählt weiter)
             else
-                SetRowStatus(r, "missing")
+                Display.SetRowStatus(r, "missing")
                 if st.rightText then
                     r.text:SetText(EntryLabel(e))
                     r.right:SetText(L.SHORT_MISSING)
@@ -2144,15 +2153,15 @@ local function ShowRows(list, dragMode)
                 end
             end
             if e.eatStart then
-                SetRowHint(r, L.HINT_EATING)
+                Display.SetRowHint(r, L.HINT_EATING)
             elseif spell then
-                SetRowHint(r, L.HINT_CAST)
+                Display.SetRowHint(r, L.HINT_CAST)
             elseif item then
-                SetRowHint(r, L.HINT_ITEM:format(ItemName(item)))
+                Display.SetRowHint(r, L.HINT_ITEM:format(ItemName(item)))
             elseif noItem then
-                SetRowHint(r, L.HINT_NOITEM)
+                Display.SetRowHint(r, L.HINT_NOITEM)
             else
-                SetRowHint(r, L.HINT_MUTE)
+                Display.SetRowHint(r, L.HINT_MUTE)
             end
         end
         r:Show()
@@ -2160,7 +2169,7 @@ local function ShowRows(list, dragMode)
     for i = #list + 1, #rows do
         rows[i]:Hide()
         rows[i].entry = nil
-        SetRowAction(rows[i], nil)
+        Display.SetRowAction(rows[i], nil)
     end
     if #list > 0 then
         if not anchor:IsShown() then
@@ -2176,13 +2185,13 @@ end
 
 -- Ess-Countdown: nur den Text der Zeilen aktualisieren (höchstens alle 0,2 Sek.).
 -- FontStrings sind nicht geschützt → auch im Kampf erlaubt; keine Attribute, kein Show/Hide.
-local EAT_TICK = 0.2
+Display.EAT_TICK = 0.2
 anchor:SetScript("OnUpdate", function(self, el)
     self.eatTick = (self.eatTick or 0) + el
-    if self.eatTick < EAT_TICK then return end
+    if self.eatTick < Display.EAT_TICK then return end
     self.eatTick = 0
     for _, r in ipairs(rows) do
-        if r:IsShown() and r.entry and r.entry.eatStart then r.text:SetText(EatText(r.entry)) end
+        if r:IsShown() and r.entry and r.entry.eatStart then r.text:SetText(Eat.EatText(r.entry)) end
     end
 end)
 
@@ -2201,8 +2210,8 @@ end
 -- versteckt; bei Kampfbeginn schließt CloseItemPanelForCombat beides.
 -- Die Favoriten-Sterne sind unsichere Buttons im menu neben den Item-Zeilen.
 ---------------------------------------------------------------------------
-local MAX_ITEM_CHOICES = 10
-local STAR_SIZE = 16
+Menu.MAX_ITEM_CHOICES = 10
+Menu.STAR_SIZE = 16
 
 local menu = CreateFrame("Frame", "BuffReminderMenu", UIParent, "BackdropTemplate")
 menu:SetFrameStrata("DIALOG")
@@ -2221,22 +2230,22 @@ menu.sub = menu:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 menu.sub:SetJustifyH("LEFT")
 menu.sub:SetWordWrap(false)
 
-local function MenuText(font)
+function Menu.MenuText(font)
     local fs = menu:CreateFontString(nil, "OVERLAY", font)
     fs:SetJustifyH("LEFT")
     return fs
 end
-menu.itemHead = MenuText("GameFontNormalSmall")
-menu.itemNone = MenuText("GameFontDisableSmall")
-menu.muteHead = MenuText("GameFontNormalSmall")
+menu.itemHead = Menu.MenuText("GameFontNormalSmall")
+menu.itemNone = Menu.MenuText("GameFontDisableSmall")
+menu.muteHead = Menu.MenuText("GameFontNormalSmall")
 menu.seps = {}
 for i = 1, 3 do menu.seps[i] = menu:CreateTexture(nil, "ARTWORK") end
 
 -- kleine Schaltfläche im Stil (Rahmen + Hintergrund + Text)
-local function MenuButton(text, onClick)
+function Menu.MenuButton(text, onClick)
     local b = CreateFrame("Button", nil, menu, "BackdropTemplate")
     b.bg = b:CreateTexture(nil, "BACKGROUND")
-    b:SetHighlightTexture(HIGHLIGHT, "ADD")
+    b:SetHighlightTexture(Style.HIGHLIGHT, "ADD")
     b.label = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     b.label:SetPoint("CENTER")
     b.label:SetText(text)
@@ -2244,12 +2253,12 @@ local function MenuButton(text, onClick)
     return b
 end
 
-local MUTE_OPTIONS = {
+Menu.MUTE_OPTIONS = {
     { L.MUTE_5, 300 }, { L.MUTE_15, 900 }, { L.MUTE_60, 3600 }, { L.MUTE_SESSION, math.huge },
 }
 menu.muteButtons = {}
-for i, opt in ipairs(MUTE_OPTIONS) do
-    menu.muteButtons[i] = MenuButton(opt[1], function()
+for i, opt in ipairs(Menu.MUTE_OPTIONS) do
+    menu.muteButtons[i] = Menu.MenuButton(opt[1], function()
         if menu.entry then
             muted[menu.entry.key] = (opt[2] == math.huge) and math.huge or (GetTime() + opt[2])
             NoteDeferred()
@@ -2260,7 +2269,7 @@ for i, opt in ipairs(MUTE_OPTIONS) do
 end
 
 menu.close = CreateFrame("Button", nil, menu)
-menu.close:SetHighlightTexture(HIGHLIGHT, "ADD")
+menu.close:SetHighlightTexture(Style.HIGHLIGHT, "ADD")
 menu.close.label = menu.close:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 menu.close.label:SetPoint("CENTER")
 menu.close.label:SetText(L.CLOSE_ESC)
@@ -2273,12 +2282,11 @@ itemPanel:Hide()
 itemPanel.buttons = {}
 menu.stars = {}
 
-local LayoutMenu -- forward
 
-local function GetItemButton(i)
+function Menu.GetItemButton(i)
     if itemPanel.buttons[i] then return itemPanel.buttons[i] end
     local b = CreateFrame("Button", nil, itemPanel, "SecureActionButtonTemplate")
-    b:SetHighlightTexture(HIGHLIGHT, "ADD")
+    b:SetHighlightTexture(Style.HIGHLIGHT, "ADD")
     b.iconBorder = b:CreateTexture(nil, "ARTWORK", nil, -1)
     b.icon = b:CreateTexture(nil, "ARTWORK")
     b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -2296,13 +2304,13 @@ local function GetItemButton(i)
     b.info:SetJustifyH("LEFT")
     b.info:SetWordWrap(false)
     b:SetAttribute("type", "item")
-    if HasKeyDownCVar() then
+    if Display.HasKeyDownCVar() then
         b:RegisterForClicks("AnyUp", "AnyDown")
     else
         b:RegisterForClicks("AnyUp")
     end
     b:SetScript("PostClick", function(self, _, down)
-        if not IsActionPhase(down) then return end
+        if not Display.IsActionPhase(down) then return end
         if menu.entry and menu.entry.itemKind == "flask" then cdb.lastFlask = self.itemID end
         menu:Hide()   -- schließt auch das itemPanel
     end)
@@ -2322,12 +2330,12 @@ local function GetItemButton(i)
 end
 
 -- Favoriten-Stern (unsicher, Kind von menu, neben der Item-Zeile): löst nie ein Item aus
-local function GetStar(i)
+function Menu.GetStar(i)
     if menu.stars[i] then return menu.stars[i] end
     local s = CreateFrame("Button", nil, menu)
-    s:SetSize(STAR_SIZE + 4, STAR_SIZE + 4)
+    s:SetSize(Menu.STAR_SIZE + 4, Menu.STAR_SIZE + 4)
     s.tex = s:CreateTexture(nil, "ARTWORK")
-    s.tex:SetSize(STAR_SIZE, STAR_SIZE)
+    s.tex:SetSize(Menu.STAR_SIZE, Menu.STAR_SIZE)
     s.tex:SetPoint("CENTER")
     s.text = s:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     s.text:SetPoint("CENTER")
@@ -2335,7 +2343,7 @@ local function GetStar(i)
         if not self.itemID or not cdb then return end
         cdb.favorites[self.itemID] = (not cdb.favorites[self.itemID]) or nil
         if not InCombatLockdown() then
-            LayoutMenu(menu.entry)   -- Reihenfolge und Markierung neu
+            Menu.LayoutMenu(menu.entry)   -- Reihenfolge und Markierung neu
             Evaluate()               -- Linksklick der Warnung nimmt ggf. den neuen Favoriten
         end
         if GameTooltip:IsOwned(self) then self:GetScript("OnEnter")(self) end
@@ -2352,8 +2360,8 @@ local function GetStar(i)
     return s
 end
 
-local function SetStar(s, on, st)
-    local a = StarAtlas()
+function Menu.SetStar(s, on, st)
+    local a = Style.StarAtlas()
     if a then
         s.tex:SetAtlas(a)
         s.tex:SetDesaturated(not on)
@@ -2367,7 +2375,7 @@ local function SetStar(s, on, st)
 end
 
 -- Tooltip ausblenden, falls er zu einem Element des Menüs gehört
-local function HideMenuTooltip()
+function Menu.HideMenuTooltip()
     for _, b in ipairs(itemPanel.buttons) do
         if GameTooltip:IsOwned(b) then GameTooltip:Hide(); return end
     end
@@ -2375,30 +2383,30 @@ local function HideMenuTooltip()
         if GameTooltip:IsOwned(s) then GameTooltip:Hide(); return end
     end
 end
-itemPanel:SetScript("OnHide", HideMenuTooltip)
+itemPanel:SetScript("OnHide", Menu.HideMenuTooltip)
 
-local function HideItemPanel()
+function Menu.HideItemPanel()
     if itemPanel:IsShown() and not InCombatLockdown() then itemPanel:Hide() end
 end
 
 -- Kategorie (Essen) bzw. leer (Fläschchen) für die Info-Zeile
-local function ItemInfoText(c)
+function Menu.ItemInfoText(c)
     if c.cat then return L.FOOD_CATS[c.cat] or c.cat end
     return ""
 end
 
 -- Menü für Eintrag e aufbauen und an menu.x/menu.y (UIParent-Koordinaten) anzeigen.
 -- Im Kampf nur Kopf + Stummschalten; die Secure-Item-Zeilen werden dann nicht angefasst.
-function LayoutMenu(e)
+function Menu.LayoutMenu(e)
     if not e then return end
-    local st = CurrentStyle()
+    local st = Style.CurrentStyle()
     local ms = st.menu
     local combat = InCombatLockdown()
     local width, pad = ms.width, ms.pad
     local inner = width - 2 * pad
     menu.entry = e
 
-    StyleFrame(menu, st, menu.bg)
+    Style.StyleFrame(menu, st, menu.bg)
 
     -- Kopf: Icon, Titel, Unterzeile
     local y = -pad - st.inset
@@ -2406,10 +2414,10 @@ function LayoutMenu(e)
     menu.icon:ClearAllPoints()
     menu.icon:SetPoint("TOPLEFT", pad, y)
     menu.icon:SetTexture(EntryIcon(e))
-    StyleIconBorder(menu.iconBorder, menu.icon, st.iconBorder)
+    Style.StyleIconBorder(menu.iconBorder, menu.icon, st.iconBorder)
     local textWidth = inner - ms.headerIcon - 8
-    SetFont(menu.title, st.titleFont)
-    SetColor(menu.title, "SetTextColor", st.titleColor)
+    Style.SetFont(menu.title, st.titleFont)
+    Style.SetColor(menu.title, "SetTextColor", st.titleColor)
     menu.title:ClearAllPoints()
     if ms.itemTwoLines then
         menu.title:SetPoint("TOPLEFT", menu.icon, "TOPRIGHT", 8, -1)
@@ -2418,7 +2426,7 @@ function LayoutMenu(e)
     end
     menu.title:SetWidth(textWidth)
     menu.title:SetText(EntryLabel(e))
-    SetColor(menu.sub, "SetTextColor", ms.subColor)
+    Style.SetColor(menu.sub, "SetTextColor", ms.subColor)
     menu.sub:ClearAllPoints()
     menu.sub:SetPoint("BOTTOMLEFT", menu.icon, "BOTTOMRIGHT", 8, 1)
     menu.sub:SetWidth(textWidth)
@@ -2428,7 +2436,7 @@ function LayoutMenu(e)
     if combat then
         sub = L.SUB_COMBAT
     elseif e.groupActive then
-        sub = MissingNames(e)
+        sub = Group.MissingNames(e)
     elseif e.kind == "reagent" then
         sub = L.REAGENT_LOW:format(EntryLabel(e), e.count or 0)
     elseif withItems then
@@ -2454,7 +2462,7 @@ function LayoutMenu(e)
         y = y - ms.gap
     end
     local function Head(fs, text)
-        SetColor(fs, "SetTextColor", ms.sectionColor)
+        Style.SetColor(fs, "SetTextColor", ms.sectionColor)
         fs:ClearAllPoints()
         fs:SetPoint("TOPLEFT", pad, y)
         fs:SetText(text)
@@ -2463,13 +2471,13 @@ function LayoutMenu(e)
     end
 
     -- Item-Auswahl
-    local n, itemTop, rowsWidth = 0, 0, inner - STAR_SIZE - 8
+    local n, itemTop, rowsWidth = 0, 0, inner - Menu.STAR_SIZE - 8
     local h = ms.itemHeight
     if withItems then
         Separator()
         Head(menu.itemHead, e.itemKind == "flask" and L.MENU_FLASK or L.MENU_FOOD)
-        local choices = ItemChoices(e)
-        n = math.min(#choices, MAX_ITEM_CHOICES)
+        local choices = Items.ItemChoices(e)
+        n = math.min(#choices, Menu.MAX_ITEM_CHOICES)
         itemTop = y
         if n == 0 then
             menu.itemNone:ClearAllPoints()
@@ -2481,7 +2489,7 @@ function LayoutMenu(e)
             menu.itemNone:Hide()
         end
         for i = 1, n do
-            local c, b = choices[i], GetItemButton(i)
+            local c, b = choices[i], Menu.GetItemButton(i)
             b.itemID = c.id
             b:SetAttribute("item", "item:" .. c.id)
             b:SetSize(rowsWidth, h)
@@ -2492,19 +2500,19 @@ function LayoutMenu(e)
             b.icon:ClearAllPoints()
             b.icon:SetPoint("LEFT", 4, 0)
             b.icon:SetTexture(ItemIcon(c.id) or FALLBACK_ICON)
-            StyleIconBorder(b.iconBorder, b.icon, st.iconBorder)
+            Style.StyleIconBorder(b.iconBorder, b.icon, st.iconBorder)
             b.count:ClearAllPoints()
             b.count:SetPoint("RIGHT", -4, 0)
             b.count:SetText(c.count)
             -- Zeile 1: Name (+ XP-Abzeichen); Zeile 2: Kategorie + "beste Wahl"
             local best = i == 1
-            local info = ItemInfoText(c)
+            local info = Menu.ItemInfoText(c)
             local nameY = ms.itemTwoLines and 6 or 0
             b.name:ClearAllPoints()
             b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, nameY)
-            SetColor(b.name, "SetTextColor", ms.textColor)
+            Style.SetColor(b.name, "SetTextColor", ms.textColor)
             local name = ItemName(c.id)
-            if best and not ms.itemTwoLines then name = StarMarkup(12) .. " " .. name end
+            if best and not ms.itemTwoLines then name = Style.StarMarkup(12) .. " " .. name end
             b.name:SetText(name)
             local maxName = rowsWidth - iconSize - 50 - (c.xp and 26 or 0)
             local w = (b.name.GetUnboundedStringWidth and b.name:GetUnboundedStringWidth()) or b.name:GetStringWidth()
@@ -2512,7 +2520,7 @@ function LayoutMenu(e)
             if c.xp then
                 b.xp:ClearAllPoints()
                 b.xp:SetPoint("LEFT", b.name, "RIGHT", 6, 0)
-                SetColor(b.xpBg, "SetColorTexture", ms.xpBg)
+                Style.SetColor(b.xpBg, "SetColorTexture", ms.xpBg)
                 b.xp:Show(); b.xpBg:Show()
             else
                 b.xp:Hide(); b.xpBg:Hide()
@@ -2520,7 +2528,7 @@ function LayoutMenu(e)
             if ms.itemTwoLines then
                 local line = info
                 if best then
-                    local mark = "|cffffd100" .. StarMarkup(10) .. " " .. L.BEST .. "|r"
+                    local mark = "|cffffd100" .. Style.StarMarkup(10) .. " " .. L.BEST .. "|r"
                     line = (line ~= "" and (line .. "  ") or "") .. mark
                 end
                 b.info:ClearAllPoints()
@@ -2535,11 +2543,11 @@ function LayoutMenu(e)
             -- Auswahl neu befüllt, während die Maus darauf steht: Tooltip nachziehen
             if GameTooltip:IsOwned(b) then GameTooltip:SetItemByID(c.id); GameTooltip:Show() end
 
-            local s = GetStar(i)
+            local s = Menu.GetStar(i)
             s.itemID = c.id
-            SetStar(s, cdb.favorites[c.id] == true, st)
+            Menu.SetStar(s, cdb.favorites[c.id] == true, st)
             s:ClearAllPoints()
-            s:SetPoint("TOPLEFT", pad + rowsWidth + 4, itemTop - (i - 1) * (h + 1) - (h - STAR_SIZE - 4) / 2)
+            s:SetPoint("TOPLEFT", pad + rowsWidth + 4, itemTop - (i - 1) * (h + 1) - (h - Menu.STAR_SIZE - 4) / 2)
             s:Show()
         end
         y = y - n * (h + 1)
@@ -2566,13 +2574,13 @@ function LayoutMenu(e)
         b:SetSize(bw, 20)
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", pad + (i - 1) * (bw + 4), y)
-        b:SetBackdrop({ edgeFile = WHITE, edgeSize = 1 })
-        SetColor(b, "SetBackdropBorderColor", ms.buttonBorder)
+        b:SetBackdrop({ edgeFile = Style.WHITE, edgeSize = 1 })
+        Style.SetColor(b, "SetBackdropBorderColor", ms.buttonBorder)
         b.bg:ClearAllPoints()
         b.bg:SetPoint("TOPLEFT", 1, -1)
         b.bg:SetPoint("BOTTOMRIGHT", -1, 1)
-        SetColor(b.bg, "SetColorTexture", ms.buttonBg)
-        SetColor(b.label, "SetTextColor", ms.textColor)
+        Style.SetColor(b.bg, "SetColorTexture", ms.buttonBg)
+        Style.SetColor(b.label, "SetTextColor", ms.textColor)
     end
     y = y - 20 - ms.gap
 
@@ -2582,7 +2590,7 @@ function LayoutMenu(e)
     menu.close:SetSize(inner, 16)
     menu.close:ClearAllPoints()
     menu.close:SetPoint("TOPLEFT", pad, y + 2)
-    SetColor(menu.close.label, "SetTextColor", ms.subColor)
+    Style.SetColor(menu.close.label, "SetTextColor", ms.subColor)
     y = y - 16
 
     local height = -y + pad + st.inset
@@ -2609,8 +2617,8 @@ end
 -- Menü geschlossen: Item-Zeilen und deren Tooltip ebenfalls schließen
 -- (im Kampf ist das itemPanel nie offen, s. CloseItemPanelForCombat)
 menu:SetScript("OnHide", function()
-    HideMenuTooltip()
-    HideItemPanel()
+    Menu.HideMenuTooltip()
+    Menu.HideItemPanel()
 end)
 
 -- Schließt sich, wenn die Maus das Fenster 2 Sek. lang verlassen hat
@@ -2622,23 +2630,23 @@ menu:SetScript("OnUpdate", function(self, el)
 end)
 
 -- Rechtsklick auf eine Erinnerung
-function OpenMuteMenu(row)
+function Display.OpenMuteMenu(row)
     local x, y = GetCursorPosition()
     local s = UIParent:GetEffectiveScale()
     menu.x, menu.y = x / s - 10, y / s + 10
-    LayoutMenu(row.entry)
+    Menu.LayoutMenu(row.entry)
     menu.away = 0
     menu:Show()
 end
 
 -- Taschen geändert: offene Item-Auswahl neu aufbauen
-local function RefreshItemPanel()
+function Menu.RefreshItemPanel()
     if not menu:IsShown() or not itemPanel:IsShown() or InCombatLockdown() then return end
-    LayoutMenu(menu.entry)
+    Menu.LayoutMenu(menu.entry)
 end
 
 -- Kampfbeginn: Item-Zeilen (Secure Buttons) schließen, solange das noch erlaubt ist
-local function CloseItemPanelForCombat()
+function Menu.CloseItemPanelForCombat()
     if itemPanel:IsShown() then
         itemPanel:Hide()
         menu:Hide()
@@ -2646,16 +2654,16 @@ local function CloseItemPanelForCombat()
 end
 
 -- Stil anwenden (Warnzeilen + Menü); im Kampf erst nach Kampfende
-local function ApplyStyle()
-    if InCombatLockdown() then stylePending = true; return end
-    stylePending = false
-    styleGen = styleGen + 1
+function Display.ApplyStyle()
+    if InCombatLockdown() then Display.stylePending = true; return end
+    Display.stylePending = false
+    Display.styleGen = Display.styleGen + 1
     for i, r in ipairs(rows) do
-        LayoutRow(r)
-        PositionRow(i)
+        Display.LayoutRow(r)
+        Display.PositionRow(i)
     end
-    local st = CurrentStyle()
-    if IconsOnly(st) then
+    local st = Style.CurrentStyle()
+    if Style.IconsOnly(st) then
         anchor:SetSize(st.row.height + st.stripe, st.row.height)
     else
         anchor:SetSize(st.row.width, st.row.height)
@@ -2672,11 +2680,11 @@ function Evaluate()
     -- bleibt unverändert und wird bei PLAYER_REGEN_ENABLED neu aufgebaut.
     local combat = InCombatLockdown()
     if layoutPending and not combat then ApplyLayout() end
-    if stylePending and not combat then ApplyStyle() end
+    if Display.stylePending and not combat then Display.ApplyStyle() end
 
     if unlocked then
         if not combat then
-            ShowRows({ { key = "_drag", label = "DRAG", icon = EntryIcon(entries[1] or {}) } }, true)
+            Display.ShowRows({ { key = "_drag", label = "DRAG", icon = EntryIcon(entries[1] or {}) } }, true)
         end
         if RefreshConfig then RefreshConfig() end
         return
@@ -2688,7 +2696,7 @@ function Evaluate()
             if knownCache[e.key] and IsEnabled(e) then list[#list + 1] = e end
         end
         if #list == 0 and entries[1] then list[1] = entries[1] end
-        ShowRows(list)
+        Display.ShowRows(list)
         return
     end
 
@@ -2707,18 +2715,18 @@ function Evaluate()
         local instOk = (not db.instanceOnly) or InGroupInstance()
         local now = GetTime()
         -- Gruppen-Buffs: nur außerhalb des Kampfes auswerten (gedrosselt)
-        if not combat and GroupFeatureOn() then GroupScanIfDue(now) end
+        if not combat and GroupFeatureOn() then Group.GroupScanIfDue(now) end
         -- Isst der Spieler gerade? (nil auch bei nicht lesbarer Aura → normale Anzeige)
-        if foodEntry then foodEntry.eatStart = FindEatStart(scan) end
+        if foodEntry then foodEntry.eatStart = Eat.FindEatStart(scan) end
 
         for _, e in ipairs(entries) do
             local relevant = knownCache[e.key] and IsEnabled(e) and (not e.general or instOk)
             -- Gruppen-Check aktiv: Gruppen-Zeile ersetzt die Selbst-Zeile (gleicher Key)
-            e.groupActive = relevant and GroupActive(e) or false
+            e.groupActive = relevant and Group.GroupActive(e) or false
             if relevant then
                 local m
                 if e.groupActive then
-                    if not combat then m = GroupMissing(e) end   -- im Kampf: Zustand beibehalten
+                    if not combat then m = Group.GroupMissing(e) end   -- im Kampf: Zustand beibehalten
                 else
                     m = CheckMissing(e, scan)
                 end
@@ -2767,7 +2775,7 @@ function Evaluate()
     wipe(shownKeys)
     for _, e in ipairs(list) do shownKeys[e.key] = true end
     if newOnes then PlayAlertSound() end   -- Ton nur bei neu fehlendem Buff, keine Wiederholung
-    ShowRows(list)
+    Display.ShowRows(list)
 
     -- Kurzstatus für das Pardona-Menü: nur bei Änderung neu anzeigen
     local count = db.enabled and #list or -1
@@ -2791,17 +2799,17 @@ end
 -- Einstellungsfenster
 ---------------------------------------------------------------------------
 local config
-local configRows = {}
-local reagentRows = {}
+Cfg.configRows = {}
+Cfg.reagentRows = {}
 
-local function FormatMute(left)
+function Cfg.FormatMute(left)
     if left == math.huge then return L.SESSION end
     left = math.ceil(left)
     return ("%d:%02d"):format(math.floor(left / 60), left % 60)
 end
 
 -- Detail-Einstellung (de)aktivieren: Häkchen samt Beschriftung
-local function SetCheckEnabled(cb, on)
+function Cfg.SetCheckEnabled(cb, on)
     if on then cb:Enable() else cb:Disable() end
     if cb.label then
         if on then cb.label:SetTextColor(1, 1, 1) else cb.label:SetTextColor(0.5, 0.5, 0.5) end
@@ -2809,7 +2817,7 @@ local function SetCheckEnabled(cb, on)
 end
 
 -- Eingabefeld sperren/freigeben (SetEnabled nicht in jedem Client garantiert → Maus als Fallback)
-local function SetEditEnabled(edit, on)
+function Cfg.SetEditEnabled(edit, on)
     if not on and edit:HasFocus() then edit:ClearFocus() end
     if edit.SetEnabled then edit:SetEnabled(on) end
     edit:EnableMouse(on)
@@ -2818,7 +2826,7 @@ end
 
 function RefreshConfig()
     if not config or not config:IsVisible() then return end
-    for _, w in ipairs(configRows) do
+    for _, w in ipairs(Cfg.configRows) do
         local e = w.entry
         local known = knownCache[e.key]
         w.cb:SetChecked(IsEnabled(e))
@@ -2830,7 +2838,7 @@ function RefreshConfig()
             w.name:SetTextColor(1, 1, 1)
             local left = MuteRemaining(e.key)
             if left then
-                w.status:SetText(L.MUTED:format(FormatMute(left)))
+                w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
                 w.status:SetTextColor(1, 0.4, 0.3)
             elseif e.general and db.instanceOnly and not InGroupInstance() then
                 w.status:SetText(L.INSTANCE_HINT)
@@ -2854,7 +2862,7 @@ function RefreshConfig()
         end
     end
     local expReag = ExpOn("expReagents")
-    for _, w in ipairs(reagentRows) do
+    for _, w in ipairs(Cfg.reagentRows) do
         local e = w.entry
         w.icon:SetTexture(EntryIcon(e))
         w.name:SetText(EntryLabel(e))
@@ -2864,7 +2872,7 @@ function RefreshConfig()
             w.name:SetTextColor(1, 1, 1)
             local left = MuteRemaining(e.key)
             if left then
-                w.status:SetText(L.MUTED:format(FormatMute(left)))
+                w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
                 w.status:SetTextColor(1, 0.4, 0.3)
             else
                 w.status:SetText(L.IN_BAGS:format(ItemCount(e.item) or 0))
@@ -2877,7 +2885,7 @@ function RefreshConfig()
             w.status:SetTextColor(0.5, 0.5, 0.5)
         end
         -- Experimental-Schalter aus: Zeile ausgrauen, Eingabe sperren
-        SetEditEnabled(w.edit, expReag)
+        Cfg.SetEditEnabled(w.edit, expReag)
         if not expReag then
             w.icon:SetDesaturated(true)
             w.name:SetTextColor(0.5, 0.5, 0.5)
@@ -2893,25 +2901,25 @@ function RefreshConfig()
     if config.reagentHint then config.reagentHint:SetAlpha(expReag and 1 or 0.5) end
     if config.groupCB then
         config.groupCB:SetChecked(db.groupCheck)
-        SetCheckEnabled(config.groupCB, expGroup)
+        Cfg.SetCheckEnabled(config.groupCB, expGroup)
         config.groupModeBtn:SetText(L.GROUP_MODE:format(L.GROUP_MODES[db.groupMode] or db.groupMode))
         if expGroup then config.groupModeBtn:Enable() else config.groupModeBtn:Disable() end
     end
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
     config.iconsCB:SetChecked(db.iconsOnly)
-    SetCheckEnabled(config.iconsCB, STYLES[db.style] ~= nil and STYLES[db.style].iconsOnly)
+    Cfg.SetCheckEnabled(config.iconsCB, Style.STYLES[db.style] ~= nil and Style.STYLES[db.style].iconsOnly)
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
 end
 
-local function MakeHeader(parent, text, y)
+function Cfg.MakeHeader(parent, text, y)
     local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     fs:SetPoint("TOPLEFT", 16, y)
     fs:SetText(text)
     return fs
 end
 
-local function MakeEntryRow(parent, e, y)
+function Cfg.MakeEntryRow(parent, e, y)
     local w = { entry = e }
     w.cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     w.cb:SetSize(24, 24)
@@ -2931,11 +2939,11 @@ local function MakeEntryRow(parent, e, y)
     w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     w.status:SetPoint("RIGHT", parent, "TOPLEFT", 424, y - 12)
     w.status:SetJustifyH("RIGHT")
-    configRows[#configRows + 1] = w
+    Cfg.configRows[#Cfg.configRows + 1] = w
 end
 
 -- Reagenz-Zeile: Icon, Name, Eingabefeld für die Schwelle (0-50), Status
-local function MakeReagentRow(parent, e, y)
+function Cfg.MakeReagentRow(parent, e, y)
     local w = { entry = e }
     w.icon = parent:CreateTexture(nil, "ARTWORK")
     w.icon:SetSize(20, 20)
@@ -2969,17 +2977,17 @@ local function MakeReagentRow(parent, e, y)
     w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     w.status:SetPoint("RIGHT", parent, "TOPLEFT", 424, y - 12)
     w.status:SetJustifyH("RIGHT")
-    reagentRows[#reagentRows + 1] = w
+    Cfg.reagentRows[#Cfg.reagentRows + 1] = w
 end
 
-local function MakeButton(parent, text, width)
+function Cfg.MakeButton(parent, text, width)
     local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     b:SetSize(width, 22)
     b:SetText(text)
     return b
 end
 
-local function MakeCheck(parent, text, x, y, onClick)
+function Cfg.MakeCheck(parent, text, x, y, onClick)
     local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     cb:SetSize(24, 24)
     cb:SetPoint("TOPLEFT", x, y)
@@ -2991,14 +2999,14 @@ local function MakeCheck(parent, text, x, y, onClick)
     return cb
 end
 
-local configCanvas   -- Seite unter "Pardona's Addons" in den Einstellungen (nil = eigenes Fenster)
+-- Cfg.configCanvas: Seite unter "Pardona's Addons" in den Einstellungen (nil = eigenes Fenster)
 
 -- Inhalt der Einstellungsseite in einem Scrollbereich (Höhe hängt von Klasse/Reagenzien ab)
-local function CreateCanvasContent()
-    local ok, scroll = pcall(CreateFrame, "ScrollFrame", "BuffReminderConfigScroll", configCanvas, "UIPanelScrollFrameTemplate")
+function Cfg.CreateCanvasContent()
+    local ok, scroll = pcall(CreateFrame, "ScrollFrame", "BuffReminderConfigScroll", Cfg.configCanvas, "UIPanelScrollFrameTemplate")
     if not ok then
         -- ohne Vorlage: Scrollen nur per Mausrad
-        scroll = CreateFrame("ScrollFrame", "BuffReminderConfigScroll", configCanvas)
+        scroll = CreateFrame("ScrollFrame", "BuffReminderConfigScroll", Cfg.configCanvas)
         scroll:EnableMouseWheel(true)
         scroll:SetScript("OnMouseWheel", function(self, delta)
             local v = self:GetVerticalScroll() - delta * 40
@@ -3014,8 +3022,8 @@ local function CreateCanvasContent()
 end
 
 local function BuildConfig()
-    if configCanvas then
-        config = CreateCanvasContent()
+    if Cfg.configCanvas then
+        config = Cfg.CreateCanvasContent()
     else
         -- Fallback ohne Settings-API: eigenständiges Fenster
         config = CreateFrame("Frame", "BuffReminderConfig", UIParent, "BackdropTemplate")
@@ -3045,7 +3053,7 @@ local function BuildConfig()
 
     local y = -48
     local className = UnitClass("player")
-    MakeHeader(config, L.CLASS_SECTION:format(className or "?"), y)
+    Cfg.MakeHeader(config, L.CLASS_SECTION:format(className or "?"), y)
     y = y - 22
     if #classEntries == 0 then
         local fs = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3054,31 +3062,31 @@ local function BuildConfig()
         y = y - 20
     end
     for _, e in ipairs(classEntries) do
-        MakeEntryRow(config, e, y)
+        Cfg.MakeEntryRow(config, e, y)
         y = y - 26
     end
 
     y = y - 10
-    MakeHeader(config, L.GENERAL, y)
+    Cfg.MakeHeader(config, L.GENERAL, y)
     y = y - 22
     for _, e in ipairs(GENERAL_BUFFS) do
-        MakeEntryRow(config, e, y)
+        Cfg.MakeEntryRow(config, e, y)
         y = y - 26
     end
 
     y = y - 12
-    config.enabledCB = MakeCheck(config, L.ENABLED, 16, y, function(self)
+    config.enabledCB = Cfg.MakeCheck(config, L.ENABLED, 16, y, function(self)
         db.enabled = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
     end)
-    config.instCB = MakeCheck(config, L.INSTANCE_ONLY, 160, y, function(self)
+    config.instCB = Cfg.MakeCheck(config, L.INSTANCE_ONLY, 160, y, function(self)
         db.instanceOnly = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
     end)
     y = y - 26
-    config.castCB = MakeCheck(config, L.CLICKCAST, 16, y, function(self)
+    config.castCB = Cfg.MakeCheck(config, L.CLICKCAST, 16, y, function(self)
         db.clickCast = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -3086,21 +3094,21 @@ local function BuildConfig()
     y = y - 30
 
     -- Stil von Warnanzeige und Rechtsklick-Menü; "Nur Icons" nur bei Compact
-    config.styleBtn = MakeButton(config, "", 160)
+    config.styleBtn = Cfg.MakeButton(config, "", 160)
     config.styleBtn:SetPoint("TOPLEFT", 18, y)
     config.styleBtn:SetScript("OnClick", function()
         local idx = 1
-        for i, k in ipairs(STYLE_ORDER) do if k == db.style then idx = i end end
-        db.style = STYLE_ORDER[idx % #STYLE_ORDER + 1]
+        for i, k in ipairs(Style.STYLE_ORDER) do if k == db.style then idx = i end end
+        db.style = Style.STYLE_ORDER[idx % #Style.STYLE_ORDER + 1]
         NoteDeferred()
-        ApplyStyle()
+        Display.ApplyStyle()
         Evaluate()
         RefreshConfig()
     end)
-    config.iconsCB = MakeCheck(config, L.ICONS_ONLY, 190, y + 1, function(self)
+    config.iconsCB = Cfg.MakeCheck(config, L.ICONS_ONLY, 190, y + 1, function(self)
         db.iconsOnly = self:GetChecked() and true or false
         NoteDeferred()
-        ApplyStyle()
+        Display.ApplyStyle()
         Evaluate()
     end)
     y = y - 34
@@ -3113,7 +3121,7 @@ local function BuildConfig()
     sep:SetPoint("TOPLEFT", 16, y)
     sep:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
     y = y - 8
-    local expHead = MakeHeader(config, L.EXP_SECTION, y)
+    local expHead = Cfg.MakeHeader(config, L.EXP_SECTION, y)
     expHead:SetTextColor(1, 0.5, 0)
     y = y - 16
     local expNote = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3122,9 +3130,9 @@ local function BuildConfig()
     y = y - 20
 
     -- Gruppen-Buffs
-    config.expGroupCB = MakeCheck(config, L.EXP_GROUP, 16, y, function(self)
+    config.expGroupCB = Cfg.MakeCheck(config, L.EXP_GROUP, 16, y, function(self)
         db.expGroup = self:GetChecked() and true or false
-        if not GroupFeatureOn() then wipe(groupState) else MarkGroupDirty() end
+        if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
         NoteDeferred()
         Evaluate()
         RefreshConfig()
@@ -3136,19 +3144,19 @@ local function BuildConfig()
         if e.groupIds then hasGroup = true end
     end
     if hasGroup then
-        config.groupCB = MakeCheck(config, L.GROUP_CHECK, 36, y, function(self)
+        config.groupCB = Cfg.MakeCheck(config, L.GROUP_CHECK, 36, y, function(self)
             db.groupCheck = self:GetChecked() and true or false
-            if not GroupFeatureOn() then wipe(groupState) else MarkGroupDirty() end
+            if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
             NoteDeferred()
             Evaluate()
         end)
-        config.groupModeBtn = MakeButton(config, "", 200)
+        config.groupModeBtn = Cfg.MakeButton(config, "", 200)
         config.groupModeBtn:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
         config.groupModeBtn:SetScript("OnClick", function()
             local idx = 1
             for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
             db.groupMode = GROUP_MODE_ORDER[idx % #GROUP_MODE_ORDER + 1]
-            MarkGroupDirty()
+            Group.MarkGroupDirty()
             NoteDeferred()
             Evaluate()
             RefreshConfig()
@@ -3158,7 +3166,7 @@ local function BuildConfig()
 
     -- Reagenzien-Warnung
     y = y - 4
-    config.expReagCB = MakeCheck(config, L.EXP_REAGENTS, 16, y, function(self)
+    config.expReagCB = Cfg.MakeCheck(config, L.EXP_REAGENTS, 16, y, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -3173,13 +3181,13 @@ local function BuildConfig()
         config.reagentHint:SetText(L.REAGENT_HINT)
         y = y - 18
         for _, e in ipairs(reagentEntries) do
-            MakeReagentRow(config, e, y)
+            Cfg.MakeReagentRow(config, e, y)
             y = y - 26
         end
     end
     y = y - 10
 
-    config.soundBtn = MakeButton(config, "", 100)
+    config.soundBtn = Cfg.MakeButton(config, "", 100)
     config.soundBtn:SetPoint("TOPLEFT", 18, y)
     config.soundBtn:SetScript("OnClick", function()
         local idx = 1
@@ -3189,20 +3197,20 @@ local function BuildConfig()
         RefreshConfig()
     end)
 
-    config.moveBtn = MakeButton(config, L.MOVE, 90)
+    config.moveBtn = Cfg.MakeButton(config, L.MOVE, 90)
     config.moveBtn:SetPoint("LEFT", config.soundBtn, "RIGHT", 4, 0)
     config.moveBtn:SetScript("OnClick", function()
         if InCombatLockdown() then Print(L.COMBAT); return end
         unlocked = not unlocked
-        if not unlocked then wipe(shownKeys); ShowRows({}) end
+        if not unlocked then wipe(shownKeys); Display.ShowRows({}) end
         Evaluate()
     end)
 
-    local testBtn = MakeButton(config, L.TEST, 60)
+    local testBtn = Cfg.MakeButton(config, L.TEST, 60)
     testBtn:SetPoint("LEFT", config.moveBtn, "RIGHT", 4, 0)
     testBtn:SetScript("OnClick", StartTest)
 
-    local unmuteBtn = MakeButton(config, L.UNMUTE, 110)
+    local unmuteBtn = Cfg.MakeButton(config, L.UNMUTE, 110)
     unmuteBtn:SetPoint("LEFT", testBtn, "RIGHT", 4, 0)
     unmuteBtn:SetScript("OnClick", function()
         wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
@@ -3210,12 +3218,12 @@ local function BuildConfig()
 
     config:SetSize(440, -y + 44)
     config:SetScript("OnShow", RefreshConfig)
-    if not configCanvas then config:Hide() end
+    if not Cfg.configCanvas then config:Hide() end
 end
 
 local function ToggleConfig()
     -- Einstellungsseite unter "Pardona's Addons"; ohne Settings-API eigenes Fenster
-    if configCanvas then
+    if Cfg.configCanvas then
         LP:OpenSettings(PARDONA_ID)
         return
     end
@@ -3264,7 +3272,7 @@ local function RegisterPardonaSettings()
     canvas:Hide()
     local category = LP:RegisterSettingsCanvas(PARDONA_ID, canvas, "Buff Reminder")
     if not category then return end
-    configCanvas = canvas
+    Cfg.configCanvas = canvas
     canvas:SetScript("OnShow", function()
         if not config then BuildConfig() end
         RefreshConfig()
@@ -3328,7 +3336,7 @@ local function StartGrace()
     local gen = graceGen
     C_Timer.After(GRACE_TIME, function()
         if gen ~= graceGen then return end
-        ready = true; ScanBags(); RefreshKnown(); Evaluate()
+        ready = true; Items.ScanBags(); RefreshKnown(); Evaluate()
     end)
 end
 
@@ -3343,7 +3351,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         cdb.lastVariant = cdb.lastVariant or {}   -- Eintrag-Key -> zuletzt genutzte Variante
         cdb.reagents = cdb.reagents or {}         -- Reagenz-Item-ID -> Warnschwelle (0 = aus)
         cdb.favorites = cdb.favorites or {}       -- Item-ID -> true: Favorit (Essen/Fläschchen)
-        if not STYLES[db.style] then db.style = DEFAULTS.style end
+        if not Style.STYLES[db.style] then db.style = DEFAULTS.style end
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
         db.flaskSpells = db.flaskSpells or {}     -- gelernte Spell-IDs von Fläschchen-Effekten
@@ -3368,9 +3376,9 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             if e.itemKind == "food" then foodEntry = e end
         end
         for id in pairs(db.flaskSpells) do flaskEntry.idSet[id] = true end
-        BuildFoodScores(class)
-        ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
-        ScanBags()
+        Items.BuildFoodScores(class)
+        Eat.ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
+        Items.ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
         reagentLines = REAGENT_SPELLS[class] or {}
         local seen = {}
@@ -3388,7 +3396,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         end
         RefreshKnown()
         ApplyLayout()
-        ApplyStyle()
+        Display.ApplyStyle()
         RegisterPardonaSettings()
         -- UNIT_AURA für alle Units; gefiltert auf player / party* / raid* (siehe unten)
         SafeRegisterEvent(self, "UNIT_AURA")
@@ -3403,10 +3411,10 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- arg1 = Item-ID; nur eigene Reagenzien interessieren (lokalisierter Name nachgeladen)
         -- bzw. Essen/Fläschchen in den Taschen (Name, Stufe, Tooltip jetzt verfügbar)
         if IsSecret(arg1) then return end
-        if eatPending[arg1] then ResolveEatSpell(arg1, true) end   -- Ess-Aura jetzt ermittelbar
-        if bagCounts[arg1] then
-            if IsFlaskItem(arg1) then LearnFlaskSpell(arg1) end
-            RefreshItemPanel()
+        if Eat.eatPending[arg1] then Eat.ResolveEatSpell(arg1, true) end   -- Ess-Aura jetzt ermittelbar
+        if Items.bagCounts[arg1] then
+            if Items.IsFlaskItem(arg1) then Items.LearnFlaskSpell(arg1) end
+            Menu.RefreshItemPanel()
             Evaluate()
             return
         end
@@ -3421,14 +3429,14 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     end
 
     if event == "BAG_UPDATE_DELAYED" then
-        ScanBags()
-        RefreshItemPanel()   -- im Kampf nicht offen; Zeilen-Attribute folgen per Evaluate nach dem Kampf
+        Items.ScanBags()
+        Menu.RefreshItemPanel()   -- im Kampf nicht offen; Zeilen-Attribute folgen per Evaluate nach dem Kampf
         Evaluate()
         return
     end
 
     if event == "PLAYER_REGEN_DISABLED" then
-        CloseItemPanelForCombat()
+        Menu.CloseItemPanelForCombat()
         RefreshPardonaStatus()   -- im Kampf kein Kurzstatus
         return
     end
@@ -3439,23 +3447,23 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- Gruppen-Buffs aus (Experimental-Schalter oder groupCheck): Gruppen-Units ignorieren.
         if arg1 == nil or IsSecret(arg1) then return end
         if arg1 == "player" then
-            if GroupFeatureOn() then MarkGroupDirty() end
+            if GroupFeatureOn() then Group.MarkGroupDirty() end
             Evaluate()
         elseif GroupFeatureOn() and (arg1:find("^party%d") or arg1:find("^raid%d")) then
-            MarkGroupDirty()
+            Group.MarkGroupDirty()
         end
         return
     end
 
     if event == "GROUP_ROSTER_UPDATE" then
         if not GroupFeatureOn() then return end
-        MarkGroupDirty()
+        Group.MarkGroupDirty()
         return
     end
 
     if event == "PLAYER_REGEN_ENABLED" then
         -- nach dem Kampf: Gruppe sofort neu prüfen, Zeilen/Attribute nachziehen
-        if GroupFeatureOn() then groupDirty = true end
+        if GroupFeatureOn() then Group.groupDirty = true end
         Evaluate()
         RefreshPardonaStatus()
         return
@@ -3464,12 +3472,12 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- arg1 = unit, arg2 = castGUID, arg3 = spellID (kann ein Secret-Wert sein)
         -- Ziel der Gruppen-Zeilen nach jedem Cast neu bestimmen
-        if GroupFeatureOn() then MarkGroupDirty() end
+        if GroupFeatureOn() then Group.MarkGroupDirty() end
         if cdb then
             RememberFromCast(arg3)
             -- Fläschchen-Effekt (auch über Aktionsleiste/Taschen benutzt) -> zuletzt benutzt
-            if arg3 ~= nil and not IsSecret(arg3) and flaskBySpell[arg3] then
-                cdb.lastFlask = flaskBySpell[arg3]
+            if arg3 ~= nil and not IsSecret(arg3) and Items.flaskBySpell[arg3] then
+                cdb.lastFlask = Items.flaskBySpell[arg3]
             end
         end
         Evaluate()
@@ -3525,8 +3533,8 @@ SlashCmdList.BUFFREMINDER = function(msg)
         end
         Print(("eating=%s aura=%s eatSpells=%d eatNames=%d"):format(
             (foodEntry and foodEntry.eatStart) and "yes" or "no",
-            eatAura and ("%s – %s"):format(tostring(eatAura.name), tostring(eatAura.id)) or "none",
-            CountKeys(eatSpells), CountKeys(eatNames)))
+            Eat.eatAura and ("%s – %s"):format(tostring(Eat.eatAura.name), tostring(Eat.eatAura.id)) or "none",
+            CountKeys(Eat.eatSpells), CountKeys(Eat.eatNames)))
     elseif cmd == "auras" then
         Print(L.AURAS_HEAD)
         if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
@@ -3553,7 +3561,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
-        ApplyLayout(); ApplyStyle(); Print(L.RESET); Evaluate()
+        ApplyLayout(); Display.ApplyStyle(); Print(L.RESET); Evaluate()
     else
         for _, line in ipairs(L.HELP) do Print(line) end
     end
