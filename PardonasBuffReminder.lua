@@ -724,7 +724,7 @@ local reagentLines = {}       -- Zauberlinien der eigenen Klasse (REAGENT_SPELLS
 local knownCache = {}
 local missing = {}            -- key -> bool (letzter lesbarer Zustand)
 local missingSince = {}       -- key -> GetTime(), seit dem der Buff durchgehend fehlt
-local MISSING_CONFIRM = 2     -- Sek. durchgehendes Fehlen, bevor gewarnt wird
+local MISSING_CONFIRM = 1     -- Sek. durchgehendes Fehlen, bevor gewarnt wird
 local shownKeys = {}          -- key -> true, aktuell eingeblendet
 local muted = {}              -- key -> Ablaufzeit (GetTime) | math.huge
 local ready, unlocked, testUntil = false, false, 0
@@ -2733,7 +2733,18 @@ function Evaluate()
                 if m ~= nil then missing[e.key] = m end   -- nil: Zustand beibehalten (Kampf/Secret)
                 -- Entprellung: nil (unbekannt) lässt missingSince unverändert
                 if m == true then
-                    missingSince[e.key] = missingSince[e.key] or now
+                    if not missingSince[e.key] then
+                        missingSince[e.key] = now
+                        -- Einmalige Nachprüfung genau nach Ablauf der Entprellung statt erst
+                        -- beim nächsten Ticker-Tick; höchstens ein ausstehender Timer.
+                        if not Display.confirmTimerPending then
+                            Display.confirmTimerPending = true
+                            C_Timer.After(MISSING_CONFIRM + 0.05, function()
+                                Display.confirmTimerPending = false
+                                Evaluate()
+                            end)
+                        end
+                    end
                 elseif m == false then
                     missingSince[e.key] = nil
                 end
