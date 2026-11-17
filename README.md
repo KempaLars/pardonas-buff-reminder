@@ -42,7 +42,7 @@ Built for **WoW Forever** (Interface `16001`).
   - Uses the "Left-click casts buff" option: when it is off, left-click does nothing and right-click only mutes.
 - **Eating countdown** – while you are eating (started from the reminder or directly from your bags; detected by the food's eating aura by spell ID or name, or by the generic "Food" or "Drink" aura) and are not yet Well Fed, the Well Fed reminder shows "Eating … 7 s", counting down the 10 seconds until the buff appears, then "Almost well fed …", with the hint "Stay seated". This does not trigger a chat message or sound. If you stand up before getting Well Fed, the normal reminder comes back (again without a new chat message or sound).
 - **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
-- **Right-click to mute** – right-click a reminder to mute it for 5, 15 or 60 minutes or for the rest of the session. Mutes can be cleared from the settings window or with `/br unmute`.
+- **Right-click to mute** – right-click a reminder to mute it for 5, 15 or 60 minutes or for the rest of the session. Mutes can be cleared from the settings or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
   - Directly castable: Priest (Fortitude, Inner Fire, Divine Spirit, Shadow Protection, Vampiric Embrace, Shadowform), Mage (Arcane Intellect), Druid (Mark of the Wild, Thorns), Hunter (Trueshot Aura), Death Knight (Horn of Winter).
   - **"Any" reminders** (Paladin aura/seal/blessing, Hunter aspect, Mage and Warlock armor, Shaman shield and weapon imbues, Warrior shout): the addon remembers per character which variant you used last – either from a spell you cast or from a matching aura you applied yourself – and left-click casts that variant (Greater Blessings are remembered as the matching single-target blessing). Until a variant has been remembered, left-click does nothing.
@@ -52,13 +52,22 @@ Built for **WoW Forever** (Interface `16001`).
 - **Combat behaviour** – reminders are secure buttons, so the list (including click targets of group buff lines) cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
 - **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock". While moving, left-click does not cast.
-- **Minimap button** – left-click opens the settings, right-click shows a test reminder, drag to move the button around the minimap.
+- **Pardona's Addons entry point (beta)** – see [below](#pardonas-addons-beta).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – German and English, picked automatically from the game client language.
 
+## Pardona's Addons (beta)
+
+All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one entry point, provided by the embedded library [LibPardona-1.0](https://github.com/KempaLars/lib-pardona). With several Pardona addons installed you still get only one minimap button and one settings category.
+
+- **Settings** – Options → AddOns → **Pardona's Addons** → **Buff Reminder**. The overview page "Pardona's Addons" lists every installed Pardona addon with its version, a short status and an *Open* button, plus a *Show minimap button* checkbox. `/br` opens the Buff Reminder page directly. If the client has no Settings API, `/br` opens the standalone settings window instead.
+- **Addon compartment** – the entry "Pardona's Addons" in the addon compartment (next to the minimap, if the client has one) works like the minimap button.
+- **Shared minimap button** – one "Pardona" button for all Pardona addons. With only Buff Reminder installed, left-click opens its settings; with several Pardona addons, left-click opens a small menu. Right-click opens the overview, drag moves the button along the minimap edge. The tooltip shows each addon's short status, for Buff Reminder e.g. "2 buffs missing" or "All active" (nothing in combat or while the state is still unknown). `/br minimap` or the overview checkbox shows or hides the button for all Pardona addons. The position and visibility of the old Buff Reminder minimap button are taken over once.
+- **Titan Panel and other LibDataBroker displays** – if another addon already loads LibDataBroker-1.1 (e.g. Titan Panel, ChocolateBar), a "Pardona" launcher appears there. It behaves like the minimap button and shows the statuses as text; you can hide the minimap button if you prefer the panel.
+
 ## Experimental features (opt-in)
 
-These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings window, in the section **"Experimental (beta) – use at your own risk"** below the general options. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
+These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings, in the section **"Experimental (beta) – use at your own risk"** below the general options. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
 
 While a feature is off, it does nothing at all: no group lines, no group scans, no reagent lines and no reagent count checks; your own reminders work as usual. The detail settings below each checkbox are greyed out while it is off. Changes take effect immediately (in combat: when combat ends).
 
@@ -84,15 +93,23 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
 
 | Command        | Description                                   |
 | -------------- | --------------------------------------------- |
-| `/br`          | Open or close the settings window             |
+| `/br`          | Open the settings (Pardona's Addons → Buff Reminder) |
 | `/br test`     | Show a test reminder for 5 seconds (not in combat) |
-| `/br minimap`  | Show or hide the minimap button               |
+| `/br minimap`  | Show or hide the shared Pardona minimap button (all Pardona addons) |
 | `/br unmute`   | Clear all mutes                               |
 | `/br auras`    | List your active buffs with name and spell ID |
 | `/br debug`    | Print diagnostic state (reminders, eating detection) |
 | `/br reset`    | Reset position and settings (not in combat)   |
 
 ## Development
+
+**Libraries:** LibPardona-1.0 is not part of this repository. The packager fetches it into `Libs/lib-pardona` (externals in `.pkgmeta`); `Libs/` is ignored by Git and luacheck. Before testing locally from the repository, run:
+
+```powershell
+.\tools\fetch-libs.ps1
+```
+
+It copies the library from a sibling checkout `..\lib-pardona` if present (for local library development), otherwise it clones `https://github.com/KempaLars/lib-pardona`. It can be run any number of times; the previous copy is replaced. Changes to the library belong in the lib-pardona repository, never in `Libs/`.
 
 The code is linted with [luacheck](https://github.com/lunarmodules/luacheck). The configuration is in `.luacheckrc` (Lua 5.1, the WoW API globals the addon uses, and the globals it writes). Run it locally from the repository root before committing:
 
@@ -132,14 +149,15 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 │   ├── lint.yml                    # Lint workflow (luacheck on push to main/develop and pull requests)
 │   └── release.yml                 # Release workflow (triggered by version tags, lint first)
 ├── media/
-│   ├── icon-minimap.svg            # Source for the minimap button icon (no ring)
+│   ├── icon-minimap.svg            # Source for the former minimap button icon (no longer used)
 │   ├── icon.svg                    # Source for the round addon list icon
 │   ├── logo-400.png                # Logo (PNG, 400 px)
 │   └── logo.svg                    # Logo (vector)
 ├── Textures/
-│   ├── Icon.tga                    # Addon list icon (64x64, 32-bit TGA with alpha)
-│   └── MinimapIcon.tga             # Minimap button icon, no ring (64x64, 32-bit TGA with alpha)
-├── .gitignore
+│   └── Icon.tga                    # Addon list and Pardona menu icon (64x64, 32-bit TGA with alpha)
+├── tools/
+│   └── fetch-libs.ps1              # Fetches LibPardona-1.0 into Libs/ for local testing
+├── .gitignore                      # Also ignores Libs/ (fetched by the packager or tools/fetch-libs.ps1)
 ├── .luacheckrc                     # luacheck configuration
 ├── .pkgmeta                        # Packager configuration
 ├── PardonasBuffReminder.lua        # Addon code
@@ -147,4 +165,4 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 └── README.md
 ```
 
-`README.md`, `.luacheckrc` and `media/` are excluded from the packaged addon.
+`README.md`, `.luacheckrc`, `media/` and `tools/` are excluded from the packaged addon. The packaged addon contains `Libs/lib-pardona` (LibPardona-1.0 with LibStub), loaded by the TOC before the addon code.

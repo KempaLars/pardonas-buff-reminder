@@ -1,7 +1,7 @@
 -- Pardona's Buff Reminder – WoW Forever (Interface 16001, Mainline-API)
 -- Erinnert an fehlende Klassen- und allgemeine Buffs (auch bei Gruppen-/Raid-Mitgliedern)
 -- sowie an knappe Reagenzien.
--- Auswahl per GUI (Minimap-Button / /br), Rechtsklick auf Erinnerung = stummschalten,
+-- Auswahl per GUI (Pardona-Menü / Einstellungen / /br), Rechtsklick auf Erinnerung = stummschalten,
 -- Linksklick auf Erinnerung = Buff auf sich selbst zaubern (abschaltbar);
 -- bei Essen/Fläschchen = bestes Item aus den Taschen benutzen, Rechtsklick = Auswahl.
 
@@ -39,16 +39,16 @@ if GetLocale() == "deDE" then
         UNMUTE        = "Stumm aufheben",
         UNMUTED       = "Alle Stummschaltungen aufgehoben.",
         DRAG          = "Ziehen zum Verschieben",
-        MM_LEFT       = "Linksklick: Einstellungen",
-        MM_RIGHT      = "Rechtsklick: Test",
-        MM_DRAG       = "Ziehen: Button verschieben",
+        STATUS_ONE    = "1 Buff fehlt",
+        STATUS_MANY   = "%d Buffs fehlen",
+        STATUS_OK     = "Alles aktiv",
         NO_CLASS      = "Keine Klassenbuffs für diese Klasse hinterlegt.",
         RESET         = "Einstellungen zurückgesetzt.",
         SOUNDS        = { ping = "Ping", glocke = "Glocke", alarm = "Alarm", aus = "Aus" },
         HELP          = {
             "/br – Einstellungen öffnen",
             "/br test – Erinnerung testen",
-            "/br minimap – Minimap-Button ein/aus",
+            "/br minimap – gemeinsamen Pardona-Minimap-Button ein/aus",
             "/br unmute – alle Stummschaltungen aufheben",
             "/br auras – aktive Buffs mit Namen und Spell-ID auflisten",
             "/br reset – Position und Einstellungen zurücksetzen",
@@ -138,16 +138,16 @@ else
         UNMUTE        = "Unmute all",
         UNMUTED       = "All mutes cleared.",
         DRAG          = "Drag to move",
-        MM_LEFT       = "Left-click: settings",
-        MM_RIGHT      = "Right-click: test",
-        MM_DRAG       = "Drag: move button",
+        STATUS_ONE    = "1 buff missing",
+        STATUS_MANY   = "%d buffs missing",
+        STATUS_OK     = "All active",
         NO_CLASS      = "No class buffs defined for this class.",
         RESET         = "Settings reset.",
         SOUNDS        = { ping = "Ping", glocke = "Bell", alarm = "Alarm", aus = "Off" },
         HELP          = {
             "/br – open settings",
             "/br test – test the reminder",
-            "/br minimap – toggle minimap button",
+            "/br minimap – toggle the shared Pardona minimap button",
             "/br unmute – clear all mutes",
             "/br auras – list active buffs with name and spell ID",
             "/br reset – reset position and settings",
@@ -651,8 +651,6 @@ local DEFAULTS = {
     sound        = "ping",
     scale        = 1.0,
     point        = { "CENTER", "UIParent", "CENTER", 0, 140 },
-    minimapAngle = 200,
-    minimapHide  = false,
     instanceOnly = true,
     groupCheck   = true,       -- Gruppen-Buffs bei Party-/Raid-Mitgliedern prüfen
     groupMode    = "always",   -- "always" | "instance" (Dungeon & Raid) | "raid"
@@ -677,6 +675,11 @@ local shownKeys = {}          -- key -> true, aktuell eingeblendet
 local muted = {}              -- key -> Ablaufzeit (GetTime) | math.huge
 local ready, unlocked, testUntil = false, false, 0
 local Evaluate, RefreshConfig -- forward
+local warnCount               -- Anzahl angezeigter Warnungen, -1 = abgeschaltet, nil = unbekannt
+
+-- Gemeinsame Pardona-Bibliothek (Minimap-Button, Einstellungs-Kategorie, Addon-Fach)
+local LP = LibStub and LibStub("LibPardona-1.0", true)
+local PARDONA_ID = "BuffReminder"
 
 local function Print(msg) print("|cff66ccff" .. L.TITLE .. ":|r " .. msg) end
 
@@ -690,6 +693,17 @@ local function NormName(n) return (n:lower():gsub("[%s%-]", "")) end
 
 local function IsSecret(v)
     return issecretvalue ~= nil and issecretvalue(v) == true
+end
+
+-- Kurzstatus im Pardona-Menü/Tooltip/Broker neu anzeigen lassen (gedrosselt)
+local statusPending = false
+local function RefreshPardonaStatus()
+    if not LP or statusPending then return end
+    statusPending = true
+    C_Timer.After(0.5, function()
+        statusPending = false
+        LP:RefreshStatus()
+    end)
 end
 
 -- Addon-Version aus der TOC ("" = nicht lesbar)
@@ -2215,6 +2229,13 @@ function Evaluate()
     if newOnes then PlayAlertSound() end   -- Ton nur bei neu fehlendem Buff, keine Wiederholung
     ShowRows(list)
 
+    -- Kurzstatus für das Pardona-Menü: nur bei Änderung neu anzeigen
+    local count = db.enabled and #list or -1
+    if count ~= warnCount then
+        warnCount = count
+        RefreshPardonaStatus()
+    end
+
     if RefreshConfig then RefreshConfig() end
 end
 
@@ -2256,7 +2277,7 @@ local function SetEditEnabled(edit, on)
 end
 
 function RefreshConfig()
-    if not config or not config:IsShown() then return end
+    if not config or not config:IsVisible() then return end
     for _, w in ipairs(configRows) do
         local e = w.entry
         local known = knownCache[e.key]
@@ -2427,30 +2448,57 @@ local function MakeCheck(parent, text, x, y, onClick)
     return cb
 end
 
+local configCanvas   -- Seite unter "Pardona's Addons" in den Einstellungen (nil = eigenes Fenster)
+
+-- Inhalt der Einstellungsseite in einem Scrollbereich (Höhe hängt von Klasse/Reagenzien ab)
+local function CreateCanvasContent()
+    local ok, scroll = pcall(CreateFrame, "ScrollFrame", "BuffReminderConfigScroll", configCanvas, "UIPanelScrollFrameTemplate")
+    if not ok then
+        -- ohne Vorlage: Scrollen nur per Mausrad
+        scroll = CreateFrame("ScrollFrame", "BuffReminderConfigScroll", configCanvas)
+        scroll:EnableMouseWheel(true)
+        scroll:SetScript("OnMouseWheel", function(self, delta)
+            local v = self:GetVerticalScroll() - delta * 40
+            v = math.max(0, math.min(v, self:GetVerticalScrollRange()))
+            self:SetVerticalScroll(v)
+        end)
+    end
+    scroll:SetPoint("TOPLEFT", 0, -4)
+    scroll:SetPoint("BOTTOMRIGHT", -28, 4)
+    local content = CreateFrame("Frame", "BuffReminderConfig", scroll)
+    scroll:SetScrollChild(content)
+    return content
+end
+
 local function BuildConfig()
-    config = CreateFrame("Frame", "BuffReminderConfig", UIParent, "BackdropTemplate")
-    config:SetFrameStrata("DIALOG")
-    config:SetPoint("CENTER")
-    config:SetClampedToScreen(true)
-    config:SetMovable(true)
-    config:EnableMouse(true)
-    config:RegisterForDrag("LeftButton")
-    config:SetScript("OnDragStart", config.StartMoving)
-    config:SetScript("OnDragStop", config.StopMovingOrSizing)
-    config:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 11, right = 12, top = 12, bottom = 11 },
-    })
-    tinsert(UISpecialFrames, "BuffReminderConfig")
+    if configCanvas then
+        config = CreateCanvasContent()
+    else
+        -- Fallback ohne Settings-API: eigenständiges Fenster
+        config = CreateFrame("Frame", "BuffReminderConfig", UIParent, "BackdropTemplate")
+        config:SetFrameStrata("DIALOG")
+        config:SetPoint("CENTER")
+        config:SetClampedToScreen(true)
+        config:SetMovable(true)
+        config:EnableMouse(true)
+        config:RegisterForDrag("LeftButton")
+        config:SetScript("OnDragStart", config.StartMoving)
+        config:SetScript("OnDragStop", config.StopMovingOrSizing)
+        config:SetBackdrop({
+            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 },
+        })
+        tinsert(UISpecialFrames, "BuffReminderConfig")
+
+        local close = CreateFrame("Button", nil, config, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -6, -6)
+    end
 
     local title = config:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -18)
     title:SetText(L.TITLE)
-
-    local close = CreateFrame("Button", nil, config, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -6, -6)
 
     local y = -48
     local className = UnitClass("player")
@@ -2599,108 +2647,89 @@ local function BuildConfig()
 
     config:SetSize(440, -y + 44)
     config:SetScript("OnShow", RefreshConfig)
-    config:Hide()
+    if not configCanvas then config:Hide() end
 end
 
 local function ToggleConfig()
+    -- Einstellungsseite unter "Pardona's Addons"; ohne Settings-API eigenes Fenster
+    if configCanvas then
+        LP:OpenSettings(PARDONA_ID)
+        return
+    end
     if not config then BuildConfig() end
     if config:IsShown() then config:Hide() else config:Show() end
 end
 
 ---------------------------------------------------------------------------
--- Minimap-Button
+-- LibPardona: gemeinsamer Minimap-Button, Addon-Fach, Einstellungs-Kategorie
 ---------------------------------------------------------------------------
-local mm = CreateFrame("Button", "BuffReminderMinimapButton", Minimap)
-mm:SetSize(31, 31)
-mm:SetFrameStrata("MEDIUM")
-mm:SetFrameLevel(8)
-mm:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-mm:RegisterForDrag("LeftButton")
-mm:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-
--- Maße wie im Mainline-Client üblich (Vorbild: LibDBIcon). Die Rahmen-Textur ist so
--- gezeichnet, dass ihr Ring bei 50x50 und TOPLEFT mittig um den 31x31-Button liegt.
-local MM_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
-
-local function RoundMask(tex)
-    local mask = mm:CreateMaskTexture()
-    mask:SetTexture(MM_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    mask:SetAllPoints(tex)   -- folgt der Textur (auch beim Klick-Versatz)
-    tex:AddMaskTexture(mask)
+-- Kurzstatus; nil im Kampf oder solange der Zustand unbekannt ist
+local function PardonaStatus()
+    if not db or not ready or warnCount == nil or warnCount < 0 or InCombatLockdown() then return nil end
+    if warnCount == 0 then return L.STATUS_OK end
+    if warnCount == 1 then return L.STATUS_ONE end
+    return L.STATUS_MANY:format(warnCount)
 end
 
-local mmBg = mm:CreateTexture(nil, "BACKGROUND")
-mmBg:SetSize(24, 24)
-mmBg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-mmBg:SetPoint("CENTER", mm, "CENTER")
-RoundMask(mmBg)
-
--- Logo ist bereits rund mit transparenten Ecken → kein TexCoord-Zuschnitt
-local mmIcon = mm:CreateTexture(nil, "ARTWORK")
-mmIcon:SetSize(18, 18)
-mmIcon:SetPoint("CENTER", mm, "CENTER")
-mmIcon:SetTexture("Interface\\AddOns\\PardonasBuffReminder\\Textures\\MinimapIcon")
-RoundMask(mmIcon)
-
-local mmBorder = mm:CreateTexture(nil, "OVERLAY")
-mmBorder:SetSize(50, 50)
-mmBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-mmBorder:SetPoint("TOPLEFT", mm, "TOPLEFT")
-
--- Klick-Feedback wie bei Standard-Minimap-Buttons: Icon versetzt und abgedunkelt
-local function MinimapIconPressed(pressed)
-    mmIcon:ClearAllPoints()
-    if pressed then
-        mmIcon:SetPoint("CENTER", mm, "CENTER", 1, -1)
-        mmIcon:SetVertexColor(0.75, 0.75, 0.75)
-    else
-        mmIcon:SetPoint("CENTER", mm, "CENTER")
-        mmIcon:SetVertexColor(1, 1, 1)
-    end
-end
-mm:SetScript("OnMouseDown", function() MinimapIconPressed(true) end)
-mm:SetScript("OnMouseUp", function() MinimapIconPressed(false) end)
-mm:SetScript("OnHide", function() MinimapIconPressed(false) end)
-
--- Abstand Button-Mitte zur Minimap-Mitte: Radius + 5 setzt den Button mittig auf den
--- Rand der Mainline-Minimap (LibDBIcon Mainline); +10 stammt aus Classic-Clients.
-local MM_RADIUS_OFFSET = 5
-
-local function UpdateMinimapPos()
-    local a = math.rad(db.minimapAngle)
-    local r = (Minimap:GetWidth() / 2) + MM_RADIUS_OFFSET
-    mm:ClearAllPoints()
-    mm:SetPoint("CENTER", Minimap, "CENTER", math.cos(a) * r, math.sin(a) * r)
-    if db.minimapHide then mm:Hide() else mm:Show() end
+-- Erst nach ADDON_LOADED aufrufen (db muss geladen sein)
+local function RegisterPardona()
+    if not LP then return end
+    if type(db.pardona) ~= "table" then db.pardona = {} end
+    LP:RegisterAddon(PARDONA_ID, {
+        name    = L.TITLE,
+        icon    = "Interface\\AddOns\\PardonasBuffReminder\\Textures\\Icon",
+        db      = db.pardona,
+        onClick = function() ToggleConfig() end,
+        status  = PardonaStatus,
+        -- einmalig: Position/Sichtbarkeit des früheren eigenen Minimap-Buttons übernehmen
+        -- (die alten Felder minimapAngle/minimapHide bleiben in der DB stehen)
+        migrate = function(pdb)
+            if db.minimapAngle == nil and db.minimapHide == nil then return end
+            pdb.minimap = {
+                hide  = db.minimapHide == true,
+                angle = type(db.minimapAngle) == "number" and db.minimapAngle % 360 or nil,
+            }
+        end,
+    })
 end
 
-mm:SetScript("OnDragStart", function(self)
-    self:SetScript("OnUpdate", function()
-        local mx, my = Minimap:GetCenter()
-        local px, py = GetCursorPosition()
-        local s = Minimap:GetEffectiveScale()
-        db.minimapAngle = math.deg(math.atan2(py / s - my, px / s - mx))
-        UpdateMinimapPos()
+-- Nach PLAYER_LOGIN aufrufen (Klassen-/Reagenzien-Einträge müssen feststehen);
+-- der Inhalt wird erst beim ersten Öffnen gebaut.
+local function RegisterPardonaSettings()
+    if not LP or config then return end
+    local canvas = CreateFrame("Frame", "BuffReminderSettingsCanvas")
+    canvas:Hide()
+    local category = LP:RegisterSettingsCanvas(PARDONA_ID, canvas, "Buff Reminder")
+    if not category then return end
+    configCanvas = canvas
+    canvas:SetScript("OnShow", function()
+        if not config then BuildConfig() end
+        RefreshConfig()
     end)
-end)
-mm:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
-mm:SetScript("OnClick", function(_, button)
-    if button == "RightButton" then
-        StartTest()
-    else
-        ToggleConfig()
+end
+
+-- /br minimap: gemeinsamen Pardona-Button ein-/ausblenden (gilt für alle Pardona-Addons)
+local function TogglePardonaMinimap()
+    if not LP or type(db.pardona) ~= "table" then return end
+    local mm = db.pardona.minimap
+    local hide = not (type(mm) == "table" and mm.hide == true)
+    if type(LP.SetMinimapHidden) == "function" then
+        LP:SetMinimapHidden(hide)
+        return
     end
-end)
-mm:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText(L.TITLE, 1, 0.82, 0)
-    GameTooltip:AddLine(L.MM_LEFT, 1, 1, 1)
-    GameTooltip:AddLine(L.MM_RIGHT, 1, 1, 1)
-    GameTooltip:AddLine(L.MM_DRAG, 0.7, 0.7, 0.7)
-    GameTooltip:Show()
-end)
-mm:SetScript("OnLeave", function() GameTooltip:Hide() end)
-mm:Hide()
+    -- LibPardona-1.0 (MINOR 1) hat dafür keine öffentliche Funktion: Datensatz so wie die
+    -- Übersichts-Checkbox der Bibliothek in alle registrierten dbs schreiben.
+    local now = type(time) == "function" and time() or 0
+    for _, id in ipairs(LP.order or {}) do
+        local entry = LP.entries and LP.entries[id]
+        local edb = entry and entry.info and entry.info.db
+        if type(edb) == "table" then
+            if type(edb.minimap) ~= "table" then edb.minimap = {} end
+            edb.minimap.hide, edb.minimap.changed = hide, now
+        end
+    end
+    LP:RefreshStatus()
+end
 
 ---------------------------------------------------------------------------
 -- Events
@@ -2711,24 +2740,35 @@ local function ApplyDefaults(t, defaults)
     end
 end
 
+-- Events nur registrieren, wenn der Client sie kennt (C_EventUtils.IsEventValid), und immer
+-- per pcall. unit gesetzt: RegisterUnitEvent. Rückgabe: true = registriert.
+local function SafeRegisterEvent(frame, event, unit)
+    if C_EventUtils and C_EventUtils.IsEventValid then
+        local okValid, valid = pcall(C_EventUtils.IsEventValid, event)
+        if not okValid or not valid then return false end
+    end
+    if unit then return (pcall(frame.RegisterUnitEvent, frame, event, unit)) end
+    return (pcall(frame.RegisterEvent, frame, event))
+end
+
 local ev = CreateFrame("Frame")
-ev:RegisterEvent("ADDON_LOADED")
-ev:RegisterEvent("PLAYER_LOGIN")
-ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-ev:RegisterEvent("PLAYER_REGEN_ENABLED")
-ev:RegisterEvent("PLAYER_ALIVE")
-ev:RegisterEvent("PLAYER_UNGHOST")
-ev:RegisterEvent("PLAYER_DEAD")
-ev:RegisterEvent("SPELLS_CHANGED")
-ev:RegisterEvent("PLAYER_LEVEL_UP")
-ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-ev:RegisterEvent("BAG_UPDATE_DELAYED")
-ev:RegisterEvent("PLAYER_REGEN_DISABLED")
-ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
--- Ladebildschirm-Events gibt es nicht in jedem Client → Registrierung absichern
-pcall(ev.RegisterEvent, ev, "LOADING_SCREEN_ENABLED")
-pcall(ev.RegisterEvent, ev, "LOADING_SCREEN_DISABLED")
+SafeRegisterEvent(ev, "ADDON_LOADED")
+SafeRegisterEvent(ev, "PLAYER_LOGIN")
+SafeRegisterEvent(ev, "PLAYER_ENTERING_WORLD")
+SafeRegisterEvent(ev, "PLAYER_REGEN_ENABLED")
+SafeRegisterEvent(ev, "PLAYER_ALIVE")
+SafeRegisterEvent(ev, "PLAYER_UNGHOST")
+SafeRegisterEvent(ev, "PLAYER_DEAD")
+SafeRegisterEvent(ev, "SPELLS_CHANGED")
+SafeRegisterEvent(ev, "PLAYER_LEVEL_UP")
+SafeRegisterEvent(ev, "PLAYER_EQUIPMENT_CHANGED")
+SafeRegisterEvent(ev, "ZONE_CHANGED_NEW_AREA")
+SafeRegisterEvent(ev, "BAG_UPDATE_DELAYED")
+SafeRegisterEvent(ev, "PLAYER_REGEN_DISABLED")
+SafeRegisterEvent(ev, "GET_ITEM_INFO_RECEIVED")
+-- Ladebildschirm-Events gibt es nicht in jedem Client (IsEventValid filtert sie dann aus)
+SafeRegisterEvent(ev, "LOADING_SCREEN_ENABLED")
+SafeRegisterEvent(ev, "LOADING_SCREEN_DISABLED")
 
 -- Nach Login/Ladebildschirm liefert die Aura-API kurz unvollständige Daten → 3 Sek. warten.
 -- Generationszähler: nur der zuletzt gestartete Timer darf ready = true setzen.
@@ -2738,6 +2778,7 @@ local graceGen = 0
 local function StartGrace()
     ready = false
     wipe(missingSince)
+    warnCount = nil   -- Kurzstatus nach der Wartezeit neu melden
     graceGen = graceGen + 1
     local gen = graceGen
     C_Timer.After(GRACE_TIME, function()
@@ -2759,6 +2800,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
         db.flaskSpells = db.flaskSpells or {}     -- gelernte Spell-IDs von Fläschchen-Effekten
+        RegisterPardona()                         -- erst jetzt: SavedVariables sind geladen
         self:UnregisterEvent("ADDON_LOADED")
         return
     end
@@ -2799,12 +2841,12 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         end
         RefreshKnown()
         ApplyLayout()
-        UpdateMinimapPos()
+        RegisterPardonaSettings()
         -- UNIT_AURA für alle Units; gefiltert auf player / party* / raid* (siehe unten)
-        self:RegisterEvent("UNIT_AURA")
-        self:RegisterEvent("GROUP_ROSTER_UPDATE")
-        self:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
-        self:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+        SafeRegisterEvent(self, "UNIT_AURA")
+        SafeRegisterEvent(self, "GROUP_ROSTER_UPDATE")
+        SafeRegisterEvent(self, "UNIT_INVENTORY_CHANGED", "player")
+        SafeRegisterEvent(self, "UNIT_SPELLCAST_SUCCEEDED", "player")
         C_Timer.NewTicker(1, Evaluate)
         return
     end
@@ -2839,6 +2881,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
 
     if event == "PLAYER_REGEN_DISABLED" then
         CloseItemPanelForCombat()
+        RefreshPardonaStatus()   -- im Kampf kein Kurzstatus
         return
     end
 
@@ -2866,6 +2909,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         -- nach dem Kampf: Gruppe sofort neu prüfen, Zeilen/Attribute nachziehen
         if GroupFeatureOn() then groupDirty = true end
         Evaluate()
+        RefreshPardonaStatus()
         return
     end
 
@@ -2917,8 +2961,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
     elseif cmd == "test" then
         StartTest()
     elseif cmd == "minimap" then
-        db.minimapHide = not db.minimapHide
-        UpdateMinimapPos()
+        TogglePardonaMinimap()
     elseif cmd == "unmute" then
         wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
     elseif cmd == "debug" then
@@ -2962,7 +3005,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
-        ApplyLayout(); UpdateMinimapPos(); Print(L.RESET); Evaluate()
+        ApplyLayout(); Print(L.RESET); Evaluate()
     else
         for _, line in ipairs(L.HELP) do Print(line) end
     end

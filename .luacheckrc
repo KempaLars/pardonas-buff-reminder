@@ -3,7 +3,7 @@ std = "lua51"
 max_line_length = false
 -- WoW callbacks receive parameters (self, event, button, ...) that are often unused
 unused_args = false
-exclude_files = { ".release" }
+exclude_files = { ".release", "Libs" }
 
 -- Globals the addon writes
 globals = {
@@ -19,6 +19,7 @@ globals = {
 read_globals = {
     -- namespaces
     "C_Container",
+    "C_EventUtils",
     "C_AddOns",
     "C_CVar",
     "C_Item",
@@ -31,7 +32,7 @@ read_globals = {
     "CreateFrame",
     "Enum",
     "GameTooltip",
-    "Minimap",
+    "LibStub",
     "UIParent",
     "SOUNDKIT",
     -- functions
@@ -71,6 +72,7 @@ read_globals = {
     "UnitIsVisible",
     "UnitLevel",
     "UnitName",
+    "time",
     "UnitOnTaxi",
     "wipe",
 }

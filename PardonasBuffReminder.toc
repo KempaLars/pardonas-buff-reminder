@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Pardona's Buff Reminder
-## Notes: Reminds you of missing class and general buffs. Configurable via minimap button.
-## Notes-deDE: Erinnert an fehlende Klassen- und allgemeine Buffs. Einstellbar über den Minimap-Button.
+## Notes: Reminds you of missing class and general buffs. Settings under "Pardona's Addons" or via /br.
+## Notes-deDE: Erinnert an fehlende Klassen- und allgemeine Buffs. Einstellungen unter "Pardona's Addons" oder per /br.
 ## Author: L. Kempa
 ## Version: @project-version@
 ## X-Curse-Project-ID: 1806185
@@ -9,4 +9,5 @@
 ## SavedVariablesPerCharacter: BuffReminderCharDB
 ## IconTexture: Interface\AddOns\PardonasBuffReminder\Textures\Icon
 
+Libs\lib-pardona\lib-pardona.xml
 PardonasBuffReminder.lua
