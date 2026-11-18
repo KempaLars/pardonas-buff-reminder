@@ -16,6 +16,7 @@ local Style   = {}   -- Stil-Tabelle und Gestaltungs-Helfer
 local Display = {}   -- Warnzeilen (Secure Buttons)
 local Menu    = {}   -- Rechtsklick-Menü
 local Cfg     = {}   -- Einstellungsfenster
+local Expiry  = {}   -- Warnung vor Ablauf (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -103,6 +104,13 @@ if GetLocale() == "deDE" then
         EXP_NOTE      = "Diese Funktionen sind noch nicht vollständig getestet.",
         EXP_GROUP     = "Gruppen-Buffs",
         EXP_REAGENTS  = "Reagenzien-Warnung",
+        EXP_EXPIRY    = "Warnung vor Ablauf",
+        EXP_CONSUMABLES = "Klassen-Verbrauchsgüter",
+        EXP_WEAPONITEMS = "Steine, Öle, Gifte per Klick",
+        -- Warnung vor Ablauf
+        EXPIRES       = "%s läuft ab · %s",
+        EXPIRY_PCT    = "Schwelle: %d %%",
+        EXPIRY_ALPHA  = "Transparenz: %d %%",
         -- Gruppen-Buffs
         GROUP_CHECK   = "Gruppen-Buffs prüfen",
         GROUP_MODE    = "Prüfen in: %s",
@@ -217,6 +225,12 @@ else
         EXP_NOTE      = "These features are not fully tested yet.",
         EXP_GROUP     = "Group buffs",
         EXP_REAGENTS  = "Low reagent warning",
+        EXP_EXPIRY    = "Expiry warning",
+        EXP_CONSUMABLES = "Class consumables",
+        EXP_WEAPONITEMS = "Stones, oils, poisons by click",
+        EXPIRES       = "%s expires · %s",
+        EXPIRY_PCT    = "Threshold: %d %%",
+        EXPIRY_ALPHA  = "Opacity: %d %%",
         GROUP_CHECK   = "Check group buffs",
         GROUP_MODE    = "Check in: %s",
         GROUP_MODES   = { always = "Always", instance = "Dungeons & raids only", raid = "Raids only" },
@@ -709,6 +723,8 @@ local DEFAULTS = {
     clickCast    = true,   -- Linksklick auf Erinnerung zaubert den Buff
     style        = "pardona",   -- Stil von Warnanzeige und Menü (STYLES)
     iconsOnly    = false,       -- nur bei Stil "compact": nur Icons zeigen
+    expiryPct    = 10,          -- Warnung vor Ablauf: Restdauer <= x % der Gesamtdauer (5-50)
+    expiryAlpha  = 0.5,         -- Warnung vor Ablauf: Zeilen-Transparenz (0.2-1)
 }
 
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -1661,6 +1677,92 @@ function Group.MissingNames(e)
 end
 
 ---------------------------------------------------------------------------
+-- Warnung vor Ablauf (experimentell, Schalter expExpiry)
+-- Für aktive eigene Buffs der aktivierten Einträge: Klassenbuffs, Well Fed, Fläschchen und
+-- temporäre Waffenverzauberungen. Gewarnt wird, wenn Restdauer <= expiryPct % der Gesamtdauer.
+-- Dauer/Ablaufzeit aus den Aura-Daten; secret, fehlend oder Dauer 0 -> keine Ablaufwarnung.
+-- Waffen: GetWeaponEnchantInfo liefert nur die Restzeit; Gesamtdauer = höchste seit dem
+-- Erscheinen der Verzauberung gesehene Restzeit pro Slot.
+---------------------------------------------------------------------------
+Expiry.weapon = {}   -- Slot (16/17) -> { max = Sek., left = Sek. | nil, id = Enchant-ID | nil }
+
+function Expiry.Pct()
+    local v = tonumber(db and db.expiryPct) or 10
+    return math.max(5, math.min(50, v))
+end
+
+function Expiry.Alpha()
+    local v = tonumber(db and db.expiryAlpha) or 0.5
+    return math.max(0.2, math.min(1, v))
+end
+
+-- Welche Einträge können eine Ablauf-Zeile bekommen? (nicht: Reagenzien, Well-Rested)
+function Expiry.Eligible(e)
+    if e.kind == "reagent" then return false end
+    if e.general then return e.itemKind == "food" or e.itemKind == "flask" end
+    return true
+end
+
+-- Restzeit eines Slots aktualisieren; Secret-Werte -> unbekannt (keine Warnung)
+function Expiry.UpdateSlot(slot, has, ms, id)
+    local w = Expiry.weapon[slot]
+    if IsSecret(has) or IsSecret(ms) then
+        if w then w.left = nil end
+        return
+    end
+    if not has or type(ms) ~= "number" then Expiry.weapon[slot] = nil; return end
+    if IsSecret(id) or type(id) ~= "number" then id = nil end
+    local left = ms / 1000
+    -- neue Verzauberung (andere ID) oder Restzeit gestiegen (neu aufgetragen): neues Maximum
+    if not w or (id and w.id and id ~= w.id) or left > w.max then
+        w = { max = left, id = id }
+        Expiry.weapon[slot] = w
+    end
+    w.left = left
+end
+
+function Expiry.UpdateWeapons()
+    if not GetWeaponEnchantInfo then wipe(Expiry.weapon); return end
+    local ok, hasMH, mhMs, _, mhId, hasOH, ohMs, _, ohId = pcall(GetWeaponEnchantInfo)
+    if not ok then wipe(Expiry.weapon); return end
+    Expiry.UpdateSlot(16, hasMH, mhMs, mhId)
+    Expiry.UpdateSlot(17, hasOH, ohMs, ohId)
+end
+
+-- Restzeit in Sek., wenn der Eintrag bald abläuft; sonst nil
+function Expiry.Left(e, scan)
+    local frac = Expiry.Pct() / 100
+    if IsWeaponEntry(e) then
+        local w = Expiry.weapon[e.kind == "weapon_mh" and 16 or 17]
+        if not w or not w.left or w.max <= 0 then return nil end
+        if w.left > 0 and w.left <= w.max * frac then return w.left end
+        return nil
+    end
+    if not scan then return nil end
+    local now, best = GetTime(), nil
+    for _, a in ipairs(scan.list) do
+        if (a.id and e.idSet[a.id]) or AuraNameMatch(e, a) then
+            local dur, exp = a.duration, a.expirationTime
+            -- ScanAuras setzt Secret-Laufzeiten auf nil
+            if type(dur) ~= "number" or type(exp) ~= "number" or dur <= 0 or exp <= 0 then return nil end
+            local left = exp - now
+            if left > dur * frac then return nil end   -- eine passende Aura hält noch
+            if left > 0 and (not best or left > best) then best = left end
+        end
+    end
+    return best
+end
+
+function Expiry.FormatLeft(sec)
+    sec = math.max(0, math.ceil(sec))
+    return ("%d:%02d"):format(math.floor(sec / 60), sec % 60)
+end
+
+function Expiry.Text(e)
+    return L.EXPIRES:format(EntryLabel(e), Expiry.FormatLeft((e.expiryEnd or 0) - GetTime()))
+end
+
+---------------------------------------------------------------------------
 -- Stile (Warnanzeige + Rechtsklick-Menü)
 -- Alle Farben, Größen und Abstände stehen hier; ein neuer Stil = neuer Eintrag in
 -- STYLES + Name in STYLE_ORDER + L.STYLE_NAMES. Farben: { r, g, b [, a] }.
@@ -1675,6 +1777,7 @@ Style.STATUS_COLORS = {
     missing = { 0.9, 0.15, 0.15 },   -- Buff fehlt
     low     = { 1, 0.55, 0.1 },      -- Reagenz knapp
     eating  = { 0.35, 0.8, 0.3 },    -- isst gerade
+    expiring = { 1, 0.75, 0.1 },     -- läuft bald ab (Bernstein)
     neutral = { 0.55, 0.55, 0.55 },  -- Verschiebe-Modus
 }
 
@@ -1831,13 +1934,17 @@ anchor:SetClampedToScreen(true)
 anchor:SetMovable(true)
 anchor:Hide()
 
-local pulse = anchor:CreateAnimationGroup()
-pulse:SetLooping("BOUNCE")
-local fade = pulse:CreateAnimation("Alpha")
-fade:SetFromAlpha(1)
-fade:SetToAlpha(0.55)
-fade:SetDuration(0.9)
-fade:SetSmoothing("IN_OUT")
+-- Pulsieren pro Zeile (Ablauf-Zeilen pulsieren nicht); gestartet wird gemeinsam in ShowRows
+function Display.MakePulse(r)
+    local g = r:CreateAnimationGroup()
+    g:SetLooping("BOUNCE")
+    local fade = g:CreateAnimation("Alpha")
+    fade:SetFromAlpha(1)
+    fade:SetToAlpha(0.55)
+    fade:SetDuration(0.9)
+    fade:SetSmoothing("IN_OUT")
+    return g
+end
 
 function Display.SavePoint()
     anchor:StopMovingOrSizing()
@@ -2019,6 +2126,7 @@ function Display.GetRow(i)
     r.right:SetJustifyH("RIGHT")
 
     r.threeLines = false
+    r.pulse = Display.MakePulse(r)
     rows[i] = r
     Display.LayoutRow(r)
     Display.PositionRow(i)
@@ -2097,11 +2205,16 @@ function Display.SetRowHint(r, text)
 end
 
 -- dragMode: Verschiebe-Modus (eine Zeile "Ziehen zum Verschieben", Linksklick zaubert nicht)
-function Display.ShowRows(list, dragMode)
+-- expFrom: ab diesem Index sind es Ablauf-Zeilen (Warnung vor Ablauf; nil = keine)
+function Display.ShowRows(list, dragMode, expFrom)
     if InCombatLockdown() then return end   -- Secure Frames: nur außerhalb des Kampfes
     local st = Style.CurrentStyle()
     for i, e in ipairs(list) do
         local r = Display.GetRow(i)
+        local isExp = not dragMode and expFrom ~= nil and i >= expFrom
+        r.expiryRow = isExp
+        local alpha = isExp and Expiry.Alpha() or 1
+        if r.baseAlpha ~= alpha then r.baseAlpha = alpha; r:SetAlpha(alpha) end   -- nur bei Änderung (Puls)
         r.icon:SetTexture(EntryIcon(e))
         r.right:SetText("")
         if dragMode then
@@ -2140,6 +2253,10 @@ function Display.ShowRows(list, dragMode)
             if e.kind == "reagent" then
                 Display.SetRowStatus(r, "low")
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
+            elseif isExp then
+                -- Ablauf-Zeile: Restzeit zählt über den 1-s-Ticker (Evaluate) weiter
+                Display.SetRowStatus(r, "expiring")
+                r.text:SetText(Expiry.Text(e))
             elseif e.eatStart then
                 Display.SetRowStatus(r, "eating")
                 r.text:SetText(Eat.EatText(e))   -- Ess-Countdown (OnUpdate des anchor zählt weiter)
@@ -2152,7 +2269,7 @@ function Display.ShowRows(list, dragMode)
                     r.text:SetText(L.MISSING:format(EntryLabel(e)))
                 end
             end
-            if e.eatStart then
+            if e.eatStart and not isExp then
                 Display.SetRowHint(r, L.HINT_EATING)
             elseif spell then
                 Display.SetRowHint(r, L.HINT_CAST)
@@ -2168,18 +2285,48 @@ function Display.ShowRows(list, dragMode)
     end
     for i = #list + 1, #rows do
         rows[i]:Hide()
+        rows[i].pulse:Stop()
         rows[i].entry = nil
+        rows[i].expiryRow = nil
         Display.SetRowAction(rows[i], nil)
     end
+    Display.SyncPulse(#list)
     if #list > 0 then
         if not anchor:IsShown() then
             anchor:SetAlpha(1)
             anchor:Show()
-            pulse:Play()
         end
     else
-        pulse:Stop()
         anchor:Hide()
+    end
+end
+
+-- Pulsieren: alle Nicht-Ablauf-Zeilen gemeinsam (bei neuer pulsierender Zeile alle neu
+-- starten, damit sie im Takt bleiben); Ablauf-Zeilen pulsieren nie
+function Display.SyncPulse(n)
+    local restart = false
+    for i = 1, n do
+        local r = rows[i]
+        if r.expiryRow then
+            r.pulse:Stop()
+        elseif not r.pulse:IsPlaying() then
+            restart = true
+        end
+    end
+    if not restart then return end
+    for i = 1, n do
+        local r = rows[i]
+        if not r.expiryRow then r.pulse:Stop(); r.pulse:Play() end
+    end
+end
+
+-- Ablauf-Zeilen: nur den Text aktualisieren (auch im Kampf erlaubt: FontStrings sind
+-- nicht geschützt; keine Attribute, kein Show/Hide)
+function Display.TickExpiry()
+    for _, r in ipairs(rows) do
+        if r:IsShown() and r.expiryRow and r.entry and r.entry.expiryEnd then
+            r.text:SetText(Expiry.Text(r.entry))
+        end
     end
 end
 
@@ -2701,7 +2848,9 @@ function Evaluate()
     end
 
     local list, newOnes = {}, false
+    local expList, expOn = {}, ExpOn("expExpiry")   -- Warnung vor Ablauf: eigene Zeilen nach den fehlenden
     if db.enabled and not Suppressed() then
+        if expOn then Expiry.UpdateWeapons() end
         local ids, names, unreliable, own, auraList = ScanAuras()
         local scan = ids and { ids = ids, names = names, unreliable = unreliable, list = auraList } or nil
         RememberFromAuras(own)
@@ -2774,11 +2923,22 @@ function Evaluate()
                     end
                 end
             end
+            -- Warnung vor Ablauf: Buff vorhanden, läuft aber bald ab (kein Ton, keine Chatmeldung)
+            e.expiryEnd = nil
+            if expOn and relevant and missing[e.key] == false and not e.groupActive and not eating
+                and Expiry.Eligible(e) and not MuteRemaining(e.key) then
+                local left = Expiry.Left(e, scan)
+                if left then
+                    e.expiryEnd = now + left
+                    expList[#expList + 1] = e
+                end
+            end
         end
     end
 
     if combat then
-        -- Meldung, Ton und Anzeige folgen nach dem Kampf
+        -- Meldung, Ton und Anzeige folgen nach dem Kampf; Restzeit vorhandener Ablauf-Zeilen läuft weiter
+        Display.TickExpiry()
         if RefreshConfig then RefreshConfig() end
         return
     end
@@ -2786,10 +2946,12 @@ function Evaluate()
     wipe(shownKeys)
     for _, e in ipairs(list) do shownKeys[e.key] = true end
     if newOnes then PlayAlertSound() end   -- Ton nur bei neu fehlendem Buff, keine Wiederholung
-    Display.ShowRows(list)
+    local missingCount = #list
+    for _, e in ipairs(expList) do list[#list + 1] = e end
+    Display.ShowRows(list, false, missingCount + 1)
 
     -- Kurzstatus für das Pardona-Menü: nur bei Änderung neu anzeigen
-    local count = db.enabled and #list or -1
+    local count = db.enabled and missingCount or -1
     if count ~= warnCount then
         warnCount = count
         RefreshPardonaStatus()
@@ -2916,6 +3078,13 @@ function RefreshConfig()
         config.groupModeBtn:SetText(L.GROUP_MODE:format(L.GROUP_MODES[db.groupMode] or db.groupMode))
         if expGroup then config.groupModeBtn:Enable() else config.groupModeBtn:Disable() end
     end
+    local expExpiry = ExpOn("expExpiry")
+    config.expExpiryCB:SetChecked(expExpiry)
+    local pct, alpha = Expiry.Pct(), math.floor(Expiry.Alpha() * 100 + 0.5)
+    Cfg.SyncSlider(config.expiryPctSlider, pct, L.EXPIRY_PCT:format(pct), expExpiry)
+    Cfg.SyncSlider(config.expiryAlphaSlider, alpha, L.EXPIRY_ALPHA:format(alpha), expExpiry)
+    config.expConsCB:SetChecked(ExpOn("expConsumables"))
+    config.expWeaponCB:SetChecked(ExpOn("expWeaponItems"))
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
     config.iconsCB:SetChecked(db.iconsOnly)
@@ -3008,6 +3177,57 @@ function Cfg.MakeCheck(parent, text, x, y, onClick)
     cb.label = fs
     cb:SetScript("OnClick", onClick)
     return cb
+end
+
+-- Schieberegler mit eigener Beschriftung rechts daneben; onChange(value) nur bei Nutzeränderung
+-- (nicht während RefreshConfig die Werte setzt, Cfg.sliderSync)
+function Cfg.MakeSlider(parent, name, x, y, minV, maxV, step, onChange)
+    local ok, s = pcall(CreateFrame, "Slider", name, parent, "OptionsSliderTemplate")
+    if not ok or not s then s = CreateFrame("Slider", name, parent, "BackdropTemplate") end
+    if not s:GetThumbTexture() then
+        -- ohne Vorlage: einfacher Regler aus Standard-Texturen
+        s:SetOrientation("HORIZONTAL")
+        if s.SetBackdrop then
+            s:SetBackdrop({ bgFile = "Interface\\Buttons\\UI-SliderBar-Background",
+                edgeFile = "Interface\\Buttons\\UI-SliderBar-Border", tile = true, tileSize = 8, edgeSize = 8,
+                insets = { left = 3, right = 3, top = 6, bottom = 6 } })
+        end
+        s:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    end
+    -- Beschriftungen der Vorlage ausblenden (eigene Beschriftung s.label)
+    for _, k in ipairs({ "Text", "Low", "High" }) do
+        local fs = s[k] or _G[name .. k]
+        if fs and fs.Hide then fs:Hide() end
+    end
+    s:SetSize(160, 17)
+    s:SetPoint("TOPLEFT", x, y)
+    s:SetMinMaxValues(minV, maxV)
+    s:SetValueStep(step)
+    if s.SetObeyStepOnDrag then s:SetObeyStepOnDrag(true) end
+    s.label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    s.label:SetPoint("LEFT", s, "RIGHT", 12, 0)
+    s:SetScript("OnValueChanged", function(_, v)
+        if Cfg.sliderSync then return end
+        onChange(math.floor(v / step + 0.5) * step)
+    end)
+    return s
+end
+
+-- Regler-Wert setzen, ohne onChange auszulösen; (de)aktivieren samt Beschriftung
+function Cfg.SyncSlider(s, value, text, on)
+    Cfg.sliderSync = true
+    s:SetValue(value)
+    Cfg.sliderSync = false
+    s.label:SetText(text)
+    if on then
+        if s.Enable then s:Enable() end
+        s:SetAlpha(1)
+        s.label:SetTextColor(1, 1, 1)
+    else
+        if s.Disable then s:Disable() end
+        s:SetAlpha(0.5)
+        s.label:SetTextColor(0.5, 0.5, 0.5)
+    end
 end
 
 -- Cfg.configCanvas: Seite unter "Pardona's Addons" in den Einstellungen (nil = eigenes Fenster)
@@ -3196,6 +3416,46 @@ local function BuildConfig()
             y = y - 26
         end
     end
+
+    -- Warnung vor Ablauf + Detail-Regler (Schwelle, Transparenz)
+    y = y - 4
+    config.expExpiryCB = Cfg.MakeCheck(config, L.EXP_EXPIRY, 16, y, function(self)
+        db.expExpiry = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 30
+    config.expiryPctSlider = Cfg.MakeSlider(config, "BuffReminderExpiryPct", 40, y, 5, 50, 1, function(v)
+        db.expiryPct = v
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
+    config.expiryAlphaSlider = Cfg.MakeSlider(config, "BuffReminderExpiryAlpha", 40, y, 20, 100, 5, function(v)
+        db.expiryAlpha = v / 100
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 28
+
+    -- Klassen-Verbrauchsgüter / Steine, Öle, Gifte (Funktion folgt in einer späteren Version)
+    config.expConsCB = Cfg.MakeCheck(config, L.EXP_CONSUMABLES, 16, y, function(self)
+        db.expConsumables = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
+    config.expWeaponCB = Cfg.MakeCheck(config, L.EXP_WEAPONITEMS, 16, y, function(self)
+        db.expWeaponItems = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
     y = y - 10
 
     config.soundBtn = Cfg.MakeButton(config, "", 100)
@@ -3569,7 +3829,8 @@ SlashCmdList.BUFFREMINDER = function(msg)
     elseif cmd == "reset" then
         if InCombatLockdown() then Print(L.COMBAT); return end
         for k in pairs(DEFAULTS) do db[k] = nil end
-        db.expGroup, db.expReagents = nil, nil   -- Experimental-Schalter: wieder Build-abhängig
+        -- Experimental-Schalter: wieder Build-abhängig
+        db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)

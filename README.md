@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks and low reagent warnings. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings and warnings for buffs that are about to expire. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
 
 **CurseForge:** https://www.curseforge.com/wow/addons/pardonas-buff-reminder
 
@@ -87,6 +87,11 @@ These features are not fully tested yet. They are **off by default in release ve
 
 While a feature is off, it does nothing at all: no group lines, no group scans, no reagent lines and no reagent count checks; your own reminders work as usual. The detail settings below each checkbox are greyed out while it is off. Changes take effect immediately (in combat: when combat ends).
 
+- **Expiry warning (beta)** – warns shortly before one of your active buffs runs out, so you can refresh it in time. Covers your enabled class buffs, Well Fed, flasks and temporary weapon imbues/poisons (main and off hand); not Well-Rested, group buff lines or reagents.
+  - A buff counts as expiring when its remaining time is at or below the threshold (default 10 % of its full duration). If the client does not reveal a buff's duration (secret values), has no duration or reports a duration of 0, that buff gets no expiry warning. Weapon imbues only report their remaining time, so the full duration is the highest remaining time seen since the imbue appeared (reset when it disappears or is reapplied).
+  - Expiring buffs appear as their own line in the reminder list, after the missing buffs: same style, but semi-transparent (default 50 %), with an amber status stripe and a live countdown, e.g. "Arcane Intellect expires · 2:31". No sound, no chat message, no pulsing.
+  - Left-click works like on the missing-buff line (cast the buff, eat, drink a flask, imbue the weapon); right-click opens the same menu and mutes the same reminder. In combat the line is only updated, never changed; a line that would appear in combat shows up when combat ends. "General buffs only in instances" also applies to food and flasks here.
+  - Detail settings below the "Expiry warning" checkbox: "Threshold" slider (5–50 %, default 10 %) and "Opacity" slider (20–100 %, default 50 %).
 - **Low reagent warning** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
   - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
   - Mage: Arcane Powder (Arcane Brilliance), Rune of Teleportation, Rune of Portals, Light Feather (Slow Fall)
