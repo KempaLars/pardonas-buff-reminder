@@ -117,6 +117,17 @@ if GetLocale() == "deDE" then
         CONJURE_CHAT  = "|cffffb000%s – bitte nachzaubern!|r",
         CONJURE_THRESHOLD = "Essen/Wasser unter: %d",
         CONJURE_OFF   = "Essen/Wasser-Warnung: aus",
+        -- Waffen-Items
+        WEAPON_MH     = "Waffe (Haupthand): Stein/Öl",
+        WEAPON_OH     = "Waffe (Nebenhand): Stein/Öl",
+        WEAPON_BY_POISON = "Gift-Eintrag aktiv",
+        MENU_WEAPON   = "Steine & Öle in den Taschen",
+        MENU_POISON   = "Gifte in den Taschen",
+        WEAPON_CATS   = {
+            sharpen = "Wetzstein", weight = "Gewichtsstein", wizard = "Zauberöl", mana = "Manaöl",
+            instant = "Sofort wirkendes Gift", deadly = "Tödliches Gift", wound = "Wundgift",
+            crippling = "Verkrüppelndes Gift", mind = "Gedankenbenebelndes Gift",
+        },
         -- Gruppen-Buffs
         GROUP_CHECK   = "Gruppen-Buffs prüfen",
         GROUP_MODE    = "Prüfen in: %s",
@@ -241,6 +252,16 @@ else
         CONJURE_CHAT  = "|cffffb000%s – conjure more!|r",
         CONJURE_THRESHOLD = "Food/water below: %d",
         CONJURE_OFF   = "Food/water warning: off",
+        WEAPON_MH     = "Main hand: weapon enhancement",
+        WEAPON_OH     = "Off hand: weapon enhancement",
+        WEAPON_BY_POISON = "poison entry active",
+        MENU_WEAPON   = "Stones & oils in your bags",
+        MENU_POISON   = "Poisons in your bags",
+        WEAPON_CATS   = {
+            sharpen = "Sharpening stone", weight = "Weightstone", wizard = "Wizard oil", mana = "Mana oil",
+            instant = "Instant poison", deadly = "Deadly poison", wound = "Wound poison",
+            crippling = "Crippling poison", mind = "Mind-numbing poison",
+        },
         GROUP_CHECK   = "Check group buffs",
         GROUP_MODE    = "Check in: %s",
         GROUP_MODES   = { always = "Always", instance = "Dungeons & raids only", raid = "Raids only" },
@@ -398,10 +419,11 @@ local CLASS_BUFFS = {
           knownIds = { 8017, 8024, 8033, 8232, 51730 }, icon = 8033 },
     },
     ROGUE = {
+        -- poisonItems: mit expWeaponItems Linksklick = bestes Gift aus den Taschen, Rechtsklick = Auswahl
         { key = "poison_mh", kind = "weapon_mh", level = 20, levelOnly = true, label = "MH_POISON",
-          icon = "Interface\\Icons\\Ability_Poisons" },
+          icon = "Interface\\Icons\\Ability_Poisons", poisonItems = true },
         { key = "poison_oh", kind = "weapon_oh", level = 20, levelOnly = true, label = "OH_POISON",
-          icon = "Interface\\Icons\\Ability_Poisons" },
+          icon = "Interface\\Icons\\Ability_Poisons", poisonItems = true },
     },
     HUNTER = {
         { key = "aspect", level = 4, label = "ANY_ASPECT",
@@ -438,6 +460,14 @@ local GENERAL_BUFFS = {
     { key = "gen_wellrested", general = true, defaultOff = true, label = "WELLRESTED",
       ids = { 429959 }, nameIds = { 429959 }, matchNames = { "Well-Rested", "Well Rested" },
       excludeIds = { 1225478 } },
+    -- Waffen-Items (experimentell, expWeaponItems): Steine/Öle per Klick; fehlt nur, wenn eine Waffe
+    -- im Slot steckt, keine temporäre Verzauberung aktiv ist und ein passendes Item in den Taschen
+    -- liegt. Nicht für Schamanen (entfernt beim Login); bei Schurken nur, wenn der Gift-Eintrag
+    -- desselben Slots aus ist (poisonEntry, beim Login gesetzt).
+    { key = "gen_weapon_mh", general = true, kind = "weapon_mh", weaponItems = true, label = "WEAPON_MH",
+      icon = "Interface\\Icons\\INV_Stone_SharpeningStone_01" },
+    { key = "gen_weapon_oh", general = true, kind = "weapon_oh", weaponItems = true, label = "WEAPON_OH",
+      icon = "Interface\\Icons\\INV_Stone_SharpeningStone_01" },
 }
 
 ---------------------------------------------------------------------------
@@ -619,6 +649,51 @@ Items.FOOD_HEALING_MIN = { PRIEST = 0.55, PALADIN = 0.55, DRUID = 0.55, SHAMAN =
 
 -- Fläschchen-Fallback (Classic), falls die Item-Klasse nicht ermittelbar ist
 Items.FLASK_IDS = { [13506] = true, [13510] = true, [13511] = true, [13512] = true, [13513] = true }
+
+---------------------------------------------------------------------------
+-- Waffen-Items (experimentell, Schalter expWeaponItems): Steine, Öle, Gifte
+--   Gruppen je Liste in aufsteigender Stufe (höchste Stufe = letzter Index wird bevorzugt);
+--   WEAPON_SPECIAL: nur gegen Untote (geweiht/gesegnet) -> niedrigste Stufe der Gruppe
+--   Wetzsteine nur für Klingenwaffen, Gewichtssteine nur für stumpfe Waffen, Öle/Gifte für alle;
+--   Faustwaffen und unbekannte Unterklassen: nur Öle (bzw. Gifte)
+---------------------------------------------------------------------------
+Items.WEAPON_ITEMS = {
+    sharpen = { 2862, 2863, 2871, 7964, 12404, 18262, 23528, 23529, 23122 },
+    weight  = { 3239, 3240, 3241, 7965, 12643, 28420, 28421 },
+    wizard  = { 20744, 20746, 20750, 20749, 22522, 23123 },
+    mana    = { 20745, 20747, 20748, 22521 },
+}
+Items.POISON_ITEMS = {
+    instant   = { 6947, 6949, 6950, 8926, 8927, 8928, 21927 },
+    deadly    = { 2892, 2893, 8984, 8985, 20844, 22053, 22054 },
+    wound     = { 10918, 10920, 10921, 10922, 22055 },
+    crippling = { 3775, 3776 },
+    mind      = { 5237, 6951, 9186 },
+}
+Items.WEAPON_SPECIAL = { [23122] = true, [23123] = true }
+-- Steine, die laut Tooltip auf jede Nahkampfwaffe wirken (Elementar, Geweiht): Klinge und stumpf
+Items.ANY_MELEE_STONE = { [18262] = true, [23122] = true }
+-- Rangfolge der Gruppen ("stone" = Wetz- oder Gewichtsstein) je Klasse
+Items.WEAPON_ORDER_MELEE  = { "stone", "wizard", "mana" }
+Items.WEAPON_ORDER = {
+    MAGE    = { "wizard", "mana", "stone" }, WARLOCK = { "wizard", "mana", "stone" },
+    PRIEST  = { "mana", "wizard", "stone" }, DRUID   = { "mana", "wizard", "stone" },
+    PALADIN = { "mana", "wizard", "stone" },
+}
+Items.POISON_ORDER = { "instant", "deadly", "wound", "crippling", "mind" }
+-- Waffen-Unterklassen (Item-Klasse 2)
+Items.BLADE_SUB = { [0] = true, [1] = true, [6] = true, [7] = true, [8] = true, [15] = true }
+Items.BLUNT_SUB = { [4] = true, [5] = true, [10] = true }
+
+-- Item-ID -> { group, tier, poison = bool }
+Items.weaponInfo = {}
+for _, src in ipairs({ { Items.WEAPON_ITEMS, false }, { Items.POISON_ITEMS, true } }) do
+    for group, list in pairs(src[1]) do
+        for i, id in ipairs(list) do
+            Items.weaponInfo[id] = { group = group, tier = Items.WEAPON_SPECIAL[id] and 0 or i, poison = src[2] }
+        end
+    end
+end
 
 ---------------------------------------------------------------------------
 -- Reagenzien (Classic-Daten)
@@ -1044,6 +1119,7 @@ function Items.BuildFoodScores(class)
     if Items.FOOD_HEALING_MIN[class] then
         weights.Healing = math.max(weights.Healing, Items.FOOD_HEALING_MIN[class])
     end
+    Items.class = class   -- auch für die Rangfolge der Waffen-Items
     wipe(Items.foodScore)
     wipe(Items.foodCat)
     for cat, list in pairs(Items.FOOD) do
@@ -1135,7 +1211,8 @@ end
 function Items.ItemChoices(e)
     local list = {}
     local favs = cdb and cdb.favorites or {}
-    if e.itemKind == "food" then
+    local kind = Items.KindOf(e)
+    if kind == "food" then
         local lvl = UnitLevel("player") or 1
         for id, n in pairs(Items.bagCounts) do
             if Items.foodScore[id] then
@@ -1153,7 +1230,7 @@ function Items.ItemChoices(e)
             if a.count ~= b.count then return a.count > b.count end
             return a.id < b.id
         end)
-    elseif e.itemKind == "flask" then
+    elseif kind == "flask" then
         local last = cdb and cdb.lastFlask
         for id, n in pairs(Items.bagCounts) do
             if Items.IsFlaskItem(id) then
@@ -1167,8 +1244,80 @@ function Items.ItemChoices(e)
             if a.count ~= b.count then return a.count > b.count end
             return a.id < b.id
         end)
+    elseif kind == "weapon" or kind == "poison" then
+        return Items.WeaponChoices(e, kind)
     end
     return list
+end
+
+-- Item-Art eines Eintrags für Linksklick/Menü: "food" | "flask" | "weapon" | "poison" | nil.
+-- Waffen-Items und Gifte nur mit aktivem Experimental-Schalter expWeaponItems.
+function Items.KindOf(e)
+    if e.weaponItems then return ExpOn("expWeaponItems") and "weapon" or nil end
+    if e.poisonItems then return ExpOn("expWeaponItems") and "poison" or nil end
+    return e.itemKind
+end
+
+function Items.WeaponSlot(e)
+    return e.kind == "weapon_oh" and 17 or 16
+end
+
+-- Unterklasse der Waffe im Slot; nil = keine Waffe / nicht lesbar
+function Items.WeaponSubclass(slot)
+    local id = GetInventoryItemID and GetInventoryItemID("player", slot)
+    if not id or IsSecret(id) then return nil end
+    local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if not fn then return nil end
+    local ok, _, _, _, _, _, classID, subID = pcall(fn, id)
+    if not ok or IsSecret(classID) or IsSecret(subID) or classID ~= 2 or type(subID) ~= "number" then return nil end
+    return subID
+end
+
+-- passt das Item zur Waffe? (Wetzstein: Klinge, Gewichtsstein: stumpf, Elementar/Geweiht:
+-- Klinge oder stumpf, Öle/Gifte: alle; Faustwaffen/unbekannt: keine Steine)
+function Items.WeaponFits(id, group, sub)
+    if Items.ANY_MELEE_STONE[id] then
+        return sub ~= nil and (Items.BLADE_SUB[sub] == true or Items.BLUNT_SUB[sub] == true)
+    end
+    if group == "sharpen" then return sub ~= nil and Items.BLADE_SUB[sub] == true end
+    if group == "weight" then return sub ~= nil and Items.BLUNT_SUB[sub] == true end
+    return true
+end
+
+-- Steine/Öle bzw. Gifte aus den Taschen für den Slot des Eintrags: Favoriten, dann
+-- Gruppen-Rangfolge (Klasse bzw. Gifte), dann höchste Stufe, dann Anzahl
+function Items.WeaponChoices(e, kind)
+    local list, favs = {}, cdb and cdb.favorites or {}
+    local sub = Items.WeaponSubclass(Items.WeaponSlot(e))
+    local order = kind == "poison" and Items.POISON_ORDER
+        or Items.WEAPON_ORDER[Items.class or ""] or Items.WEAPON_ORDER_MELEE
+    local rank = {}
+    for i, g in ipairs(order) do rank[g] = i end
+    local lvl = UnitLevel("player") or 1
+    for id, n in pairs(Items.bagCounts) do
+        local info = Items.weaponInfo[id]
+        if info and info.poison == (kind == "poison") and Items.WeaponFits(id, info.group, sub) then
+            local _, minLevel = Items.ItemLevels(id)
+            if not minLevel or minLevel <= lvl then
+                local g = (info.group == "sharpen" or info.group == "weight") and "stone" or info.group
+                list[#list + 1] = { id = id, count = n, fav = favs[id] == true, rank = rank[g] or 99,
+                    tier = info.tier, wcat = info.group }
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.fav ~= b.fav then return a.fav end
+        if a.rank ~= b.rank then return a.rank < b.rank end
+        if a.tier ~= b.tier then return a.tier > b.tier end
+        if a.count ~= b.count then return a.count > b.count end
+        return a.id < b.id
+    end)
+    return list
+end
+
+-- Makro: Item benutzen und auf den Waffen-Slot anwenden
+function Items.WeaponMacro(id, slot)
+    return ("/use item:%d\n/use %d"):format(id, slot)
 end
 
 local function EntryLabel(e)
@@ -1182,6 +1331,11 @@ local function EntryIcon(e)
     if e.kind == "reagent" then return ItemIcon(e.item) or FALLBACK_ICON end
     if e.kind == "conjure" then
         return ItemIcon(Conjure.RankItem(e)) or SpellIcon(e.knownIds[1]) or FALLBACK_ICON
+    end
+    if e.weaponItems then
+        -- Icon der aktuell besten Wahl aus den Taschen
+        local c = Items.KindOf(e) and Items.ItemChoices(e)[1]
+        return (c and ItemIcon(c.id)) or e.icon
     end
     if e.general then
         -- a) zuletzt im Spiel gesehenes Aura-Icon, b) Spell-Textur der ersten ID,
@@ -1274,6 +1428,11 @@ local function IsEnabled(e)
     if e.kind == "reagent" then return ExpOn("expReagents") and ReagentThreshold(e.item) > 0 end
     -- Klassen-Verbrauchsgüter: nur mit aktivem Experimental-Schalter
     if e.kind == "conjure" and not ExpOn("expConsumables") then return false end
+    -- Waffen-Items: nur mit Experimental-Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
+    if e.weaponItems then
+        if not ExpOn("expWeaponItems") then return false end
+        if e.poisonEntry and IsEnabled(e.poisonEntry) then return false end
+    end
     local v = cdb.buffs[e.key]
     if v == nil then return not e.defaultOff end
     return v
@@ -1585,8 +1744,11 @@ local function CheckMissing(e, scan)
         if not HasWeaponIn(slot) then return false end
         local mh, oh = WeaponEnchants()
         if mh == nil then return nil end
-        if slot == 16 then return not mh end
-        return not oh
+        local active = (slot == 16) and mh or oh
+        if active then return false end
+        -- Waffen-Items: nur warnen, wenn ein passendes Item in den Taschen liegt
+        if e.weaponItems and #Items.ItemChoices(e) == 0 then return false end
+        return true
     end
     if not scan then return nil end
     for id in pairs(e.idSet) do
@@ -1821,7 +1983,7 @@ end
 -- Welche Einträge können eine Ablauf-Zeile bekommen? (nicht: Reagenzien, Well-Rested)
 function Expiry.Eligible(e)
     if e.kind == "reagent" or e.kind == "conjure" then return false end
-    if e.general then return e.itemKind == "food" or e.itemKind == "flask" end
+    if e.general then return e.itemKind == "food" or e.itemKind == "flask" or e.weaponItems == true end
     return true
 end
 
@@ -2114,15 +2276,22 @@ end
 -- Ohne spell/item tut Linksklick nichts.
 function Display.SetRowAction(r, a)
     a = a or {}
-    local sig = table.concat({ tostring(a.spell), tostring(a.item), tostring(a.unit),
+    local sig = table.concat({ tostring(a.spell), tostring(a.item), tostring(a.macro), tostring(a.unit),
         tostring(a.ctrlSpell), tostring(a.ctrlUnit) }, "|")
     r.action = a
     r.castSpell, r.useItem = a.spell, a.item
     if r.actionSig == sig then return end
     r.actionSig = sig
+    r:SetAttribute("macrotext1", nil)
     if a.spell then
         r:SetAttribute("type1", "spell")
         r:SetAttribute("spell1", a.spell)
+        r:SetAttribute("item1", nil)
+    elseif a.macro then
+        -- Waffen-Items: "/use item:<id>" + "/use <Slot>" (Item auf die Waffe anwenden)
+        r:SetAttribute("type1", "macro")
+        r:SetAttribute("macrotext1", a.macro)
+        r:SetAttribute("spell1", nil)
         r:SetAttribute("item1", nil)
     elseif a.item then
         r:SetAttribute("type1", "item")
@@ -2364,14 +2533,18 @@ function Display.ShowRows(list, dragMode, expFrom)
             r.entry = e
             Display.SetRowLines(r, false)
             local spell = CastSpellFor(e)
-            -- Essen/Fläschchen: Linksklick benutzt die beste Wahl aus den Taschen
-            local item, noItem
-            if not spell and e.itemKind and db.clickCast then
+            -- Essen/Fläschchen/Waffen-Items: Linksklick benutzt die beste Wahl aus den Taschen
+            local item, noItem, macro
+            local kind = Items.KindOf(e)
+            if not spell and kind and db.clickCast then
                 local choices = Items.ItemChoices(e)
                 item = choices[1] and choices[1].id
                 noItem = item == nil
+                if item and (kind == "weapon" or kind == "poison") then
+                    macro = Items.WeaponMacro(item, Items.WeaponSlot(e))
+                end
             end
-            Display.SetRowAction(r, (spell or item) and { spell = spell, item = item } or nil)
+            Display.SetRowAction(r, (spell or item) and { spell = spell, item = item, macro = macro } or nil)
             if e.kind == "reagent" then
                 Display.SetRowStatus(r, "low")
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
@@ -2396,6 +2569,8 @@ function Display.ShowRows(list, dragMode, expFrom)
                 if st.rightText then
                     r.text:SetText(EntryLabel(e))
                     r.right:SetText(L.SHORT_MISSING)
+                elseif e.weaponItems then
+                    r.text:SetText(EntryLabel(e))   -- "Waffe (Haupthand): Stein/Öl"
                 else
                     r.text:SetText(L.MISSING:format(EntryLabel(e)))
                 end
@@ -2670,7 +2845,28 @@ end
 -- Kategorie (Essen) bzw. leer (Fläschchen) für die Info-Zeile
 function Menu.ItemInfoText(c)
     if c.cat then return L.FOOD_CATS[c.cat] or c.cat end
+    if c.wcat then return L.WEAPON_CATS[c.wcat] or c.wcat end
     return ""
+end
+
+-- Secure-Aktion einer Item-Zeile: normal "item", Waffen-Items per Makro auf den Slot
+function Menu.SetItemButtonAction(b, id, e, kind)
+    if kind == "weapon" or kind == "poison" then
+        b:SetAttribute("type", "macro")
+        b:SetAttribute("macrotext", Items.WeaponMacro(id, Items.WeaponSlot(e)))
+        b:SetAttribute("item", nil)
+    else
+        b:SetAttribute("type", "item")
+        b:SetAttribute("item", "item:" .. id)
+        b:SetAttribute("macrotext", nil)
+    end
+end
+
+function Menu.ItemHeadText(kind)
+    if kind == "flask" then return L.MENU_FLASK end
+    if kind == "weapon" then return L.MENU_WEAPON end
+    if kind == "poison" then return L.MENU_POISON end
+    return L.MENU_FOOD
 end
 
 -- Menü für Eintrag e aufbauen und an menu.x/menu.y (UIParent-Koordinaten) anzeigen.
@@ -2709,7 +2905,8 @@ function Menu.LayoutMenu(e)
     menu.sub:SetPoint("BOTTOMLEFT", menu.icon, "BOTTOMRIGHT", 8, 1)
     menu.sub:SetWidth(textWidth)
 
-    local withItems = e.itemKind and db.clickCast and not combat
+    local kind = Items.KindOf(e)
+    local withItems = kind and db.clickCast and not combat
     local sub
     if combat then
         sub = L.SUB_COMBAT
@@ -2755,7 +2952,7 @@ function Menu.LayoutMenu(e)
     local h = ms.itemHeight
     if withItems then
         Separator()
-        Head(menu.itemHead, e.itemKind == "flask" and L.MENU_FLASK or L.MENU_FOOD)
+        Head(menu.itemHead, Menu.ItemHeadText(kind))
         local choices = Items.ItemChoices(e)
         n = math.min(#choices, Menu.MAX_ITEM_CHOICES)
         itemTop = y
@@ -2771,7 +2968,7 @@ function Menu.LayoutMenu(e)
         for i = 1, n do
             local c, b = choices[i], Menu.GetItemButton(i)
             b.itemID = c.id
-            b:SetAttribute("item", "item:" .. c.id)
+            Menu.SetItemButtonAction(b, c.id, e, kind)
             b:SetSize(rowsWidth, h)
             b:ClearAllPoints()
             b:SetPoint("TOPLEFT", 0, -(i - 1) * (h + 1))
@@ -2842,6 +3039,7 @@ function Menu.LayoutMenu(e)
             b:Hide()
             b.itemID = nil
             b:SetAttribute("item", nil)
+            b:SetAttribute("macrotext", nil)
         end
     end
     for i = n + 1, #menu.stars do menu.stars[i]:Hide() end
@@ -3139,9 +3337,14 @@ function RefreshConfig()
     for _, w in ipairs(Cfg.configRows) do
         local e = w.entry
         local known = knownCache[e.key]
-        -- Verbrauchsgüter: eigenes Häkchen (Standard an), ausgegraut solange der Schalter aus ist
-        local gated = e.kind == "conjure" and not expCons
-        if e.kind == "conjure" then w.cb:SetChecked(cdb.buffs[e.key] ~= false) else w.cb:SetChecked(IsEnabled(e)) end
+        -- Verbrauchsgüter/Waffen-Items: eigenes Häkchen (Standard an), ausgegraut solange der
+        -- Schalter aus ist (Schurke: auch solange der Gift-Eintrag des Slots aktiv ist)
+        local gated, gateNote = Cfg.Gate(e, expCons)
+        if e.kind == "conjure" or e.weaponItems then
+            w.cb:SetChecked(cdb.buffs[e.key] ~= false)
+        else
+            w.cb:SetChecked(IsEnabled(e))
+        end
         w.icon:SetTexture(EntryIcon(e))
         w.name:SetText(EntryLabel(e))
         if known then
@@ -3149,7 +3352,10 @@ function RefreshConfig()
             w.icon:SetDesaturated(gated)
             if gated then w.name:SetTextColor(0.5, 0.5, 0.5) else w.name:SetTextColor(1, 1, 1) end
             local left = MuteRemaining(e.key)
-            if left then
+            if gateNote then
+                w.status:SetText(gateNote)
+                w.status:SetTextColor(0.6, 0.6, 0.6)
+            elseif left then
                 w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
                 w.status:SetTextColor(1, 0.4, 0.3)
             elseif e.general and db.instanceOnly and not InGroupInstance() then
@@ -3240,6 +3446,16 @@ function Cfg.MakeHeader(parent, text, y)
     fs:SetPoint("TOPLEFT", 16, y)
     fs:SetText(text)
     return fs
+end
+
+-- Ausgegraut? (Experimental-Schalter aus bzw. Schurke mit aktivem Gift-Eintrag); 2. Wert = Statushinweis
+function Cfg.Gate(e, expCons)
+    if e.kind == "conjure" then return not expCons, nil end
+    if e.weaponItems then
+        if not ExpOn("expWeaponItems") then return true, nil end
+        if e.poisonEntry and IsEnabled(e.poisonEntry) then return true, L.WEAPON_BY_POISON end
+    end
+    return false, nil
 end
 
 -- Eintrag-Zeile an Höhe y setzen (Klassenzeilen werden in RefreshConfig neu angeordnet)
@@ -3841,6 +4057,20 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             if g then e.groupIds, e.manaOnly = g.groupIds, g.manaOnly end
         end
         Conjure.Preload(classEntries)   -- Namen der Verbrauchsgüter-Items vorladen
+        -- Waffen-Items: nicht für Schamanen (eigene Waffenverzauberungen); Schurke: an den
+        -- Gift-Eintrag desselben Slots koppeln
+        for i = #GENERAL_BUFFS, 1, -1 do
+            local e = GENERAL_BUFFS[i]
+            if e.weaponItems then
+                if class == "SHAMAN" then
+                    table.remove(GENERAL_BUFFS, i)
+                else
+                    for _, c in ipairs(classEntries) do
+                        if c.poisonItems and c.kind == e.kind then e.poisonEntry = c end
+                    end
+                end
+            end
+        end
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
         -- Essen & Fläschchen: Kategorie-Gewichte der Klasse, gelernte Fläschchen-Spells, Taschen
         for _, e in ipairs(GENERAL_BUFFS) do

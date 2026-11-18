@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire and reminders for mage and warlock conjured items. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items and one-click weapon stones, oils and poisons. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
 
 **CurseForge:** https://www.curseforge.com/wow/addons/pardonas-buff-reminder
 
@@ -98,6 +98,13 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - Item names come from the game client in your language; the line shows the item of the highest rank you know. Only your bags are counted (not the bank).
   - Left-click casts the highest rank you have learned; right-click opens the normal menu to mute the reminder (no item list). These reminders apply everywhere ("General buffs only in instances" does not affect them) and get no expiry warning.
   - Detail setting below the "Class consumables" checkbox (mages only): "Food/water below" slider (0–60, default 20; 0 turns the food/water warning off).
+- **Weapon enhancements: stones, oils, poisons (beta)** – apply sharpening stones, weightstones, wizard oils, mana oils or rogue poisons with one click.
+  - Two new general entries, "Main hand: weapon enhancement" and "Off hand: weapon enhancement" (own checkboxes, on by default). Not available for shamans, who use their own imbues. For rogues they only apply while the matching poison entry (main/off-hand poison) is turned off.
+  - A line appears only if a weapon is equipped in that slot, it has no temporary enhancement and you carry at least one matching item. "General buffs only in instances" applies like for food and flasks.
+  - Matching items: sharpening stones only for edged weapons (axes, polearms, swords, daggers), weightstones only for blunt weapons (maces, staves); Elemental and Consecrated Sharpening Stone work on both. Wizard and mana oils fit every weapon. Fist weapons and unknown weapon types only get oils. Items above your level are skipped.
+  - Left-click applies the best item to the slot: favorites first (the same favorites as for food and flasks, per character), then by class: Warrior, Rogue, Hunter, Death Knight: stones before oils; Mage, Warlock: wizard oil, mana oil, stones; Priest, Druid, Paladin: mana oil, wizard oil, stones. Within a group the highest rank comes first; the undead-only Consecrated Sharpening Stone and Blessed Wizard Oil come last. Right-click opens the item menu (icon, name, count, favorite star, "best choice").
+  - Rogue poisons: with this feature on, the existing main-hand/off-hand poison reminders work the same way – left-click applies the best poison (or a favorite) from your bags, right-click opens the poison menu. Order: Instant, Deadly, Wound, Crippling, Mind-numbing, highest rank first. Anesthetic Poison is not included.
+  - Items are applied with a click macro (`/use item:<id>` followed by `/use 16` or `/use 17`); this is only set up out of combat. Item names and icons come from the game client. The expiry warning covers these enhancements too.
 - **Low reagent warning** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
   - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
   - Mage: Arcane Powder (Arcane Brilliance), Rune of Teleportation, Rune of Portals, Light Feather (Slow Fall)
