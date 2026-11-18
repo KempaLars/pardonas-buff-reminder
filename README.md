@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings and warnings for buffs that are about to expire. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire and reminders for mage and warlock conjured items. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
 
 **CurseForge:** https://www.curseforge.com/wow/addons/pardonas-buff-reminder
 
@@ -92,6 +92,12 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - Expiring buffs appear as their own line in the reminder list, after the missing buffs: same style, but semi-transparent (default 50 %), with an amber status stripe and a live countdown, e.g. "Arcane Intellect expires · 2:31". No sound, no chat message, no pulsing.
   - Left-click works like on the missing-buff line (cast the buff, eat, drink a flask, imbue the weapon); right-click opens the same menu and mutes the same reminder. In combat the line is only updated, never changed; a line that would appear in combat shows up when combat ends. "General buffs only in instances" also applies to food and flasks here.
   - Detail settings below the "Expiry warning" checkbox: "Threshold" slider (5–50 %, default 10 %) and "Opacity" slider (20–100 %, default 50 %).
+- **Class consumables (beta)** – reminds mages and warlocks to conjure their consumables. Each one is its own entry in the class list of the settings (own checkbox, on by default) and only appears there once you have learned the matching spell.
+  - Mage: **conjured water** and **conjured food** – warns when the total of all ranks in your bags drops below the threshold, e.g. "Conjured Crystal Water: 5" (at 0: "… missing"). **Mana gem** – warns when you carry no mana gem of any rank.
+  - Warlock: **Healthstone** – warns when you carry no healthstone of any rank (including the improved talent versions). **Soulstone** – warns when you carry no soulstone.
+  - Item names come from the game client in your language; the line shows the item of the highest rank you know. Only your bags are counted (not the bank).
+  - Left-click casts the highest rank you have learned; right-click opens the normal menu to mute the reminder (no item list). These reminders apply everywhere ("General buffs only in instances" does not affect them) and get no expiry warning.
+  - Detail setting below the "Class consumables" checkbox (mages only): "Food/water below" slider (0–60, default 20; 0 turns the food/water warning off).
 - **Low reagent warning** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
   - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
   - Mage: Arcane Powder (Arcane Brilliance), Rune of Teleportation, Rune of Portals, Light Feather (Slow Fall)

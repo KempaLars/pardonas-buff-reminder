@@ -17,6 +17,7 @@ local Display = {}   -- Warnzeilen (Secure Buttons)
 local Menu    = {}   -- Rechtsklick-Menü
 local Cfg     = {}   -- Einstellungsfenster
 local Expiry  = {}   -- Warnung vor Ablauf (experimentell)
+local Conjure = {}   -- Klassen-Verbrauchsgüter: Magier-Essen/-Wasser/Manastein, Hexenmeister-Steine (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -111,6 +112,11 @@ if GetLocale() == "deDE" then
         EXPIRES       = "%s läuft ab · %s",
         EXPIRY_PCT    = "Schwelle: %d %%",
         EXPIRY_ALPHA  = "Transparenz: %d %%",
+        -- Klassen-Verbrauchsgüter
+        CONJURE_COUNT = "%s: %d",
+        CONJURE_CHAT  = "|cffffb000%s – bitte nachzaubern!|r",
+        CONJURE_THRESHOLD = "Essen/Wasser unter: %d",
+        CONJURE_OFF   = "Essen/Wasser-Warnung: aus",
         -- Gruppen-Buffs
         GROUP_CHECK   = "Gruppen-Buffs prüfen",
         GROUP_MODE    = "Prüfen in: %s",
@@ -231,6 +237,10 @@ else
         EXPIRES       = "%s expires · %s",
         EXPIRY_PCT    = "Threshold: %d %%",
         EXPIRY_ALPHA  = "Opacity: %d %%",
+        CONJURE_COUNT = "%s: %d",
+        CONJURE_CHAT  = "|cffffb000%s – conjure more!|r",
+        CONJURE_THRESHOLD = "Food/water below: %d",
+        CONJURE_OFF   = "Food/water warning: off",
         GROUP_CHECK   = "Check group buffs",
         GROUP_MODE    = "Check in: %s",
         GROUP_MODES   = { always = "Always", instance = "Dungeons & raids only", raid = "Raids only" },
@@ -280,6 +290,37 @@ end
 --   kind      : "aura" (Standard) | "weapon_mh" | "weapon_oh"
 --   defaultOff: standardmäßig nicht ausgewählt (situative Buffs)
 ---------------------------------------------------------------------------
+---------------------------------------------------------------------------
+-- Klassen-Verbrauchsgüter (experimentell, Schalter expConsumables)
+--   spells    : Zauber-Ränge aufsteigend (Erlernt-Prüfung; Linksklick zaubert den höchsten)
+--   rankItems : Item des jeweiligen Rangs (gleicher Index, nil = nicht hinterlegt);
+--               nur für Name und Icon der Zeile (Namen immer per C_Item)
+--   items     : alle Items, die gezählt werden (nur Taschen)
+--   mode      : "sum" = Summe < Schwelle (db.conjureThreshold), "any" = keins in den Taschen
+---------------------------------------------------------------------------
+Conjure.WATER = { mode = "sum",
+    spells    = { 5504, 5505, 5506, 6127, 10138, 10139, 10140, 37420, 27090 },
+    rankItems = { 5350, 2288, 2136, 3772, 8077, 8078, 8079, 30703, 22018 },
+    items     = { 5350, 2288, 2136, 3772, 8077, 8078, 8079, 30703, 22018 } }
+Conjure.FOOD = { mode = "sum",
+    spells    = { 587, 597, 990, 6129, 10144, 10145, 28612, 33717 },
+    rankItems = { 5349, 1113, 1114, 1487, 8075, 8076, 22895, 22019 },
+    items     = { 5349, 1113, 1114, 1487, 8075, 8076, 22895, 22019 } }
+Conjure.GEM = { mode = "any",
+    spells    = { 759, 3552, 10053, 10054, 27101 },
+    rankItems = { 5514, 5513, 8007, 8008, 22044 },
+    items     = { 5514, 5513, 8007, 8008, 22044 } }
+Conjure.HEALTHSTONE = { mode = "any",
+    spells    = { 6201, 6202, 5699, 11729, 11730, 27230 },
+    rankItems = { 5512, 5511, 5509, 5510, 9421, 22103 },
+    -- je Rang normal + zwei verbesserte Varianten (Talent)
+    items     = { 5512, 19004, 19005, 5511, 19006, 19007, 5509, 19008, 19009, 5510, 19010, 19011,
+                  9421, 19012, 19013, 22103, 22104, 22105 } }
+Conjure.SOULSTONE = { mode = "any",
+    spells    = { 693, 20752, 20755, 20756, 20757, 27238 },
+    rankItems = { 5232, 16892, 16893, 16895, 16896, 22116 },
+    items     = { 5232, 16892, 16893, 16895, 16896, 22116 } }
+
 local CLASS_BUFFS = {
     PRIEST = {
         { key = "fortitude", level = 1,
@@ -303,11 +344,22 @@ local CLASS_BUFFS = {
           ids = { 168, 7300, 7301, 7302, 7320, 10219, 10220, 27124, 43008, 6117, 22782, 22783,
                   27125, 43023, 43024, 30482, 43045, 43046 },
           nameIds = { 168, 7302, 6117, 30482 } },
+        -- Klassen-Verbrauchsgüter (kind "conjure"; Zeile in den Optionen erst, wenn erlernt)
+        { key = "mage_water", kind = "conjure", level = 4, hideUnknown = true,
+          conj = Conjure.WATER, knownIds = Conjure.WATER.spells },
+        { key = "mage_food", kind = "conjure", level = 6, hideUnknown = true,
+          conj = Conjure.FOOD, knownIds = Conjure.FOOD.spells },
+        { key = "mage_gem", kind = "conjure", level = 28, hideUnknown = true,
+          conj = Conjure.GEM, knownIds = Conjure.GEM.spells },
     },
     WARLOCK = {
         { key = "armor", level = 1, label = "LOCK_ARMOR",
           ids = { 687, 696, 706, 1086, 11733, 11734, 11735, 27260, 47793, 47889, 28176, 28189, 47892, 47893 },
           nameIds = { 687, 706, 28176 } },
+        { key = "wl_healthstone", kind = "conjure", level = 10, hideUnknown = true,
+          conj = Conjure.HEALTHSTONE, knownIds = Conjure.HEALTHSTONE.spells },
+        { key = "wl_soulstone", kind = "conjure", level = 18, hideUnknown = true,
+          conj = Conjure.SOULSTONE, knownIds = Conjure.SOULSTONE.spells },
     },
     DRUID = {
         { key = "motw", level = 1,
@@ -425,6 +477,9 @@ local CAST_DATA = {
             { key = "mage",   castIds = { 6117, 22782, 22783, 27125, 43023, 43024 } },
             { key = "molten", castIds = { 30482, 43045, 43046 } },
         } },
+        mage_water = { castIds = Conjure.WATER.spells },
+        mage_food  = { castIds = Conjure.FOOD.spells },
+        mage_gem   = { castIds = Conjure.GEM.spells },
     },
     WARLOCK = {
         armor = { variants = {
@@ -432,6 +487,8 @@ local CAST_DATA = {
             { key = "demonarmor", castIds = { 706, 1086, 11733, 11734, 11735, 27260, 47793, 47889 } },
             { key = "felarmor",   castIds = { 28176, 28189, 47892, 47893 } },
         } },
+        wl_healthstone = { castIds = Conjure.HEALTHSTONE.spells },
+        wl_soulstone   = { castIds = Conjure.SOULSTONE.spells },
     },
     DRUID = {
         motw   = { castIds = { 1126, 5232, 6756, 5234, 8907, 9884, 9885, 26990, 48469 } },
@@ -725,6 +782,7 @@ local DEFAULTS = {
     iconsOnly    = false,       -- nur bei Stil "compact": nur Icons zeigen
     expiryPct    = 10,          -- Warnung vor Ablauf: Restdauer <= x % der Gesamtdauer (5-50)
     expiryAlpha  = 0.5,         -- Warnung vor Ablauf: Zeilen-Transparenz (0.2-1)
+    conjureThreshold = 20,      -- Magier: Warnung, wenn gezaubertes Essen/Wasser < x (0 = aus, max. 60)
 }
 
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -1122,6 +1180,9 @@ end
 
 local function EntryIcon(e)
     if e.kind == "reagent" then return ItemIcon(e.item) or FALLBACK_ICON end
+    if e.kind == "conjure" then
+        return ItemIcon(Conjure.RankItem(e)) or SpellIcon(e.knownIds[1]) or FALLBACK_ICON
+    end
     if e.general then
         -- a) zuletzt im Spiel gesehenes Aura-Icon, b) Spell-Textur der ersten ID,
         -- c) fest eingetragenes Icon, d) Fallback
@@ -1211,6 +1272,8 @@ end
 local function IsEnabled(e)
     -- Reagenzien: nur mit aktivem Experimental-Schalter (sonst keine Zeile, keine Mengenprüfung)
     if e.kind == "reagent" then return ExpOn("expReagents") and ReagentThreshold(e.item) > 0 end
+    -- Klassen-Verbrauchsgüter: nur mit aktivem Experimental-Schalter
+    if e.kind == "conjure" and not ExpOn("expConsumables") then return false end
     local v = cdb.buffs[e.key]
     if v == nil then return not e.defaultOff end
     return v
@@ -1359,6 +1422,64 @@ local function RememberFromAuras(own)
 end
 
 ---------------------------------------------------------------------------
+-- Klassen-Verbrauchsgüter: Zählen, Name/Icon, Zeilentext
+---------------------------------------------------------------------------
+function Conjure.Threshold()
+    local v = tonumber(db and db.conjureThreshold) or 20
+    return math.max(0, math.min(60, math.floor(v)))
+end
+
+-- Item des höchsten erlernten Rangs (Name/Icon der Zeile); nichts erlernt -> erster Rang
+function Conjure.RankItem(e)
+    local c = e.conj
+    for i = #c.spells, 1, -1 do
+        if SpellKnown(c.spells[i]) then
+            for j = i, 1, -1 do
+                if c.rankItems[j] then return c.rankItems[j] end
+            end
+        end
+    end
+    return c.rankItems[1]
+end
+
+function Conjure.Name(e)
+    return ItemName(Conjure.RankItem(e))
+end
+
+-- true = fehlt/zu wenig, false = genug, nil = Anzahl nicht lesbar; e.count = Summe in den Taschen
+function Conjure.Missing(e)
+    local n = 0
+    for _, id in ipairs(e.conj.items) do
+        local c = ItemCount(id)
+        if c == nil then return nil end
+        n = n + c
+    end
+    e.count = n
+    if e.conj.mode == "sum" then
+        local t = Conjure.Threshold()
+        return t > 0 and n < t
+    end
+    return n == 0
+end
+
+-- "Gezaubertes Wasser: 5" bzw. "<Name> fehlt" (bei 0 bzw. "beliebiger Stein")
+function Conjure.Text(e)
+    if e.conj.mode == "sum" and (e.count or 0) > 0 then
+        return L.CONJURE_COUNT:format(Conjure.Name(e), e.count)
+    end
+    return L.MISSING:format(Conjure.Name(e))
+end
+
+-- Item-Daten der angezeigten Items vorladen (Namen kommen per GET_ITEM_INFO_RECEIVED / Ticker)
+function Conjure.Preload(list)
+    for _, e in ipairs(list) do
+        if e.kind == "conjure" then
+            for _, id in pairs(e.conj.rankItems) do ItemName(id) end
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- Buff-Erkennung
 ---------------------------------------------------------------------------
 -- liefert idSet, nameSet, unreliable, own, list  (nil = gar nicht lesbar); unit Standard "player"
@@ -1458,6 +1579,7 @@ local function CheckMissing(e, scan)
         e.count = n
         return n < ReagentThreshold(e.item)
     end
+    if e.kind == "conjure" then return Conjure.Missing(e) end
     if e.kind == "weapon_mh" or e.kind == "weapon_oh" then
         local slot = (e.kind == "weapon_mh") and 16 or 17
         if not HasWeaponIn(slot) then return false end
@@ -1698,7 +1820,7 @@ end
 
 -- Welche Einträge können eine Ablauf-Zeile bekommen? (nicht: Reagenzien, Well-Rested)
 function Expiry.Eligible(e)
-    if e.kind == "reagent" then return false end
+    if e.kind == "reagent" or e.kind == "conjure" then return false end
     if e.general then return e.itemKind == "food" or e.itemKind == "flask" end
     return true
 end
@@ -2253,6 +2375,15 @@ function Display.ShowRows(list, dragMode, expFrom)
             if e.kind == "reagent" then
                 Display.SetRowStatus(r, "low")
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
+            elseif e.kind == "conjure" then
+                local n = e.count or 0
+                Display.SetRowStatus(r, n > 0 and "low" or "missing")
+                if st.rightText then
+                    r.text:SetText(Conjure.Name(e))
+                    r.right:SetText(n > 0 and tostring(n) or L.SHORT_MISSING)
+                else
+                    r.text:SetText(Conjure.Text(e))
+                end
             elseif isExp then
                 -- Ablauf-Zeile: Restzeit zählt über den 1-s-Ticker (Evaluate) weiter
                 Display.SetRowStatus(r, "expiring")
@@ -2586,6 +2717,8 @@ function Menu.LayoutMenu(e)
         sub = Group.MissingNames(e)
     elseif e.kind == "reagent" then
         sub = L.REAGENT_LOW:format(EntryLabel(e), e.count or 0)
+    elseif e.kind == "conjure" then
+        sub = Conjure.Text(e)
     elseif withItems then
         sub = L.SUB_ITEMS
     else
@@ -2916,6 +3049,8 @@ function Evaluate()
                     newOnes = true
                     if e.kind == "reagent" then
                         Print(L.REAGENT_CHAT:format(EntryLabel(e), e.count or 0))
+                    elseif e.kind == "conjure" then
+                        Print(L.CONJURE_CHAT:format(Conjure.Text(e)))
                     elseif e.groupActive then
                         Print(L.GROUP_CHAT:format(EntryLabel(e), #(e.groupMissing or {})))
                     else
@@ -2999,16 +3134,20 @@ end
 
 function RefreshConfig()
     if not config or not config:IsVisible() then return end
+    Cfg.LayoutClassRows()
+    local expCons = ExpOn("expConsumables")
     for _, w in ipairs(Cfg.configRows) do
         local e = w.entry
         local known = knownCache[e.key]
-        w.cb:SetChecked(IsEnabled(e))
+        -- Verbrauchsgüter: eigenes Häkchen (Standard an), ausgegraut solange der Schalter aus ist
+        local gated = e.kind == "conjure" and not expCons
+        if e.kind == "conjure" then w.cb:SetChecked(cdb.buffs[e.key] ~= false) else w.cb:SetChecked(IsEnabled(e)) end
         w.icon:SetTexture(EntryIcon(e))
         w.name:SetText(EntryLabel(e))
         if known then
-            w.cb:Enable()
-            w.icon:SetDesaturated(false)
-            w.name:SetTextColor(1, 1, 1)
+            if gated then w.cb:Disable() else w.cb:Enable() end
+            w.icon:SetDesaturated(gated)
+            if gated then w.name:SetTextColor(0.5, 0.5, 0.5) else w.name:SetTextColor(1, 1, 1) end
             local left = MuteRemaining(e.key)
             if left then
                 w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
@@ -3083,7 +3222,11 @@ function RefreshConfig()
     local pct, alpha = Expiry.Pct(), math.floor(Expiry.Alpha() * 100 + 0.5)
     Cfg.SyncSlider(config.expiryPctSlider, pct, L.EXPIRY_PCT:format(pct), expExpiry)
     Cfg.SyncSlider(config.expiryAlphaSlider, alpha, L.EXPIRY_ALPHA:format(alpha), expExpiry)
-    config.expConsCB:SetChecked(ExpOn("expConsumables"))
+    config.expConsCB:SetChecked(expCons)
+    if config.conjureSlider then
+        local t = Conjure.Threshold()
+        Cfg.SyncSlider(config.conjureSlider, t, t > 0 and L.CONJURE_THRESHOLD:format(t) or L.CONJURE_OFF, expCons)
+    end
     config.expWeaponCB:SetChecked(ExpOn("expWeaponItems"))
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
@@ -3099,11 +3242,44 @@ function Cfg.MakeHeader(parent, text, y)
     return fs
 end
 
+-- Eintrag-Zeile an Höhe y setzen (Klassenzeilen werden in RefreshConfig neu angeordnet)
+function Cfg.PlaceEntryRow(w, y)
+    w.cb:ClearAllPoints()
+    w.cb:SetPoint("TOPLEFT", 16, y)
+    w.status:ClearAllPoints()
+    w.status:SetPoint("RIGHT", w.parent, "TOPLEFT", 424, y - 12)
+end
+
+function Cfg.ShowEntryRow(w, show)
+    for _, obj in ipairs({ w.cb, w.icon, w.name, w.status }) do
+        if show then obj:Show() else obj:Hide() end
+    end
+end
+
+-- Klassenliste: Einträge mit hideUnknown (Verbrauchsgüter) erst zeigen, wenn erlernt; alles
+-- darunter (config.below) rückt nach
+function Cfg.LayoutClassRows()
+    local y = Cfg.classTop
+    for _, w in ipairs(Cfg.configRows) do
+        if w.classRow then
+            local show = not w.entry.hideUnknown or knownCache[w.entry.key] == true
+            Cfg.ShowEntryRow(w, show)
+            if show then
+                Cfg.PlaceEntryRow(w, y)
+                y = y - 26
+            end
+        end
+    end
+    config.below:ClearAllPoints()
+    config.below:SetPoint("TOPLEFT", config, "TOPLEFT", 0, y)
+    config.below:SetSize(440, Cfg.belowHeight)
+    config:SetSize(440, -y + Cfg.belowHeight)
+end
+
 function Cfg.MakeEntryRow(parent, e, y)
-    local w = { entry = e }
+    local w = { entry = e, parent = parent }
     w.cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     w.cb:SetSize(24, 24)
-    w.cb:SetPoint("TOPLEFT", 16, y)
     w.cb:SetScript("OnClick", function(self)
         cdb.buffs[e.key] = self:GetChecked() and true or false
         NoteDeferred()
@@ -3117,9 +3293,10 @@ function Cfg.MakeEntryRow(parent, e, y)
     w.name:SetPoint("LEFT", w.icon, "RIGHT", 8, 0)
     w.name:SetJustifyH("LEFT")
     w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    w.status:SetPoint("RIGHT", parent, "TOPLEFT", 424, y - 12)
     w.status:SetJustifyH("RIGHT")
+    Cfg.PlaceEntryRow(w, y)
     Cfg.configRows[#Cfg.configRows + 1] = w
+    return w
 end
 
 -- Reagenz-Zeile: Icon, Name, Eingabefeld für die Schwelle (0-50), Status
@@ -3292,32 +3469,37 @@ local function BuildConfig()
         fs:SetText(L.NO_CLASS)
         y = y - 20
     end
+    Cfg.classTop = y
     for _, e in ipairs(classEntries) do
-        Cfg.MakeEntryRow(config, e, y)
-        y = y - 26
+        Cfg.MakeEntryRow(config, e, y).classRow = true
     end
 
+    -- Alles unterhalb der Klassenliste liegt in einem eigenen Frame (p), den
+    -- Cfg.LayoutClassRows unter die sichtbaren Klassenzeilen rückt
+    local p = CreateFrame("Frame", nil, config)
+    config.below = p
+    y = 0
     y = y - 10
-    Cfg.MakeHeader(config, L.GENERAL, y)
+    Cfg.MakeHeader(p, L.GENERAL, y)
     y = y - 22
     for _, e in ipairs(GENERAL_BUFFS) do
-        Cfg.MakeEntryRow(config, e, y)
+        Cfg.MakeEntryRow(p, e, y)
         y = y - 26
     end
 
     y = y - 12
-    config.enabledCB = Cfg.MakeCheck(config, L.ENABLED, 16, y, function(self)
+    config.enabledCB = Cfg.MakeCheck(p, L.ENABLED, 16, y, function(self)
         db.enabled = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
     end)
-    config.instCB = Cfg.MakeCheck(config, L.INSTANCE_ONLY, 160, y, function(self)
+    config.instCB = Cfg.MakeCheck(p, L.INSTANCE_ONLY, 160, y, function(self)
         db.instanceOnly = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
     end)
     y = y - 26
-    config.castCB = Cfg.MakeCheck(config, L.CLICKCAST, 16, y, function(self)
+    config.castCB = Cfg.MakeCheck(p, L.CLICKCAST, 16, y, function(self)
         db.clickCast = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -3325,7 +3507,7 @@ local function BuildConfig()
     y = y - 30
 
     -- Stil von Warnanzeige und Rechtsklick-Menü; "Nur Icons" nur bei Compact
-    config.styleBtn = Cfg.MakeButton(config, "", 160)
+    config.styleBtn = Cfg.MakeButton(p, "", 160)
     config.styleBtn:SetPoint("TOPLEFT", 18, y)
     config.styleBtn:SetScript("OnClick", function()
         local idx = 1
@@ -3336,7 +3518,7 @@ local function BuildConfig()
         Evaluate()
         RefreshConfig()
     end)
-    config.iconsCB = Cfg.MakeCheck(config, L.ICONS_ONLY, 190, y + 1, function(self)
+    config.iconsCB = Cfg.MakeCheck(p, L.ICONS_ONLY, 190, y + 1, function(self)
         db.iconsOnly = self:GetChecked() and true or false
         NoteDeferred()
         Display.ApplyStyle()
@@ -3346,22 +3528,22 @@ local function BuildConfig()
 
     -- Experimentelle Funktionen: klar abgesetzter Abschnitt; Detail-Einstellungen direkt
     -- unter dem jeweiligen Schalter, ausgegraut solange dieser aus ist
-    local sep = config:CreateTexture(nil, "ARTWORK")
+    local sep = p:CreateTexture(nil, "ARTWORK")
     sep:SetColorTexture(1, 0.5, 0, 0.6)
     sep:SetHeight(1)
     sep:SetPoint("TOPLEFT", 16, y)
-    sep:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
+    sep:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y)
     y = y - 8
-    local expHead = Cfg.MakeHeader(config, L.EXP_SECTION, y)
+    local expHead = Cfg.MakeHeader(p, L.EXP_SECTION, y)
     expHead:SetTextColor(1, 0.5, 0)
     y = y - 16
-    local expNote = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local expNote = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     expNote:SetPoint("TOPLEFT", 16, y)
     expNote:SetText(L.EXP_NOTE)
     y = y - 20
 
     -- Gruppen-Buffs
-    config.expGroupCB = Cfg.MakeCheck(config, L.EXP_GROUP, 16, y, function(self)
+    config.expGroupCB = Cfg.MakeCheck(p, L.EXP_GROUP, 16, y, function(self)
         db.expGroup = self:GetChecked() and true or false
         if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
         NoteDeferred()
@@ -3375,14 +3557,14 @@ local function BuildConfig()
         if e.groupIds then hasGroup = true end
     end
     if hasGroup then
-        config.groupCB = Cfg.MakeCheck(config, L.GROUP_CHECK, 36, y, function(self)
+        config.groupCB = Cfg.MakeCheck(p, L.GROUP_CHECK, 36, y, function(self)
             db.groupCheck = self:GetChecked() and true or false
             if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
             NoteDeferred()
             Evaluate()
         end)
-        config.groupModeBtn = Cfg.MakeButton(config, "", 200)
-        config.groupModeBtn:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y)
+        config.groupModeBtn = Cfg.MakeButton(p, "", 200)
+        config.groupModeBtn:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y)
         config.groupModeBtn:SetScript("OnClick", function()
             local idx = 1
             for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
@@ -3397,7 +3579,7 @@ local function BuildConfig()
 
     -- Reagenzien-Warnung
     y = y - 4
-    config.expReagCB = Cfg.MakeCheck(config, L.EXP_REAGENTS, 16, y, function(self)
+    config.expReagCB = Cfg.MakeCheck(p, L.EXP_REAGENTS, 16, y, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -3406,34 +3588,34 @@ local function BuildConfig()
     y = y - 26
     -- Schwellenwerte: nur die Reagenzien der eigenen Klasse
     if #reagentEntries > 0 then
-        config.reagentHint = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        config.reagentHint:SetPoint("TOPRIGHT", config, "TOPLEFT", 424, y - 2)
+        config.reagentHint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        config.reagentHint:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y - 2)
         config.reagentHint:SetJustifyH("RIGHT")
         config.reagentHint:SetText(L.REAGENT_HINT)
         y = y - 18
         for _, e in ipairs(reagentEntries) do
-            Cfg.MakeReagentRow(config, e, y)
+            Cfg.MakeReagentRow(p, e, y)
             y = y - 26
         end
     end
 
     -- Warnung vor Ablauf + Detail-Regler (Schwelle, Transparenz)
     y = y - 4
-    config.expExpiryCB = Cfg.MakeCheck(config, L.EXP_EXPIRY, 16, y, function(self)
+    config.expExpiryCB = Cfg.MakeCheck(p, L.EXP_EXPIRY, 16, y, function(self)
         db.expExpiry = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
     y = y - 30
-    config.expiryPctSlider = Cfg.MakeSlider(config, "BuffReminderExpiryPct", 40, y, 5, 50, 1, function(v)
+    config.expiryPctSlider = Cfg.MakeSlider(p, "BuffReminderExpiryPct", 40, y, 5, 50, 1, function(v)
         db.expiryPct = v
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
     y = y - 26
-    config.expiryAlphaSlider = Cfg.MakeSlider(config, "BuffReminderExpiryAlpha", 40, y, 20, 100, 5, function(v)
+    config.expiryAlphaSlider = Cfg.MakeSlider(p, "BuffReminderExpiryAlpha", 40, y, 20, 100, 5, function(v)
         db.expiryAlpha = v / 100
         NoteDeferred()
         Evaluate()
@@ -3441,15 +3623,31 @@ local function BuildConfig()
     end)
     y = y - 28
 
-    -- Klassen-Verbrauchsgüter / Steine, Öle, Gifte (Funktion folgt in einer späteren Version)
-    config.expConsCB = Cfg.MakeCheck(config, L.EXP_CONSUMABLES, 16, y, function(self)
+    -- Klassen-Verbrauchsgüter (Einträge stehen in der Klassenliste); Schwelle für gezaubertes
+    -- Essen/Wasser nur bei Klassen mit solchen Einträgen (Magier)
+    config.expConsCB = Cfg.MakeCheck(p, L.EXP_CONSUMABLES, 16, y, function(self)
         db.expConsumables = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
     y = y - 26
-    config.expWeaponCB = Cfg.MakeCheck(config, L.EXP_WEAPONITEMS, 16, y, function(self)
+    local hasConjureSum = false
+    for _, e in ipairs(classEntries) do
+        if e.kind == "conjure" and e.conj.mode == "sum" then hasConjureSum = true end
+    end
+    if hasConjureSum then
+        y = y - 4
+        config.conjureSlider = Cfg.MakeSlider(p, "BuffReminderConjureThreshold", 40, y, 0, 60, 1, function(v)
+            db.conjureThreshold = v
+            NoteDeferred()
+            Evaluate()
+            RefreshConfig()
+        end)
+        y = y - 28
+    end
+    -- Steine, Öle, Gifte (Funktion folgt in einer späteren Version)
+    config.expWeaponCB = Cfg.MakeCheck(p, L.EXP_WEAPONITEMS, 16, y, function(self)
         db.expWeaponItems = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -3458,7 +3656,7 @@ local function BuildConfig()
     y = y - 26
     y = y - 10
 
-    config.soundBtn = Cfg.MakeButton(config, "", 100)
+    config.soundBtn = Cfg.MakeButton(p, "", 100)
     config.soundBtn:SetPoint("TOPLEFT", 18, y)
     config.soundBtn:SetScript("OnClick", function()
         local idx = 1
@@ -3468,7 +3666,7 @@ local function BuildConfig()
         RefreshConfig()
     end)
 
-    config.moveBtn = Cfg.MakeButton(config, L.MOVE, 90)
+    config.moveBtn = Cfg.MakeButton(p, L.MOVE, 90)
     config.moveBtn:SetPoint("LEFT", config.soundBtn, "RIGHT", 4, 0)
     config.moveBtn:SetScript("OnClick", function()
         if InCombatLockdown() then Print(L.COMBAT); return end
@@ -3477,17 +3675,18 @@ local function BuildConfig()
         Evaluate()
     end)
 
-    local testBtn = Cfg.MakeButton(config, L.TEST, 60)
+    local testBtn = Cfg.MakeButton(p, L.TEST, 60)
     testBtn:SetPoint("LEFT", config.moveBtn, "RIGHT", 4, 0)
     testBtn:SetScript("OnClick", StartTest)
 
-    local unmuteBtn = Cfg.MakeButton(config, L.UNMUTE, 110)
+    local unmuteBtn = Cfg.MakeButton(p, L.UNMUTE, 110)
     unmuteBtn:SetPoint("LEFT", testBtn, "RIGHT", 4, 0)
     unmuteBtn:SetScript("OnClick", function()
         wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
     end)
 
-    config:SetSize(440, -y + 44)
+    Cfg.belowHeight = -y + 44
+    Cfg.LayoutClassRows()
     config:SetScript("OnShow", RefreshConfig)
     if not Cfg.configCanvas then config:Hide() end
 end
@@ -3641,6 +3840,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
             local g = GROUP_BUFFS[class] and GROUP_BUFFS[class][e.key]
             if g then e.groupIds, e.manaOnly = g.groupIds, g.manaOnly end
         end
+        Conjure.Preload(classEntries)   -- Namen der Verbrauchsgüter-Items vorladen
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
         -- Essen & Fläschchen: Kategorie-Gewichte der Klasse, gelernte Fläschchen-Spells, Taschen
         for _, e in ipairs(GENERAL_BUFFS) do
