@@ -1992,6 +1992,34 @@ function Group.UnitDisplayName(unit)
     return "?"
 end
 
+function Group.UnitFullName(unit)
+    local ok, n, r = pcall(UnitName, unit)
+    if not ok or not n or IsSecret(n) then return "?" end
+    if type(r) == "string" and r ~= "" and not IsSecret(r) then
+        return n .. "-" .. (r:gsub("[%s%-]", ""))
+    end
+    return n
+end
+
+function Group.UnitKey(unit)
+    if UnitGUID then
+        local ok, guid = pcall(UnitGUID, unit)
+        if ok and type(guid) == "string" and guid ~= "" and not IsSecret(guid) then
+            return guid
+        end
+    end
+    return Group.UnitFullName(unit)
+end
+
+function Group.OwnRealm()
+    local fn = GetNormalizedRealmName or GetRealmName
+    if not fn then return nil end
+    local ok, r = pcall(fn)
+    if ok and type(r) == "string" and r ~= "" and not IsSecret(r) then
+        return (r:gsub("[%s%-]", ""))
+    end
+end
+
 Group.BLESSING_ALL = { "kings", "might", "wisdom", "sanctuary" }
 Group.BLESSING_BY_CLASS = {
     WARRIOR     = { "kings", "might", "sanctuary" },
@@ -2023,10 +2051,10 @@ Group.CONFLICTS = {
                   [58771] = 40, [58773] = 50, [58774] = 91 },
     },
 }
-Group.bounced = {}   -- "<name>:<variant>" -> { ids = { [id]=true }, expires = GetTime()+120 }
+Group.bounced = {}   -- "<unitKey>:<variant>" -> { ids = { [id]=true }, expires = GetTime()+120 }
 
-function Group.IsBounced(unitName, varKey, scan)
-    local k = unitName .. ":" .. varKey
+function Group.IsBounced(unitKey, varKey, scan)
+    local k = unitKey .. ":" .. varKey
     local b = Group.bounced[k]
     if not b then return false end
     if GetTime() >= b.expires then Group.bounced[k] = nil; return false end
@@ -2036,24 +2064,43 @@ function Group.IsBounced(unitName, varKey, scan)
     return true
 end
 
-function Group.RecordBounce(att)
-    if not att or not att.name or not att.variant then return end
-    local ids = {}
-    for _, u in ipairs(Group.GroupUnits()) do
-        if Group.UnitDisplayName(u) == att.name then
-            local _, _, _, _, auras = ScanAuras(u)
-            for _, a in ipairs(auras or {}) do
-                if a.id and not a.isOwn then ids[a.id] = true end
-            end
-            break
+function Group.FindAttUnit(att)
+    if att.unit and att.unitKey and Group.UnitKey(att.unit) == att.unitKey then
+        return att.unit
+    end
+    if not att.name then return nil end
+    local units = Group.GroupUnits()
+    for _, u in ipairs(units) do
+        if Group.UnitFullName(u) == att.name then return u end
+    end
+    -- Fallback: arg2 in UNIT_SPELLCAST_SENT kann "<Name>-<OwnRealm>" sein, während UnitName
+    -- bei Spielern vom eigenen Realm keinen Realm-Teil liefert
+    local short, realm = att.name:match("^([^%-]+)%-(.+)$")
+    local ownRealm = Group.OwnRealm()
+    if short and ownRealm and realm:gsub("[%s%-]", "") == ownRealm then
+        for _, u in ipairs(units) do
+            if Group.UnitFullName(u) == short then return u end
         end
     end
-    Group.bounced[att.name .. ":" .. att.variant] = { ids = ids, expires = GetTime() + 120 }
+    return nil
 end
 
-function Group.VariantBlocked(v, scan, unitName)
+function Group.RecordBounce(att)
+    if not att or not att.variant then return end
+    local u = Group.FindAttUnit(att)
+    if not u then return end
+    local ukey = Group.UnitKey(u)
+    local ids = {}
+    local _, _, _, _, auras = ScanAuras(u)
+    for _, a in ipairs(auras or {}) do
+        if a.id and not a.isOwn then ids[a.id] = true end
+    end
+    Group.bounced[ukey .. ":" .. att.variant] = { ids = ids, expires = GetTime() + 120 }
+end
+
+function Group.VariantBlocked(v, scan, unitKey)
     if VariantActive(v, scan) then return true end
-    if unitName and Group.IsBounced(unitName, v.key, scan) then return true end
+    if unitKey and Group.IsBounced(unitKey, v.key, scan) then return true end
     local c = Group.CONFLICTS[v.key]
     if c then
         local ourSpell = BestCast(v.castIds)
@@ -2073,13 +2120,13 @@ end
 
 -- Passende Variante für das Ziel wählen: bevorzugte (lastVariant), falls noch nicht aktiv,
 -- nicht durch stärkeren Buff blockiert und für die Klasse sinnvoll, sonst erste freie Variante.
-function Group.PickVariant(e, class, scan, unitName)
+function Group.PickVariant(e, class, scan, unitKey)
     local order = Group.BLESSING_BY_CLASS[class or ""] or Group.BLESSING_ALL
     local allowed = {}
     for _, k in ipairs(order) do allowed[k] = true end
     local function usable(k)
         local v = VariantByKey(e, k)
-        return v and BestCast(v.castIds) ~= nil and not Group.VariantBlocked(v, scan, unitName) and v or nil
+        return v and BestCast(v.castIds) ~= nil and not Group.VariantBlocked(v, scan, unitKey) and v or nil
     end
     local last = cdb and cdb.lastVariant and cdb.lastVariant[e.key]
     if last and allowed[last] then
@@ -2094,7 +2141,7 @@ function Group.PickVariant(e, class, scan, unitName)
 end
 
 -- Eigene Aura auf unit prüfen (ownOnly); liefert missing (true/false/nil) + gewählte Variante
-function Group.CheckOwnEntry(e, class, scan, unitName)
+function Group.CheckOwnEntry(e, class, scan, unitKey)
     if not scan then return nil end
     local secretHit = false
     for _, a in ipairs(scan.list) do
@@ -2105,7 +2152,7 @@ function Group.CheckOwnEntry(e, class, scan, unitName)
     end
     if secretHit or scan.unreliable then return nil end
     if e.groupByVariant and e.variants then
-        local v = Group.PickVariant(e, class, scan, unitName)
+        local v = Group.PickVariant(e, class, scan, unitKey)
         if not v then return false end
         return true, v
     end
@@ -2122,27 +2169,38 @@ function Group.ScanGroup()
         end
     end
     if #list == 0 then return end
+    local shortCounts, scanned = {}, {}
     for _, unit in ipairs(Group.GroupUnits()) do
         if Group.UnitUsable(unit) then
             local ids, names, unreliable, _, auras = ScanAuras(unit)
             local scan = ids and { ids = ids, names = names, unreliable = unreliable, list = auras } or nil
-            local class = Group.UnitClassFile(unit)
-            local uname = Group.UnitDisplayName(unit)
-            for _, e in ipairs(list) do
-                if not e.manaOnly or (class and MANA_CLASSES[class]) then
-                    local st = Group.groupState[e.key]
-                    local m, variant
-                    if e.ownOnly then
-                        m, variant = Group.CheckOwnEntry(e, class, scan, uname)
-                    else
-                        -- Gruppen- und Einzelversion stehen beide in e.idSet / e.names
-                        m = CheckMissing(e, scan)
-                    end
-                    if m == true then
-                        st.missing[#st.missing + 1] = { unit = unit, name = uname, variant = variant }
-                    elseif m == nil then
-                        st.unknown = true
-                    end
+            local short = Group.UnitDisplayName(unit)
+            shortCounts[short] = (shortCounts[short] or 0) + 1
+            scanned[#scanned + 1] = {
+                unit = unit, scan = scan, class = Group.UnitClassFile(unit),
+                short = short, full = Group.UnitFullName(unit), ukey = Group.UnitKey(unit),
+            }
+        end
+    end
+    for _, info in ipairs(scanned) do
+        local uname = (shortCounts[info.short] or 0) > 1 and info.full or info.short
+        for _, e in ipairs(list) do
+            if not e.manaOnly or (info.class and MANA_CLASSES[info.class]) then
+                local st = Group.groupState[e.key]
+                local m, variant
+                if e.ownOnly then
+                    m, variant = Group.CheckOwnEntry(e, info.class, info.scan, info.ukey)
+                else
+                    -- Gruppen- und Einzelversion stehen beide in e.idSet / e.names
+                    m = CheckMissing(e, info.scan)
+                end
+                if m == true then
+                    st.missing[#st.missing + 1] = {
+                        unit = info.unit, unitKey = info.ukey, name = uname,
+                        fullName = info.full, variant = variant,
+                    }
+                elseif m == nil then
+                    st.unknown = true
                 end
             end
         end
@@ -2209,7 +2267,10 @@ function Group.GroupActionFor(e)
     if not target or not db.clickCast then return nil end
     local single = (target.variant and BestCast(target.variant.castIds)) or CastSpellFor(e)
     if not single then return nil end
-    local a = { unit = target.unit, targetName = target.name, ctrlSpell = single, ctrlUnit = target.unit }
+    local a = {
+        unit = target.unit, unitKey = target.unitKey, targetName = target.name,
+        targetFullName = target.fullName, ctrlSpell = single, ctrlUnit = target.unit,
+    }
     local gspell, item = Group.GroupSpellFor(e, target.variant)
     if gspell and (not item or (ItemCount(item) or 1) > 0) then
         a.spell, a.isGroup = gspell, true
@@ -2253,7 +2314,7 @@ function Group.PrintDebug(log)
         end
         local ids, _, un, _, auras = ScanAuras(u)
         out(("  %s (%s): usable=%s ex=%s co=%s de=%s vi=%s range=%s scan=%s un=%s auras=%d"):format(
-            u, Group.UnitDisplayName(u), tostring(Group.UnitUsable(u)),
+            u, Group.UnitFullName(u), tostring(Group.UnitUsable(u)),
             tostring(ex), tostring(co), tostring(de), tostring(vi), irStr,
             ids and "ok" or "nil", tostring(un), auras and #auras or 0))
         if log and auras and #auras > 0 then
@@ -2764,8 +2825,9 @@ function Display.GetRow(i)
             end
             if self.entry and self.entry.ownOnly and self.action and self.action.variantKey then
                 Group.lastAttempt = {
-                    name = self.action.targetName, key = self.entry.key,
-                    variant = self.action.variantKey, t = GetTime(),
+                    unit = self.action.unit, unitKey = self.action.unitKey,
+                    name = self.action.targetFullName or self.action.targetName,
+                    key = self.entry.key, variant = self.action.variantKey, t = GetTime(),
                 }
             end
             return
@@ -4529,7 +4591,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 for _, v in ipairs(e.variants) do
                     if v.matchSet[arg4] or (sname and v.nameSet[sname]) then
                         Group.lastAttempt = {
-                            name = arg2:match("^([^%-]+)") or arg2,
+                            name = arg2,
                             key = e.key, variant = v.key, t = GetTime(),
                         }
                         return
