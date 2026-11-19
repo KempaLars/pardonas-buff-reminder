@@ -440,7 +440,7 @@ local CLASS_BUFFS = {
           ids = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 27140, 48931, 48932,
                   25782, 25916, 27141, 48933, 48934,
                   19742, 19850, 19852, 19853, 19854, 25290, 27142, 48935, 48936,
-                  25894, 25918, 27143, 48937, 48938, 20217, 25898, 20911, 25899 },
+                  25894, 25918, 27143, 48937, 48938, 20217, 25898, 20911, 25899, 27169 },
           nameIds = { 19740, 25782, 19742, 25894, 20217, 25898, 20911, 25899 } },
         { key = "rfury", level = 16, defaultOff = true, ids = { 25780 } },
     },
@@ -591,7 +591,7 @@ local CAST_DATA = {
               castIds = { 19742, 19850, 19852, 19853, 19854, 25290, 27142, 48935, 48936 },
               ids = { 25894, 25918, 27143, 48937, 48938 } },               -- Großer Segen der Weisheit
             { key = "kings",     castIds = { 20217 }, ids = { 25898 } },   -- Großer Segen der Könige
-            { key = "sanctuary", castIds = { 20911 }, ids = { 25899 } },   -- Großer Segen des Refugiums
+            { key = "sanctuary", castIds = { 20911 }, ids = { 25899, 27169 } },   -- Großer Segen des Refugiums
         } },
     },
     SHAMAN = {
@@ -842,9 +842,12 @@ local REAGENT_SPELLS = {
 
 ---------------------------------------------------------------------------
 -- Gruppen-Buffs (Party/Raid, nur außerhalb des Kampfes)
---   groupIds : Ränge der Gruppenversion (aufsteigend); Lernstufe und Reagenz je Rang
---              stammen aus REAGENT_SPELLS (RANK_INFO)
---   manaOnly : nur Spieler mit Mana-Klasse prüfen (Klasse, nicht aktueller Ressourcentyp)
+--   groupIds       : Ränge der Gruppenversion (aufsteigend); Lernstufe und Reagenz je Rang
+--                    stammen aus REAGENT_SPELLS (RANK_INFO)
+--   groupByVariant : Gruppenversionen stehen je Variante in v.ids (zuletzt genutzte Variante)
+--   ownOnly        : nur eigene Auren (sourceUnit == "player") zählen als vorhanden;
+--                    mit groupByVariant wird eine noch nicht aktive, passende Variante gewählt
+--   manaOnly       : nur Spieler mit Mana-Klasse prüfen (Klasse, nicht aktueller Ressourcentyp)
 -- Wird beim Login in die Einträge von CLASS_BUFFS übernommen (gleiche Keys).
 ---------------------------------------------------------------------------
 local GROUP_BUFFS = {
@@ -858,6 +861,9 @@ local GROUP_BUFFS = {
     },
     DRUID = {
         motw = { groupIds = { 21849, 21850, 26991, 48470 } },           -- Gabe der Wildnis
+    },
+    PALADIN = {
+        blessing = { groupByVariant = true, ownOnly = true },   -- Große Segen (nur eigener Segen, weicht fremden aus)
     },
 }
 
@@ -1760,7 +1766,8 @@ local function ScanAuras(unit)
                     if id then ids[id] = true end
                     if name then names[name] = true end
                     local src = aura.sourceUnit
-                    if not IsSecret(src) and src == "player" then
+                    local isOwn = not IsSecret(src) and src == "player"
+                    if isOwn then
                         if id then own.ids[id] = true end
                         if name then own.names[name] = true end
                     end
@@ -1769,7 +1776,8 @@ local function ScanAuras(unit)
                     -- Laufzeit (für den Ess-Countdown); Secret-Werte -> nil
                     local dur, exp = aura.duration, aura.expirationTime
                     if IsSecret(dur) or IsSecret(exp) then dur, exp = nil, nil end
-                    list[#list + 1] = { id = id, name = name, icon = icon, duration = dur, expirationTime = exp }
+                    list[#list + 1] = { id = id, name = name, icon = icon, duration = dur, expirationTime = exp,
+                        isOwn = isOwn, secretSrc = IsSecret(src) }
                 end
             end
         end
@@ -1784,7 +1792,8 @@ local function ScanAuras(unit)
                 own.names[name] = true
                 if id then own.ids[id] = true end
             end
-            list[#list + 1] = { id = id, name = name, icon = icon, duration = dur, expirationTime = exp }
+            list[#list + 1] = { id = id, name = name, icon = icon, duration = dur, expirationTime = exp,
+                isOwn = (src == "player"), secretSrc = false }
         end
         return ids, names, false, own, list
     end
@@ -1908,9 +1917,13 @@ function Group.GroupModeOk()
     return true
 end
 
+function Group.SupportsGroup(e)
+    return e.groupIds ~= nil or e.groupByVariant == true
+end
+
 -- Gruppen-Check für einen (erlernten, aktivierten) Eintrag aktiv?
 function Group.GroupActive(e)
-    return e.groupIds ~= nil and GroupFeatureOn() and IsInGroup ~= nil and IsInGroup() and Group.GroupModeOk()
+    return Group.SupportsGroup(e) and GroupFeatureOn() and IsInGroup ~= nil and IsInGroup() and Group.GroupModeOk()
 end
 
 function Group.GroupUnits()
@@ -1926,7 +1939,8 @@ function Group.GroupUnits()
 end
 
 -- Prüf- und Zielbarkeit: existiert, online, lebt, sichtbar, in Reichweite.
--- Unbekannte (Secret-)Werte zählen als "nicht prüfbar" → Spieler wird übersprungen.
+-- Secret-Werte bei UnitInRange (z. B. WoW 12.0 / Forever) blockieren die Prüfung nicht;
+-- es greift dann UnitIsVisible.
 function Group.UnitUsable(unit)
     if Group.UnitFlag(UnitExists, unit) ~= true then return false end
     if UnitIsConnected and Group.UnitFlag(UnitIsConnected, unit) ~= true then return false end
@@ -1935,8 +1949,9 @@ function Group.UnitUsable(unit)
     if Group.UnitFlag(UnitIsUnit, unit, "player") == true then return true end
     if UnitInRange then
         local ok, inRange, checked = pcall(UnitInRange, unit)
-        if not ok or IsSecret(inRange) or IsSecret(checked) then return false end
-        if checked and not inRange then return false end
+        if ok and not IsSecret(inRange) and not IsSecret(checked) and checked and not inRange then
+            return false
+        end
     end
     return true
 end
@@ -1952,11 +1967,131 @@ function Group.UnitDisplayName(unit)
     return "?"
 end
 
+Group.BLESSING_ALL = { "kings", "might", "wisdom", "sanctuary" }
+Group.BLESSING_BY_CLASS = {
+    WARRIOR     = { "kings", "might", "sanctuary" },
+    ROGUE       = { "kings", "might", "sanctuary" },
+    DEATHKNIGHT = { "kings", "might", "sanctuary" },
+    MAGE        = { "kings", "wisdom", "sanctuary" },
+    PRIEST      = { "kings", "wisdom", "sanctuary" },
+    WARLOCK     = { "kings", "wisdom", "sanctuary" },
+}
+Group.OUR_POWER = {
+    -- Blessing of Might / Greater Blessing of Might (AP)
+    [19740] = 20,  [19834] = 35,  [19835] = 55,  [19836] = 85,  [19837] = 115,
+    [19838] = 155, [25291] = 185, [27140] = 220, [48931] = 305, [48932] = 550,
+    [25782] = 155, [25916] = 185, [27141] = 220, [48933] = 305, [48934] = 550,
+    -- Blessing of Wisdom / Greater Blessing of Wisdom (MP5)
+    [19742] = 10,  [19850] = 15,  [19852] = 20,  [19853] = 25,  [19854] = 30,
+    [25290] = 33,  [27142] = 41,  [48935] = 50,  [48936] = 92,
+    [25894] = 30,  [25918] = 33,  [27143] = 41,  [48937] = 50,  [48938] = 92,
+}
+Group.CONFLICTS = {
+    might = {
+        spellId = 6673,   -- Battle Shout
+        power = { [6673] = 15, [5242] = 35, [6192] = 55, [11549] = 85, [11550] = 130,
+                  [11551] = 185, [25289] = 232, [2048] = 305, [47436] = 550 },
+    },
+    wisdom = {
+        spellId = 5677,   -- Mana Spring
+        power = { [5677] = 10, [10491] = 15, [10493] = 20, [10494] = 25, [25569] = 34,
+                  [58771] = 40, [58773] = 50, [58774] = 91 },
+    },
+}
+Group.bounced = {}   -- "<name>:<variant>" -> { ids = { [id]=true }, expires = GetTime()+120 }
+
+function Group.IsBounced(unitName, varKey, scan)
+    local k = unitName .. ":" .. varKey
+    local b = Group.bounced[k]
+    if not b then return false end
+    if GetTime() >= b.expires then Group.bounced[k] = nil; return false end
+    for id in pairs(b.ids) do
+        if not scan.ids[id] then Group.bounced[k] = nil; return false end
+    end
+    return true
+end
+
+function Group.RecordBounce(att)
+    if not att or not att.name or not att.variant then return end
+    local ids = {}
+    for _, u in ipairs(Group.GroupUnits()) do
+        if Group.UnitDisplayName(u) == att.name then
+            local _, _, _, _, auras = ScanAuras(u)
+            for _, a in ipairs(auras or {}) do
+                if a.id and not a.isOwn then ids[a.id] = true end
+            end
+            break
+        end
+    end
+    Group.bounced[att.name .. ":" .. att.variant] = { ids = ids, expires = GetTime() + 120 }
+end
+
+function Group.VariantBlocked(v, scan, unitName)
+    if VariantActive(v, scan) then return true end
+    if unitName and Group.IsBounced(unitName, v.key, scan) then return true end
+    local c = Group.CONFLICTS[v.key]
+    if c then
+        local ourSpell = BestCast(v.castIds)
+        local ourPower = (type(ourSpell) == "number" and Group.OUR_POWER[ourSpell]) or 0
+        local cname = SpellName(c.spellId)
+        for _, a in ipairs(scan.list) do
+            local p = a.id and c.power[a.id]
+            if p ~= nil then
+                if p >= ourPower then return true end
+            elseif cname and a.name == cname then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- Passende Variante für das Ziel wählen: bevorzugte (lastVariant), falls noch nicht aktiv,
+-- nicht durch stärkeren Buff blockiert und für die Klasse sinnvoll, sonst erste freie Variante.
+function Group.PickVariant(e, class, scan, unitName)
+    local order = Group.BLESSING_BY_CLASS[class or ""] or Group.BLESSING_ALL
+    local allowed = {}
+    for _, k in ipairs(order) do allowed[k] = true end
+    local function usable(k)
+        local v = VariantByKey(e, k)
+        return v and BestCast(v.castIds) ~= nil and not Group.VariantBlocked(v, scan, unitName) and v or nil
+    end
+    local last = cdb and cdb.lastVariant and cdb.lastVariant[e.key]
+    if last and allowed[last] then
+        local v = usable(last)
+        if v then return v end
+    end
+    for _, k in ipairs(order) do
+        local v = usable(k)
+        if v then return v end
+    end
+    return nil
+end
+
+-- Eigene Aura auf unit prüfen (ownOnly); liefert missing (true/false/nil) + gewählte Variante
+function Group.CheckOwnEntry(e, class, scan, unitName)
+    if not scan then return nil end
+    local secretHit = false
+    for _, a in ipairs(scan.list) do
+        if (a.id and e.idSet[a.id]) or AuraNameMatch(e, a) then
+            if a.isOwn then return false end
+            if a.secretSrc then secretHit = true end
+        end
+    end
+    if secretHit or scan.unreliable then return nil end
+    if e.groupByVariant and e.variants then
+        local v = Group.PickVariant(e, class, scan, unitName)
+        if not v then return false end
+        return true, v
+    end
+    return true
+end
+
 function Group.ScanGroup()
     wipe(Group.groupState)
     local list = {}
     for _, e in ipairs(entries) do
-        if e.groupIds and knownCache[e.key] and IsEnabled(e) then
+        if Group.SupportsGroup(e) and knownCache[e.key] and IsEnabled(e) then
             list[#list + 1] = e
             Group.groupState[e.key] = { missing = {}, unknown = false }
         end
@@ -1967,13 +2102,19 @@ function Group.ScanGroup()
             local ids, names, unreliable, _, auras = ScanAuras(unit)
             local scan = ids and { ids = ids, names = names, unreliable = unreliable, list = auras } or nil
             local class = Group.UnitClassFile(unit)
+            local uname = Group.UnitDisplayName(unit)
             for _, e in ipairs(list) do
                 if not e.manaOnly or (class and MANA_CLASSES[class]) then
                     local st = Group.groupState[e.key]
-                    -- Gruppen- und Einzelversion stehen beide in e.idSet / e.names
-                    local m = CheckMissing(e, scan)
+                    local m, variant
+                    if e.ownOnly then
+                        m, variant = Group.CheckOwnEntry(e, class, scan, uname)
+                    else
+                        -- Gruppen- und Einzelversion stehen beide in e.idSet / e.names
+                        m = CheckMissing(e, scan)
+                    end
                     if m == true then
-                        st.missing[#st.missing + 1] = { unit = unit, name = Group.UnitDisplayName(unit) }
+                        st.missing[#st.missing + 1] = { unit = unit, name = uname, variant = variant }
                     elseif m == nil then
                         st.unknown = true
                     end
@@ -2014,8 +2155,13 @@ function Group.GroupMissing(e)
 end
 
 -- höchster erlernter Rang der Gruppenversion + dessen Reagenz; Namens-Fallback wie bei Reagenzien
-function Group.GroupSpellFor(e)
+function Group.GroupSpellFor(e, variant)
     local ids = e.groupIds
+    if not ids and e.groupByVariant and e.variants then
+        local v = variant or VariantByKey(e, cdb and cdb.lastVariant and cdb.lastVariant[e.key])
+        ids = v and v.ids
+    end
+    if not ids or #ids == 0 then return nil end
     for i = #ids, 1, -1 do
         if SpellKnown(ids[i]) then return ids[i], RANK_INFO[ids[i]] and RANK_INFO[ids[i]].item end
     end
@@ -2035,15 +2181,18 @@ end
 --   Strg+Linksklick : Einzelversion
 function Group.GroupActionFor(e)
     local target = e.groupMissing and e.groupMissing[1]
-    local single = CastSpellFor(e)
-    if not target or not single then return nil end
+    if not target or not db.clickCast then return nil end
+    local single = (target.variant and BestCast(target.variant.castIds)) or CastSpellFor(e)
+    if not single then return nil end
     local a = { unit = target.unit, targetName = target.name, ctrlSpell = single, ctrlUnit = target.unit }
-    local gspell, item = Group.GroupSpellFor(e)
+    local gspell, item = Group.GroupSpellFor(e, target.variant)
     if gspell and (not item or (ItemCount(item) or 1) > 0) then
         a.spell, a.isGroup = gspell, true
     else
         a.spell = single
     end
+    a.spellName = SpellName(a.spell)
+    a.variantKey = target.variant and target.variant.key
     return a
 end
 
@@ -2054,6 +2203,52 @@ function Group.MissingNames(e)
     local s = table.concat(out, ", ")
     if #list > 5 then s = s .. " +" .. (#list - 5) end
     return s
+end
+
+function Group.PrintDebug(log)
+    local function out(msg)
+        Print(msg)
+        if log then log[#log + 1] = msg end
+    end
+    local units = Group.GroupUnits()
+    out(("group: feature=%s expGroup=%s check=%s mode=%s modeOk=%s inGroup=%s members=%d"):format(
+        tostring(GroupFeatureOn()), tostring(ExpOn("expGroup")), tostring(db and db.groupCheck),
+        tostring(db and db.groupMode), tostring(Group.GroupModeOk()),
+        tostring(IsInGroup and IsInGroup()), GetNumGroupMembers and GetNumGroupMembers() or 0))
+    for _, u in ipairs(units) do
+        local ex = Group.UnitFlag(UnitExists, u)
+        local co = UnitIsConnected and Group.UnitFlag(UnitIsConnected, u)
+        local de = Group.UnitFlag(UnitIsDeadOrGhost, u)
+        local vi = UnitIsVisible and Group.UnitFlag(UnitIsVisible, u)
+        local irStr = "nil"
+        if UnitInRange then
+            local ok, ir, ch = pcall(UnitInRange, u)
+            irStr = ok and (("%s/%s"):format(IsSecret(ir) and "secret" or tostring(ir),
+                IsSecret(ch) and "secret" or tostring(ch))) or "err"
+        end
+        local ids, _, un, _, auras = ScanAuras(u)
+        out(("  %s (%s): usable=%s ex=%s co=%s de=%s vi=%s range=%s scan=%s un=%s auras=%d"):format(
+            u, Group.UnitDisplayName(u), tostring(Group.UnitUsable(u)),
+            tostring(ex), tostring(co), tostring(de), tostring(vi), irStr,
+            ids and "ok" or "nil", tostring(un), auras and #auras or 0))
+        if log and auras and #auras > 0 then
+            local list = {}
+            for _, a in ipairs(auras) do
+                list[#list + 1] = ("%s(%s%s)"):format(tostring(a.name), tostring(a.id),
+                    a.isOwn and ",own" or (a.secretSrc and ",sec" or ""))
+            end
+            log[#log + 1] = "    auras: " .. table.concat(list, ", ")
+        end
+    end
+    for _, e in ipairs(entries) do
+        if Group.SupportsGroup(e) then
+            local st = Group.groupState[e.key]
+            out(("  entry %s: active=%s missing=%d unknown=%s lastVar=%s"):format(
+                e.key, tostring(Group.GroupActive(e)),
+                st and #st.missing or -1, tostring(st and st.unknown),
+                tostring(cdb and cdb.lastVariant and cdb.lastVariant[e.key])))
+        end
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -2557,6 +2752,12 @@ function Display.GetRow(i)
             if self.useItem and self.entry and self.entry.itemKind == "flask" then
                 cdb.lastFlask = self.useItem
             end
+            if self.entry and self.entry.ownOnly and self.action and self.action.variantKey then
+                Group.lastAttempt = {
+                    name = self.action.targetName, key = self.entry.key,
+                    variant = self.action.variantKey, t = GetTime(),
+                }
+            end
             return
         end
         if button == "RightButton" and self.entry and not unlocked then Display.OpenMuteMenu(self) end
@@ -2590,9 +2791,10 @@ function Display.GetRow(i)
         end
         local a = self.action or {}
         if a.ctrlSpell then
-            -- Gruppen-Zeile: Ziel nennen
+            -- Gruppen-Zeile: Ziel nennen (bei Varianten-Vorschlag auch gewählten Segen)
             local who = a.targetName or "?"
-            GameTooltip:AddLine((a.isGroup and L.LEFTCLICK_GROUP or L.LEFTCLICK_SINGLE):format(who), 0.8, 0.8, 0.8)
+            local label = (self.entry.ownOnly and a.spellName) and (who .. " – " .. a.spellName) or who
+            GameTooltip:AddLine((a.isGroup and L.LEFTCLICK_GROUP or L.LEFTCLICK_SINGLE):format(label), 0.8, 0.8, 0.8)
             GameTooltip:AddLine(L.CTRLCLICK_SINGLE:format(who), 0.8, 0.8, 0.8)
         elseif self.castSpell then
             GameTooltip:AddLine(L.LEFTCLICK, 0.8, 0.8, 0.8)
@@ -2644,7 +2846,12 @@ function Display.ShowRows(list, dragMode, expFrom)
             Display.SetRowAction(r, a)
             Display.SetRowLines(r, true)
             Display.SetRowStatus(r, "missing")
-            r.text:SetText(L.GROUP_MISSING:format(EntryLabel(e), #(e.groupMissing or {})))
+            local label = (e.ownOnly and a and a.spellName) or EntryLabel(e)
+            if e.ownOnly and a and a.spell then
+                local tex = SpellIcon(a.spell)
+                if tex then r.icon:SetTexture(tex) end
+            end
+            r.text:SetText(L.GROUP_MISSING:format(label, #(e.groupMissing or {})))
             r.names:SetText(Group.MissingNames(e))
             if a then
                 Display.SetRowHint(r, a.isGroup and L.HINT_GROUP or L.HINT_SINGLE)
@@ -4021,10 +4228,10 @@ local function BuildConfig()
         RefreshConfig()
     end)
     y = y - 26
-    -- Detail-Einstellungen nur für Klassen mit Gruppen-Buffs (Priester, Magier, Druide)
+    -- Detail-Einstellungen nur für Klassen mit Gruppen-Buffs (Priester, Magier, Druide, Paladin)
     local hasGroup = false
     for _, e in ipairs(classEntries) do
-        if e.groupIds then hasGroup = true end
+        if Group.SupportsGroup(e) then hasGroup = true end
     end
     if hasGroup then
         config.groupCB = Cfg.MakeCheck(p, L.GROUP_CHECK, 36, y, function(self)
@@ -4293,7 +4500,7 @@ local function StartGrace()
     end)
 end
 
-ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
+ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then return end
         BuffReminderDB = BuffReminderDB or {}
@@ -4320,7 +4527,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         for _, e in ipairs(classEntries) do
             PrepareEntry(e); PrepareCast(e, class); entries[#entries + 1] = e
             local g = GROUP_BUFFS[class] and GROUP_BUFFS[class][e.key]
-            if g then e.groupIds, e.manaOnly = g.groupIds, g.manaOnly end
+            if g then e.groupIds, e.manaOnly, e.groupByVariant, e.ownOnly = g.groupIds, g.manaOnly, g.groupByVariant, g.ownOnly end
         end
         Conjure.Preload(classEntries)   -- Namen der Verbrauchsgüter-Items vorladen
         -- Waffen-Items: nicht für Schamanen (eigene Waffenverzauberungen); Schurke: an den
@@ -4372,6 +4579,8 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         SafeRegisterEvent(self, "GROUP_ROSTER_UPDATE")
         SafeRegisterEvent(self, "UNIT_INVENTORY_CHANGED", "player")
         SafeRegisterEvent(self, "UNIT_SPELLCAST_SUCCEEDED", "player")
+        SafeRegisterEvent(self, "UNIT_SPELLCAST_SENT")
+        SafeRegisterEvent(self, "UI_ERROR_MESSAGE")
         C_Timer.NewTicker(1, Evaluate)
         return
     end
@@ -4430,8 +4639,42 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     end
 
     if event == "GROUP_ROSTER_UPDATE" then
+        if not IsInGroup or not IsInGroup() then wipe(Group.bounced) end
         if not GroupFeatureOn() then return end
         Group.MarkGroupDirty()
+        return
+    end
+
+    if event == "UNIT_SPELLCAST_SENT" then
+        -- arg1 = unit, arg2 = target, arg3 = castGUID, arg4 = spellID
+        if arg1 ~= "player" or type(arg2) ~= "string" or IsSecret(arg2) or arg4 == nil or IsSecret(arg4) then return end
+        local sname = SpellName(arg4)
+        for _, e in ipairs(entries) do
+            if e.ownOnly and e.variants then
+                for _, v in ipairs(e.variants) do
+                    if v.matchSet[arg4] or (sname and v.nameSet[sname]) then
+                        Group.lastAttempt = {
+                            name = arg2:match("^([^%-]+)") or arg2,
+                            key = e.key, variant = v.key, t = GetTime(),
+                        }
+                        return
+                    end
+                end
+            end
+        end
+        return
+    end
+
+    if event == "UI_ERROR_MESSAGE" then
+        -- arg1 = errorType, arg2 = message ("A more powerful spell is already active" -> Variante merken)
+        local att = Group.lastAttempt
+        if not att or (GetTime() - att.t) > 2 or type(arg2) ~= "string" or IsSecret(arg2) then return end
+        local bouncedMsg = _G["SPELL_FAILED_AURA_BOUNCED"] or _G["ERR_AURA_BOUNCED"]
+        if (bouncedMsg and arg2 == bouncedMsg) or arg2:lower():find("more powerful spell", 1, true) then
+            Group.RecordBounce(att)
+            Group.lastAttempt = nil
+            Group.MarkGroupDirty()
+        end
         return
     end
 
@@ -4503,20 +4746,24 @@ SlashCmdList.BUFFREMINDER = function(msg)
     elseif cmd == "unmute" then
         wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
     elseif cmd == "debug" then
+        local log = {}
+        local function dprint(line) Print(line); log[#log + 1] = line end
         local ids, _, unreliable = ScanAuras()
-        Print(("ready=%s enabled=%s suppressed=%s instanceOnly=%s inInstance=%s scan=%s unreliable=%s"):format(
+        dprint(("ready=%s enabled=%s suppressed=%s instanceOnly=%s inInstance=%s scan=%s unreliable=%s"):format(
             tostring(ready), tostring(db.enabled), tostring(Suppressed()), tostring(db.instanceOnly),
             tostring(InGroupInstance()), ids and "ok" or "nil", tostring(unreliable)))
         for _, e in ipairs(entries) do
-            Print(("%s: known=%s enabled=%s missing=%s muted=%s names=%s"):format(
+            dprint(("%s: known=%s enabled=%s missing=%s muted=%s groupActive=%s names=%s"):format(
                 EntryLabel(e), tostring(knownCache[e.key]), tostring(IsEnabled(e)),
                 tostring(missing[e.key]), tostring(MuteRemaining(e.key) ~= nil),
-                table.concat(e.names or {}, "/")))
+                tostring(e.groupActive), table.concat(e.names or {}, "/")))
         end
-        Print(("eating=%s aura=%s eatSpells=%d eatNames=%d"):format(
+        Group.PrintDebug(log)
+        dprint(("eating=%s aura=%s eatSpells=%d eatNames=%d"):format(
             (foodEntry and foodEntry.eatStart) and "yes" or "no",
             Eat.eatAura and ("%s – %s"):format(tostring(Eat.eatAura.name), tostring(Eat.eatAura.id)) or "none",
             CountKeys(Eat.eatSpells), CountKeys(Eat.eatNames)))
+        db.lastDebug = log
     elseif cmd == "auras" then
         Print(L.AURAS_HEAD)
         if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
