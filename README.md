@@ -33,7 +33,7 @@ Built for **WoW Forever** (Interface `16001`).
   - Death Knight: Horn of Winter
   - Situational buffs (e.g. Thorns, Shadowform, Righteous Fury, shouts) are off by default.
 - **Weapon imbues and poisons** – Shaman main-hand/off-hand weapon imbues and Rogue main-hand/off-hand poisons. Off-hand checks only apply when an actual weapon is equipped there.
-- **General buffs (optional, off by default)** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag).
+- **General buffs** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag) (all off by default), plus **Find Minerals** (on by default when learned; applies everywhere, not restricted to instances, and left-click activates the minimap tracking).
 - **Use food and flasks by click** – for the Well Fed and Flask reminders:
   - **Left-click** uses the best matching item from your bags. The hint line shows which one ("Left-click: Smoked Desert Dumplings · Right-click: choose"), or "Not in bags · Right-click: mute" if you have none.
   - **Right-click** opens the reminder menu (see [Right-click menu](#right-click-menu-beta)) with all matching items in your bags.
@@ -42,7 +42,7 @@ Built for **WoW Forever** (Interface `16001`).
   - **Flasks** are any flask in your bags (detected by item type, with a fallback list of the Classic flasks). After favorites, the flask you used last (remembered per character) comes first, then higher item level. The addon also learns each flask's effect so that new flasks count as an active Flask buff.
   - Uses the "Left-click casts buff" option: when it is off, left-click does nothing and right-click only mutes.
 - **Eating countdown** – while you are eating (started from the reminder or directly from your bags; detected by the food's eating aura by spell ID or name, or by the generic "Food" or "Drink" aura) and are not yet Well Fed, the Well Fed reminder shows "Eating … 7 s", counting down the 10 seconds until the buff appears, then "Almost well fed …", with the hint "Stay seated". This does not trigger a chat message or sound. If you stand up before getting Well Fed, the normal reminder comes back (again without a new chat message or sound).
-- **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
+- **Instance mode** – general buffs (except Find Minerals) can be limited to dungeons and raids ("General buffs only in instances", on by default).
 - **Right-click to mute** – right-click a reminder and pick 5, 15 or 60 minutes or the rest of the session in the menu. Mutes can be cleared from the settings or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
   - Directly castable: Priest (Fortitude, Inner Fire, Divine Spirit, Shadow Protection, Vampiric Embrace, Shadowform), Mage (Arcane Intellect), Druid (Mark of the Wild, Thorns), Hunter (Trueshot Aura), Death Knight (Horn of Winter).

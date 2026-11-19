@@ -18,6 +18,7 @@ local Menu    = {}   -- Rechtsklick-Menü
 local Cfg     = {}   -- Einstellungsfenster
 local Expiry  = {}   -- Warnung vor Ablauf (experimentell)
 local Conjure = {}   -- Klassen-Verbrauchsgüter: Magier-Essen/-Wasser/Manastein, Hexenmeister-Steine (experimentell)
+local Tracking = {}  -- Minimap-Tracking (z. B. Mineraliensuche)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -78,8 +79,10 @@ if GetLocale() == "deDE" then
         WELLRESTED    = "Well-Rested (Schlafsack)",
         -- Klick-Zaubern
         HINT_CAST     = "Linksklick: zaubern · Rechtsklick: stumm",
+        HINT_TRACK    = "Linksklick: aktivieren · Rechtsklick: stumm",
         HINT_MUTE     = "Rechtsklick: stumm",
         LEFTCLICK     = "Linksklick: zaubern",
+        LEFTCLICK_TRACK = "Linksklick: aktivieren",
         CLICKCAST     = "Linksklick zaubert Buff",
         COMBAT        = "Im Kampf nicht möglich.",
         AFTER_COMBAT  = "Änderung wird nach dem Kampf angezeigt.",
@@ -220,8 +223,10 @@ else
         FLASK         = "Flask",
         WELLRESTED    = "Well-Rested (sleeping bag)",
         HINT_CAST     = "Left-click: cast · Right-click: mute",
+        HINT_TRACK    = "Left-click: activate · Right-click: mute",
         HINT_MUTE     = "Right-click: mute",
         LEFTCLICK     = "Left-click: cast",
+        LEFTCLICK_TRACK = "Left-click: activate",
         CLICKCAST     = "Left-click casts buff",
         COMBAT        = "Not possible in combat.",
         AFTER_COMBAT  = "Change will be shown after combat.",
@@ -460,6 +465,13 @@ local GENERAL_BUFFS = {
     { key = "gen_wellrested", general = true, defaultOff = true, label = "WELLRESTED",
       ids = { 429959 }, nameIds = { 429959 }, matchNames = { "Well-Rested", "Well Rested" },
       excludeIds = { 1225478 } },
+    -- Mineraliensuche (Find Minerals, Spell-ID 2580): nur wenn erlernt, gilt überall
+    -- (auch außerhalb von Instanzen); Linksklick aktiviert das Minimap-Tracking.
+    { key = "gen_findminerals", general = true, kind = "tracking", everywhere = true,
+      ids = { 2580 }, knownIds = { 2580 }, level = 1,
+      matchNames = { "Find Minerals", "Mineraliensuche", "Minerals", "Erze", "Track Minerals" },
+      matchTextures = { 136025, "spell_nature_earthquake" },
+      icon = "Interface\\Icons\\Spell_Nature_Earthquake" },
     -- Waffen-Items (experimentell, expWeaponItems): Steine/Öle per Klick; fehlt nur, wenn eine Waffe
     -- im Slot steckt, keine temporäre Verzauberung aktiv ist und ein passendes Item in den Taschen
     -- liegt. Nicht für Schamanen (entfernt beim Login); bei Schurken nur, wenn der Gift-Eintrag
@@ -1326,11 +1338,91 @@ function Items.WeaponMacro(id, slot)
     return ("/use item:%d\n/use %d"):format(id, slot)
 end
 
+---------------------------------------------------------------------------
+-- Minimap-Tracking (z. B. Mineraliensuche / Find Minerals)
+---------------------------------------------------------------------------
+function Tracking.NumTypesFn()
+    return (C_Minimap and C_Minimap.GetNumTrackingTypes) or GetNumTrackingTypes
+end
+
+function Tracking.InfoFn()
+    return (C_Minimap and C_Minimap.GetTrackingInfo) or GetTrackingInfo
+end
+
+function Tracking.SetFn()
+    return (C_Minimap and C_Minimap.SetTracking) or SetTracking
+end
+
+function Tracking.NameMatch(e, name)
+    if type(name) ~= "string" then return false end
+    for _, n in ipairs(e.names or {}) do
+        if name == n then return true end
+    end
+    return e.normNames ~= nil and next(e.normNames) ~= nil and e.normNames[NormName(name)] == true
+end
+
+function Tracking.TexMatch(e, tex)
+    if tex == nil then return false end
+    local lowerTex = type(tex) == "string" and tex:lower() or nil
+    for _, t in ipairs(e.matchTextures or {}) do
+        if tex == t or (lowerTex and type(t) == "string" and lowerTex:find(t:lower(), 1, true)) then
+            return true
+        end
+    end
+    local want = e.ids and e.ids[1] and SpellIcon(e.ids[1])
+    return want ~= nil and tex == want
+end
+
+-- Liefert name, tex, active (boolean), spellID; nil bei Fehler oder Secret-Wert
+function Tracking.ReadInfo(i)
+    local fn = Tracking.InfoFn()
+    if not fn then return nil end
+    local ok, a, b, c, _, _, f = pcall(fn, i)
+    if not ok or a == nil or IsSecret(a) then return nil end
+    if type(a) == "table" then
+        local name = a.name
+        local tex = a.texture or a.textureFileID or a.icon
+        local active = a.active
+        local spellID = a.spellID or a.spellId
+        if IsSecret(name) or IsSecret(active) or IsSecret(spellID) then return nil end
+        return name, (not IsSecret(tex)) and tex or nil, active and true or false, spellID
+    end
+    if IsSecret(c) or IsSecret(f) then return nil end
+    return a, (not IsSecret(b)) and b or nil, c and true or false, f
+end
+
+-- Sucht Eintrag e in den Minimap-Trackings; liefert idx, active, unavailable
+-- und aktualisiert trackIndex/trackName/iconCache am Eintrag.
+function Tracking.Find(e)
+    local numFn = Tracking.NumTypesFn()
+    if not (numFn and Tracking.InfoFn()) then
+        return nil, nil, false
+    end
+    local okN, num = pcall(numFn)
+    if not okN or type(num) ~= "number" or IsSecret(num) or num <= 0 then
+        return nil, nil, true
+    end
+    local hadSecret = false
+    for i = 1, num do
+        local name, tex, active, spellID = Tracking.ReadInfo(i)
+        if active == nil then
+            hadSecret = true
+        elseif (spellID and e.idSet and e.idSet[spellID]) or Tracking.NameMatch(e, name) or Tracking.TexMatch(e, tex) then
+            e.trackIndex = i
+            if name then e.trackName = name end
+            if tex and db and db.iconCache then db.iconCache[e.key] = tex end
+            return i, active, false
+        end
+    end
+    if not hadSecret then e.trackIndex = nil end
+    return nil, nil, hadSecret
+end
+
 local function EntryLabel(e)
     if e.kind == "reagent" then return ItemName(e.item) end
     if e.label then return L[e.label] end
     local first = (e.ids or e.knownIds or {})[1]
-    return (first and SpellName(first)) or e.key
+    return (first and SpellName(first)) or (e.kind == "tracking" and e.trackName) or e.key
 end
 
 local function EntryIcon(e)
@@ -1400,6 +1492,13 @@ local function SpellKnown(id)
 end
 
 local function ComputeKnown(e)
+    if e.kind == "tracking" then
+        if Tracking.Find(e) then return true end
+        for _, id in ipairs(e.knownIds or e.ids or {}) do
+            if SpellKnown(id) then return true end
+        end
+        return false
+    end
     if e.general then return true end
     local lvl = UnitLevel("player") or 1
     if e.levelOnly then return lvl >= (e.level or 1) end
@@ -1748,6 +1847,28 @@ local function CheckMissing(e, scan)
         return n < ReagentThreshold(e.item)
     end
     if e.kind == "conjure" then return Conjure.Missing(e) end
+    if e.kind == "tracking" then
+        local idx, active, unavailable = Tracking.Find(e)
+        if idx then return not active end
+        if unavailable then return nil end
+        if scan then
+            for id in pairs(e.idSet) do
+                if scan.ids[id] then return false end
+            end
+            for _, n in ipairs(e.names) do
+                if scan.names[n] then return false end
+            end
+        end
+        if GetTrackingTexture then
+            local ok, curTex = pcall(GetTrackingTexture)
+            if ok and curTex and not IsSecret(curTex) and Tracking.TexMatch(e, curTex) then
+                return false
+            end
+        end
+        if scan and scan.unreliable then return nil end
+        if SpellKnown(e.ids[1]) then return true end
+        return false
+    end
     if e.kind == "weapon_mh" or e.kind == "weapon_oh" then
         local slot = (e.kind == "weapon_mh") and 16 or 17
         if not HasWeaponIn(slot) then return false end
@@ -2177,7 +2298,7 @@ end
 
 -- Welche Einträge können eine Ablauf-Zeile bekommen? (nicht: Reagenzien, Well-Rested)
 function Expiry.Eligible(e)
-    if e.kind == "reagent" or e.kind == "conjure" then return false end
+    if e.kind == "reagent" or e.kind == "conjure" or e.kind == "tracking" then return false end
     if e.general then return e.itemKind == "food" or e.itemKind == "flask" or e.weaponItems == true end
     return true
 end
@@ -2472,7 +2593,7 @@ end
 function Display.SetRowAction(r, a)
     a = a or {}
     local sig = table.concat({ tostring(a.spell), tostring(a.item), tostring(a.macro), tostring(a.unit),
-        tostring(a.ctrlSpell), tostring(a.ctrlUnit) }, "|")
+        tostring(a.ctrlSpell), tostring(a.ctrlUnit), tostring(a.trackIndex) }, "|")
     r.action = a
     r.castSpell, r.useItem = a.spell, a.item
     if r.actionSig == sig then return end
@@ -2628,6 +2749,15 @@ function Display.GetRow(i)
     r:SetScript("PostClick", function(self, button, down)
         if not Display.IsActionPhase(down) then return end
         if button == "LeftButton" then
+            if self.entry and self.entry.kind == "tracking" and self.action and self.action.trackIndex
+                and not unlocked and db.clickCast then
+                local setFn = Tracking.SetFn()
+                if setFn then
+                    pcall(setFn, self.action.trackIndex, true)
+                    Evaluate()
+                end
+                return
+            end
             -- per Linksklick benutztes Fläschchen als "zuletzt benutzt" merken
             if self.useItem and self.entry and self.entry.itemKind == "flask" then
                 cdb.lastFlask = self.useItem
@@ -2676,6 +2806,8 @@ function Display.GetRow(i)
             local label = (self.entry.ownOnly and a.spellName) and (who .. " – " .. a.spellName) or who
             GameTooltip:AddLine((a.isGroup and L.LEFTCLICK_GROUP or L.LEFTCLICK_SINGLE):format(label), 0.8, 0.8, 0.8)
             GameTooltip:AddLine(L.CTRLCLICK_SINGLE:format(who), 0.8, 0.8, 0.8)
+        elseif self.action and self.action.trackIndex then
+            GameTooltip:AddLine(L.LEFTCLICK_TRACK, 0.8, 0.8, 0.8)
         elseif self.castSpell then
             GameTooltip:AddLine(L.LEFTCLICK, 0.8, 0.8, 0.8)
         end
@@ -2740,10 +2872,17 @@ function Display.ShowRows(list, dragMode, expFrom)
             r.entry = e
             Display.SetRowLines(r, false)
             local spell = CastSpellFor(e)
+            local trackIndex
             -- Essen/Fläschchen/Waffen-Items: Linksklick benutzt die beste Wahl aus den Taschen
             local item, noItem, macro
             local kind = Items.KindOf(e)
-            if not spell and kind and db.clickCast then
+            if e.kind == "tracking" and db.clickCast then
+                if e.trackIndex and Tracking.SetFn() then
+                    trackIndex = e.trackIndex
+                elseif e.ids and e.ids[1] and SpellKnown(e.ids[1]) then
+                    spell = e.ids[1]
+                end
+            elseif not spell and kind and db.clickCast then
                 local choices = Items.ItemChoices(e)
                 item = choices[1] and choices[1].id
                 noItem = item == nil
@@ -2751,7 +2890,9 @@ function Display.ShowRows(list, dragMode, expFrom)
                     macro = Items.WeaponMacro(item, Items.WeaponSlot(e))
                 end
             end
-            Display.SetRowAction(r, (spell or item) and { spell = spell, item = item, macro = macro } or nil)
+            local action = (spell or item) and { spell = spell, item = item, macro = macro }
+                or (trackIndex and { trackIndex = trackIndex } or nil)
+            Display.SetRowAction(r, action)
             if e.kind == "reagent" then
                 Display.SetRowStatus(r, "low")
                 r.text:SetText(L.REAGENT_LOW:format(EntryLabel(e), e.count or 0))
@@ -2784,6 +2925,8 @@ function Display.ShowRows(list, dragMode, expFrom)
             end
             if e.eatStart and not isExp then
                 Display.SetRowHint(r, L.HINT_EATING)
+            elseif trackIndex then
+                Display.SetRowHint(r, L.HINT_TRACK)
             elseif spell then
                 Display.SetRowHint(r, L.HINT_CAST)
             elseif item then
@@ -3407,7 +3550,7 @@ function Evaluate()
         if foodEntry then foodEntry.eatStart = Eat.FindEatStart(scan) end
 
         for _, e in ipairs(entries) do
-            local relevant = knownCache[e.key] and IsEnabled(e) and (not e.general or instOk)
+            local relevant = knownCache[e.key] and IsEnabled(e) and (not e.general or e.everywhere or instOk)
             -- Gruppen-Check aktiv: Gruppen-Zeile ersetzt die Selbst-Zeile (gleicher Key)
             e.groupActive = relevant and Group.GroupActive(e) or false
             if relevant then
@@ -3543,6 +3686,9 @@ function RefreshConfig()
     local expCons = ExpOn("expConsumables")
     for _, w in ipairs(Cfg.configRows) do
         local e = w.entry
+        if e.kind == "tracking" and not knownCache[e.key] then
+            knownCache[e.key] = ComputeKnown(e)
+        end
         local known = knownCache[e.key]
         -- Verbrauchsgüter/Waffen-Items: eigenes Häkchen (Standard an), ausgegraut solange der
         -- Schalter aus ist (Schurke: auch solange der Gift-Eintrag des Slots aktiv ist)
@@ -3565,7 +3711,7 @@ function RefreshConfig()
             elseif left then
                 w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
                 w.status:SetTextColor(1, 0.4, 0.3)
-            elseif e.general and db.instanceOnly and not InGroupInstance() then
+            elseif e.general and not e.everywhere and db.instanceOnly and not InGroupInstance() then
                 w.status:SetText(L.INSTANCE_HINT)
                 w.status:SetTextColor(0.6, 0.6, 0.6)
             else
@@ -4211,6 +4357,7 @@ SafeRegisterEvent(ev, "PLAYER_LEVEL_UP")
 SafeRegisterEvent(ev, "PLAYER_EQUIPMENT_CHANGED")
 SafeRegisterEvent(ev, "ZONE_CHANGED_NEW_AREA")
 SafeRegisterEvent(ev, "BAG_UPDATE_DELAYED")
+SafeRegisterEvent(ev, "MINIMAP_UPDATE_TRACKING")
 SafeRegisterEvent(ev, "PLAYER_REGEN_DISABLED")
 SafeRegisterEvent(ev, "GET_ITEM_INFO_RECEIVED")
 -- Ladebildschirm-Events gibt es nicht in jedem Client (IsEventValid filtert sie dann aus)
@@ -4446,6 +4593,12 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         return
     end
 
+    if event == "MINIMAP_UPDATE_TRACKING" then
+        RefreshKnown()
+        Evaluate()
+        return
+    end
+
     Evaluate()
 end)
 
@@ -4483,6 +4636,10 @@ SlashCmdList.BUFFREMINDER = function(msg)
             (foodEntry and foodEntry.eatStart) and "yes" or "no",
             Eat.eatAura and ("%s – %s"):format(tostring(Eat.eatAura.name), tostring(Eat.eatAura.id)) or "none",
             CountKeys(Eat.eatSpells), CountKeys(Eat.eatNames)))
+        local numFn = Tracking.NumTypesFn()
+        local okN, numTrack = false, nil
+        if numFn then okN, numTrack = pcall(numFn) end
+        dprint(("trackingTypes=%s"):format(okN and tostring(numTrack) or "err"))
         db.lastDebug = log
     elseif cmd == "auras" then
         Print(L.AURAS_HEAD)
