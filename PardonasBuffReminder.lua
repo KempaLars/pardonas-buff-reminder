@@ -22,6 +22,7 @@ local Keybind = {}   -- Tastenbelegung "Oberste Warnung auslösen" (unsichtbarer
 local Variant = {}   -- Variantenmenü per Rechtsklick (experimentell)
 local Tracking = {}  -- Minimap-Tracking (z. B. Mineraliensuche)
 local Demo = {}      -- versteckter Demo-Modus mit Screenshot-Lauf (nur mit BuffReminderDB.demo)
+local Elixir = {}    -- Wunsch-Elixiere pro Charakter (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -985,7 +986,7 @@ function Items.ScanBags()
         end
     end
     for id in pairs(Items.bagCounts) do
-        if Items.IsFlaskItem(id) then Items.LearnFlaskSpell(id) end
+        Items.LearnItem(id)   -- Fläschchen-/Elixier-/Rollen-Zauber lernen
     end
 end
 
@@ -1031,6 +1032,10 @@ function Items.ItemChoices(e)
         end)
     elseif kind == "weapon" or kind == "poison" then
         return Items.WeaponChoices(e, kind)
+    elseif kind == "elixir" then
+        -- ein Eintrag = ein Elixier
+        local cnt = Items.bagCounts[e.item]
+        if cnt and cnt > 0 then list[1] = { id = e.item, count = cnt, fav = favs[e.item] == true } end
     end
     return list
 end
@@ -1197,6 +1202,7 @@ local function EntryLabel(e)
     if e.demoLabel then return e.demoLabel end   -- Demo-Modus: Name aus dem Client (Demo.Entry)
     if e.kind == "reagent" then return ItemName(e.item) end
     if e.kind == "tracking" then return Tracking.Label(e.trackType) end
+    if e.kind == "elixir" then return ItemName(e.item) end
     if e.label then   -- Variantengruppen: Grundwort + bekannte Varianten (Variant.GroupLabel)
         return e.variantClass and Variant.GroupLabel(e.variantClass, e.key, e.label) or L[e.label]
     end
@@ -1214,6 +1220,7 @@ local function EntryIcon(e)
     if e.kind == "conjure" then
         return ItemIcon(Conjure.RankItem(e)) or SpellIcon(e.knownIds[1]) or FALLBACK_ICON
     end
+    if e.kind == "elixir" then return ItemIcon(e.item) or FALLBACK_ICON end
     if e.weaponItems then
         -- Icon der aktuell besten Wahl aus den Taschen
         local c = Items.KindOf(e) and Items.ItemChoices(e)[1]
@@ -1418,6 +1425,8 @@ local function IsEnabled(e)
     if e.kind == "conjure" and not ExpOn("expConsumables") then return false end
     -- Verfolgungs-Erinnerung: nur mit Experimental-Schalter und gewünschter Verfolgung
     if e.kind == "tracking" then return ExpOn("expTracking") and e.trackType ~= nil end
+    -- Wunsch-Elixiere: nur mit Experimental-Schalter und Haken in der Liste (pro Charakter)
+    if e.kind == "elixir" then return ExpOn("expElixirs") and cdb.elixirsWanted[e.item] == true end
     -- Waffen-Items: nur mit Experimental-Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return false end
@@ -1788,6 +1797,10 @@ local function CheckMissing(e, scan)
     end
     if e.kind == "conjure" then return Conjure.Missing(e) end
     if e.kind == "tracking" then return Tracking.Missing(e, scan) end
+    if e.kind == "elixir" then
+        local pre = Elixir.Precheck(e)   -- nicht in den Taschen / Buff unbekannt -> keine Warnung
+        if pre ~= nil then return pre end
+    end
     if e.kind == "weapon_mh" or e.kind == "weapon_oh" then
         local slot = (e.kind == "weapon_mh") and 16 or 17
         if not HasWeaponIn(slot) then return false end
@@ -2310,7 +2323,10 @@ end
 -- Welche Einträge können eine Ablauf-Zeile bekommen? (nicht: Reagenzien, Well-Rested)
 function Expiry.Eligible(e)
     if e.kind == "reagent" or e.kind == "conjure" or e.kind == "tracking" then return false end
-    if e.general then return e.itemKind == "food" or e.itemKind == "flask" or e.weaponItems == true end
+    if e.general then
+        return e.itemKind == "food" or e.itemKind == "flask" or e.itemKind == "elixir" or e.itemKind == "scroll"
+            or e.weaponItems == true
+    end
     return true
 end
 
@@ -2372,6 +2388,136 @@ end
 function Expiry.Text(e)
     return L.EXPIRES:format(EntryLabel(e), Expiry.FormatLeft((e.expiryEnd or 0) - GetTime()))
 end
+
+---------------------------------------------------------------------------
+-- Wunsch-Elixiere pro Charakter (experimentell, Schalter expElixirs)
+-- Ob WoW Forever Elixiere nach den Original-Regeln stapelt (verschiedene Werte, mit Fläschchen)
+-- oder nach der TBC-Regel (1 Kampf- + 1 Wächterelixier, nicht mit Fläschchen), ist unbestätigt.
+-- Deshalb keine festen Plätze: Jedes Elixier, das schon einmal in den Taschen war, steht in der
+-- Merkliste (cdb.elixirsSeen); gewünschte (cdb.elixirsWanted[itemID] = true) bekommen eine eigene
+-- Warnung, wenn ihr Buff fehlt und das Elixier in den Taschen liegt. Unabhängig vom Fläschchen.
+--   Erkennung: Item-Klasse Verbrauchsgut + Unterklasse Elixier (GetItemInfoInstant); Fläschchen
+--   bleiben beim Fläschchen-Eintrag.
+--   Buff: Zauber des Items (C_Item.GetItemSpell) per Spell-ID, sonst per Name; gelernte
+--   Zuordnung in db.elixirSpells[itemID] = spellID (wie flaskSpells).
+--   Eintrag: { key = "elixir_<id>", kind = "elixir", itemKind = "elixir", item = id, general = true }
+---------------------------------------------------------------------------
+Elixir.entries = {}   -- Item-ID -> Eintrag
+Elixir.ready = false  -- Einträge erst nach PLAYER_LOGIN anlegen
+
+-- Item-Klasse/Unterklasse eines Items; nil = nicht lesbar
+function Items.ClassOf(item)
+    local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if not fn then return nil end
+    local ok, _, _, _, _, _, classID, subClassID = pcall(fn, item)
+    if not ok or IsSecret(classID) or IsSecret(subClassID) then return nil end
+    return classID, subClassID
+end
+
+-- Verbrauchsgut der Unterklasse subKey (Enum.ItemConsumableSubclass, sonst Rückfallwert)?
+function Items.IsConsumableSub(item, subKey, fallback)
+    local classID, subID = Items.ClassOf(item)
+    if classID == nil then return false end
+    local consumable = (Enum and Enum.ItemClass and Enum.ItemClass.Consumable) or 0
+    local sub = Enum and Enum.ItemConsumableSubclass and Enum.ItemConsumableSubclass[subKey]
+    if sub == nil then sub = fallback end
+    return classID == consumable and subID == sub
+end
+
+-- Zauber eines Items (Spell-ID, Name); nil = (noch) nicht ermittelbar -> Laden anstoßen
+function Items.ItemSpell(item)
+    if not (C_Item and C_Item.GetItemSpell) then return nil end
+    local ok, name, spellID = pcall(C_Item.GetItemSpell, item)
+    if ok and type(spellID) == "number" and not IsSecret(spellID) then
+        if IsSecret(name) or type(name) ~= "string" then name = nil end
+        return spellID, name
+    end
+    if C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, item) end
+    return nil
+end
+
+-- Item aus den Taschen auswerten (Scan und GET_ITEM_INFO_RECEIVED): Fläschchen-, Elixier-,
+-- Rollen-Zauber lernen
+function Items.LearnItem(id)
+    if Items.IsFlaskItem(id) then
+        Items.LearnFlaskSpell(id)
+    elseif Elixir.IsElixir(id) then
+        Elixir.Seen(id)
+    end
+end
+
+function Elixir.IsElixir(item)
+    if Items.IsFlaskItem(item) then return false end
+    return Items.IsConsumableSub(item, "Elixir", 2)
+end
+
+-- Zauber eines Elixiers in den Eintrag übernehmen (Spell-ID + Name)
+function Elixir.AddSpell(e, spellID, name)
+    if not spellID then return end
+    e.idSet[spellID] = true
+    name = name or SpellName(spellID)
+    if name then
+        for _, n in ipairs(e.names) do if n == name then return end end
+        e.names[#e.names + 1] = name
+    end
+end
+
+-- Elixier in den Taschen gesehen: merken, Zauber lernen, Eintrag sicherstellen
+function Elixir.Seen(id)
+    if not cdb then return end
+    cdb.elixirsSeen[id] = true
+    local spellID, name = Items.ItemSpell(id)
+    if spellID and db then db.elixirSpells[id] = spellID end
+    local e = Elixir.Ensure(id)
+    if e and spellID then Elixir.AddSpell(e, spellID, name) end
+end
+
+-- Eintrag eines Elixiers (einmal pro Item-ID); nil vor PLAYER_LOGIN
+function Elixir.Ensure(id)
+    if not Elixir.ready then return nil end
+    local e = Elixir.entries[id]
+    if e then return e end
+    local spellID = db.elixirSpells[id]
+    e = { key = "elixir_" .. id, general = true, kind = "elixir", itemKind = "elixir", item = id,
+          ids = spellID and { spellID } or {} }
+    PrepareEntry(e)
+    Elixir.entries[id] = e
+    entries[#entries + 1] = e
+    knownCache[e.key] = true
+    Elixir.dirty = true   -- Einstellungen: Liste neu aufbauen
+    return e
+end
+
+-- PLAYER_LOGIN: Einträge für alle gemerkten Elixiere
+function Elixir.Setup()
+    Elixir.ready = true
+    for id in pairs(cdb.elixirsSeen) do Elixir.Ensure(id) end
+end
+
+-- Einträge sortiert nach Name (Einstellungen)
+function Elixir.List()
+    local list = {}
+    for _, e in pairs(Elixir.entries) do list[#list + 1] = e end
+    table.sort(list, function(a, b)
+        local na, nb = ItemName(a.item), ItemName(b.item)
+        if na ~= nb then return na < nb end
+        return a.item < b.item
+    end)
+    return list
+end
+
+-- true = fehlt, false = nicht relevant/vorhanden, nil = unbekannt (Rest in CheckMissing)
+function Elixir.Precheck(e)
+    if (Items.bagCounts[e.item] or 0) == 0 then return false end
+    if next(e.idSet) == nil and #e.names == 0 then
+        local spellID, name = Items.ItemSpell(e.item)
+        if not spellID then return false end   -- Buff noch unbekannt: lieber nicht warnen
+        db.elixirSpells[e.item] = spellID
+        Elixir.AddSpell(e, spellID, name)
+    end
+    return nil
+end
+
 
 ---------------------------------------------------------------------------
 -- Stile (Warnanzeige + Rechtsklick-Menü)
@@ -2995,7 +3141,8 @@ function Display.GetRow(i)
         end
         if self.useItem then
             GameTooltip:AddLine(L.LEFTCLICK_USE:format(ItemName(self.useItem)), 0.8, 0.8, 0.8)
-            GameTooltip:AddLine(L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
+            local single = self.entry and self.entry.kind == "elixir"   -- Elixier: kein Auswahlmenü
+            GameTooltip:AddLine(single and L.RIGHTCLICK or L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
         elseif Variant.MenuOn(self.entry) then
             GameTooltip:AddLine(L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
         else
@@ -3122,7 +3269,7 @@ function Display.ShowRows(list, dragMode, expFrom)
             elseif spell then
                 Display.SetRowHint(r, Variant.MenuOn(e) and L.HINT_CAST_CHOOSE or L.HINT_CAST)
             elseif item then
-                Display.SetRowHint(r, L.HINT_ITEM:format(ItemName(item)))
+                Display.SetRowHint(r, kind == "elixir" and L.HINT_USE or L.HINT_ITEM:format(ItemName(item)))
             elseif noItem then
                 Display.SetRowHint(r, L.HINT_NOITEM)
             else
@@ -3569,7 +3716,8 @@ function Menu.LayoutMenu(e)
     menu.sub:SetWidth(textWidth)
 
     local kind = Items.KindOf(e)
-    local withItems = kind and (db.clickCast or e.demo) and not combat
+    -- Elixiere: kein Item-Menü (ein Eintrag = ein Elixier)
+    local withItems = kind and kind ~= "elixir" and (db.clickCast or e.demo) and not combat
     -- Variantenmenü (experimentell): erlernte Varianten statt Items; nie im Kampf
     local variants = not combat and not withItems and Variant.MenuOn(e) and Variant.Choices(e) or nil
     -- Demo-Modus: Beispiel-Varianten (Magier-Rüstungen, unabhängig davon, ob gelernt)
@@ -4043,7 +4191,11 @@ function RefreshConfig()
         -- Verbrauchsgüter/Waffen-Items: eigenes Häkchen (Standard an), ausgegraut solange der
         -- Schalter aus ist (Schurke: auch solange der Gift-Eintrag des Slots aktiv ist)
         local gated, gateNote = Cfg.Gate(e, expCons)
-        if e.kind == "conjure" or e.weaponItems then
+        if e.kind == "elixir" then
+            w.cb:SetChecked(cdb.elixirsWanted[e.item] == true)
+        elseif e.kind == "scroll" then
+            w.cb:SetChecked(not cdb.scrollsOff[e.scrollType])
+        elseif e.kind == "conjure" or e.weaponItems then
             w.cb:SetChecked(cdb.buffs[e.key] ~= false)
         else
             w.cb:SetChecked(IsEnabled(e))
@@ -4061,6 +4213,11 @@ function RefreshConfig()
             elseif left then
                 w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
                 w.status:SetTextColor(1, 0.4, 0.3)
+            elseif e.kind == "elixir" or e.kind == "scroll" then
+                -- Anzahl in den Taschen (Rollen: alle Ränge der Art)
+                local cnt = e.kind == "elixir" and (Items.bagCounts[e.item] or 0) or Cfg.ScrollCount(e)
+                w.status:SetText(L.IN_BAGS:format(cnt))
+                w.status:SetTextColor(0.6, 0.6, 0.6)
             elseif e.general and not e.everywhere and db.instanceOnly and not InGroupInstance() then
                 w.status:SetText(L.INSTANCE_HINT)
                 w.status:SetTextColor(0.6, 0.6, 0.6)
@@ -4146,6 +4303,9 @@ function RefreshConfig()
     local expTrack = ExpOn("expTracking")
     config.expTrackCB:SetChecked(expTrack)
     config.trackBtn:SetText(Tracking.ButtonText())
+    config.expElixirCB:SetChecked(ExpOn("expElixirs"))
+    if Elixir.dirty then Cfg.LayoutElixirs() end
+    config.elixirEmpty:SetTextColor(ExpOn("expElixirs") and 0.6 or 0.4, ExpOn("expElixirs") and 0.6 or 0.4, 0.4)
     if expTrack then config.trackBtn:Enable() else config.trackBtn:Disable() end
     config.soundBtn:SetText(L.SOUND:format(Cfg.ValueText("SOUND_", db.sound)))
     config.styleBtn:SetText(L.STYLE:format(Cfg.ValueText("STYLE_NAME_", db.style)))
@@ -4165,6 +4325,8 @@ end
 
 -- Ausgegraut? (Experimental-Schalter aus bzw. Schurke mit aktivem Gift-Eintrag); 2. Wert = Statushinweis
 function Cfg.Gate(e, expCons)
+    if e.kind == "elixir" then return not ExpOn("expElixirs"), nil end
+    if e.kind == "scroll" then return not ExpOn("expScrolls"), nil end
     if e.kind == "conjure" then return not expCons, nil end
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return true, nil end
@@ -4212,7 +4374,14 @@ function Cfg.MakeEntryRow(parent, e, y)
     w.cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     w.cb:SetSize(24, 24)
     w.cb:SetScript("OnClick", function(self)
-        cdb.buffs[e.key] = self:GetChecked() and true or false
+        local on = self:GetChecked() and true or false
+        if e.kind == "elixir" then
+            cdb.elixirsWanted[e.item] = on or nil        -- Wunsch-Elixier (pro Charakter)
+        elseif e.kind == "scroll" then
+            cdb.scrollsOff[e.scrollType] = (not on) or nil   -- Rollen-Art aus (pro Charakter)
+        else
+            cdb.buffs[e.key] = on
+        end
         NoteDeferred()
         Evaluate()
     end)
@@ -4452,7 +4621,7 @@ function Cfg.AddFooter(p, y)
     fs:SetWidth(Cfg.WIDTH - 32)
     fs:SetJustifyH("LEFT")
     fs:SetText(Cfg.BETA_FOOTER_COLOR .. L.BETA_FOOTER .. "|r")
-    return y - 40
+    return y - 40, fs
 end
 
 -- Verschiebe-Modus an/aus (Knopf, /br move, /br lock, Rechtsklick-Menü); nicht im Kampf
@@ -4788,8 +4957,57 @@ function Cfg.BuildOtherTab()
         Evaluate()
         RefreshConfig()
     end)
+    y = y - 30
+
+    -- Wunsch-Elixiere: Schalter + Liste aller bekannten Elixiere (Taschen + Merkliste); die Liste
+    -- wächst, wenn neue Elixiere in die Taschen kommen (Cfg.LayoutElixirs rückt die Fußzeile nach)
+    config.expElixirCB = Cfg.MakeBetaCheck(p, L.EXP_ELIXIRS, 16, y, function(self)
+        db.expElixirs = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
     y = y - 26
-    Cfg.FinishTab(p, Cfg.AddFooter(p, y))
+    Cfg.otherContent, Cfg.elixirTop, Cfg.elixirRows = p, y, {}
+    config.elixirEmpty = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    config.elixirEmpty:SetText(L.ELIXIRS_EMPTY)
+    local _, footer = Cfg.AddFooter(p, y)
+    Cfg.otherFooter = footer
+    Cfg.LayoutElixirs()
+end
+
+-- Elixier-Liste im Tab "Weitere Buffs" (nach Name) anordnen; Fußzeile und Inhaltshöhe folgen
+function Cfg.LayoutElixirs()
+    local p = Cfg.otherContent
+    if not p then return end
+    local y = Cfg.elixirTop
+    local list = Elixir.List()
+    for _, e in ipairs(list) do
+        local w = Cfg.elixirRows[e.key]
+        if not w then
+            w = Cfg.MakeEntryRow(p, e, y)
+            Cfg.elixirRows[e.key] = w
+        end
+        Cfg.PlaceEntryRow(w, y)
+        y = y - 26
+    end
+    if #list == 0 then
+        config.elixirEmpty:ClearAllPoints()
+        config.elixirEmpty:SetPoint("TOPLEFT", 44, y - 2)
+        config.elixirEmpty:Show()
+        y = y - 20
+    else
+        config.elixirEmpty:Hide()
+    end
+    Cfg.otherFooter:ClearAllPoints()
+    Cfg.otherFooter:SetPoint("TOPLEFT", 16, y - 10)
+    Cfg.FinishTab(p, y - 40)
+    Elixir.dirty = false
+end
+
+-- Anzahl der Rollen einer Art in den Taschen (Rollen folgen in Scroll.Count)
+function Cfg.ScrollCount()
+    return 0
 end
 
 -- Tab "Gruppe" (nur Klassen mit Gruppen-Buffs: Priester, Magier, Druide, Paladin)
@@ -5580,6 +5798,9 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
         db.flaskSpells = db.flaskSpells or {}     -- gelernte Spell-IDs von Fläschchen-Effekten
+        db.elixirSpells = db.elixirSpells or {}   -- Elixier-Item-ID -> Spell-ID des Buffs (gelernt)
+        cdb.elixirsSeen = cdb.elixirsSeen or {}   -- Elixier-Item-ID -> true: schon in den Taschen gewesen
+        cdb.elixirsWanted = cdb.elixirsWanted or {}   -- Elixier-Item-ID -> true: gewünscht (Warnung)
         -- versteckter Sprach-Schalter (nicht in Hilfe/README/Einstellungen; /br reset lässt ihn stehen):
         -- /run BuffReminderDB.locale = "frFR" + /reload; nil = Client-Sprache
         ns.Locales.Activate(db.locale)
@@ -5630,6 +5851,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         Items.BuildFoodScores(class)
         Items.UpdateXP()            -- zählt Erfahrung? (XP-Essen bevorzugen / Abzeichen)
         Eat.ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
+        Elixir.Setup()              -- Einträge der gemerkten Elixiere (neue folgen beim Taschen-Scan)
         Items.ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
         reagentLines = REAGENT_SPELLS[class] or {}
@@ -5668,7 +5890,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if IsSecret(arg1) then return end
         if Eat.eatPending[arg1] then Eat.ResolveEatSpell(arg1, true) end   -- Ess-Aura jetzt ermittelbar
         if Items.bagCounts[arg1] then
-            if Items.IsFlaskItem(arg1) then Items.LearnFlaskSpell(arg1) end
+            Items.LearnItem(arg1)
             Menu.RefreshItemPanel()
             Evaluate()
             return
@@ -5888,6 +6110,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         -- Experimental-Schalter: wieder Build-abhängig
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
         db.expVariantMenu, db.expBlessings, db.expTracking = nil, nil, nil
+        db.expElixirs, db.expScrolls = nil, nil
         cdb.trackWanted = nil                     -- Verfolgung wieder automatisch
         RefreshKnown()
         ApplyDefaults(db, DEFAULTS)

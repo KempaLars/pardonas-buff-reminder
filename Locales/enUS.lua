@@ -233,3 +233,6 @@ L["BETA_FOOTER"] = "(beta) = experimental: on in beta builds, off by default in 
 L["HELP_MOVE"] = "/br move – unlock the display to move it"
 L["HELP_LOCK"] = "/br lock – lock the display"
 L["MENU_MOVE"] = "Move display"
+L["EXP_ELIXIRS"] = "Elixirs"
+L["ELIXIRS_EMPTY"] = "Elixirs you carry appear here."
+L["HINT_USE"] = "Left-click: use · Right-click: mute"
