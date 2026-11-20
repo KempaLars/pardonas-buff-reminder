@@ -19,6 +19,7 @@ local Cfg     = {}   -- Einstellungsfenster
 local Expiry  = {}   -- Warnung vor Ablauf (experimentell)
 local Conjure = {}   -- Klassen-Verbrauchsgüter: Magier-Essen/-Wasser/Manastein, Hexenmeister-Steine (experimentell)
 local Keybind = {}   -- Tastenbelegung "Oberste Warnung auslösen" (unsichtbarer Secure Button)
+local Variant = {}   -- Variantenmenü per Rechtsklick (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -109,6 +110,14 @@ if GetLocale() == "deDE" then
         EXP_EXPIRY    = "Warnung vor Ablauf",
         EXP_CONSUMABLES = "Klassen-Verbrauchsgüter",
         EXP_WEAPONITEMS = "Steine, Öle, Gifte per Klick",
+        EXP_VARIANTMENU = "Variantenmenü per Rechtsklick",
+        -- Variantenmenü
+        MENU_VARIANT  = "Variante zaubern",
+        SUB_VARIANT   = "Variante zaubern oder stummschalten",
+        LAST_USED     = "zuletzt genutzt",
+        NO_VARIANT    = "Keine Variante erlernt",
+        HINT_CAST_CHOOSE = "Linksklick: zaubern · Rechtsklick: Auswahl",
+        HINT_CHOOSE   = "Rechtsklick: Variante wählen / stumm",
         -- Warnung vor Ablauf
         EXPIRES       = "%s läuft ab · %s",
         EXPIRY_PCT    = "Schwelle: %d %%",
@@ -255,6 +264,13 @@ else
         EXP_EXPIRY    = "Expiry warning",
         EXP_CONSUMABLES = "Class consumables",
         EXP_WEAPONITEMS = "Stones, oils, poisons by click",
+        EXP_VARIANTMENU = "Variant menu on right-click",
+        MENU_VARIANT  = "Cast a variant",
+        SUB_VARIANT   = "Cast a variant or mute",
+        LAST_USED     = "last used",
+        NO_VARIANT    = "No variant learned",
+        HINT_CAST_CHOOSE = "Left-click: cast · Right-click: choose",
+        HINT_CHOOSE   = "Right-click: choose variant / mute",
         EXPIRES       = "%s expires · %s",
         EXPIRY_PCT    = "Threshold: %d %%",
         EXPIRY_ALPHA  = "Opacity: %d %%",
@@ -414,8 +430,10 @@ local CLASS_BUFFS = {
                   19891, 19899, 19900, 27153, 48947, 32223 },
           nameIds = { 465, 7294, 19746, 19876, 19888, 19891, 32223 } },
         { key = "seal", level = 1, label = "ANY_SEAL",
-          ids = { 21084, 20154, 20375, 20165, 20166, 20164, 31801, 53736, 53720, 31892 },
-          nameIds = { 21084, 20154, 20375, 20165, 20166, 20164, 31801, 53736, 53720, 31892 } },
+          -- Siegel des Kreuzfahrers (21082 …): Classic-IDs, im Spiel per /br auras zu bestätigen
+          ids = { 21084, 20154, 20375, 20165, 20166, 20164, 31801, 53736, 53720, 31892,
+                  21082, 20162, 20305, 20306, 20307, 20308, 27158 },
+          nameIds = { 21084, 20154, 20375, 20165, 20166, 20164, 31801, 53736, 53720, 31892, 21082 } },
         { key = "blessing", level = 4, label = "ANY_BLESSING",
           ids = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 27140, 48931, 48932,
                   25782, 25916, 27141, 48933, 48934,
@@ -523,7 +541,7 @@ local CAST_DATA = {
             { key = "ice",    castIds = { 7302, 7320, 10219, 10220, 27124, 43008 } },
             { key = "mage",   castIds = { 6117, 22782, 22783, 27125, 43023, 43024 } },
             { key = "molten", castIds = { 30482, 43045, 43046 } },
-        } },
+        }, menu = true },
         mage_water = { castIds = Conjure.WATER.spells },
         mage_food  = { castIds = Conjure.FOOD.spells },
         mage_gem   = { castIds = Conjure.GEM.spells },
@@ -533,7 +551,7 @@ local CAST_DATA = {
             { key = "demonskin",  castIds = { 687, 696 } },
             { key = "demonarmor", castIds = { 706, 1086, 11733, 11734, 11735, 27260, 47793, 47889 } },
             { key = "felarmor",   castIds = { 28176, 28189, 47892, 47893 } },
-        } },
+        }, menu = true },
         wl_healthstone = { castIds = Conjure.HEALTHSTONE.spells },
         wl_soulstone   = { castIds = Conjure.SOULSTONE.spells },
     },
@@ -550,7 +568,7 @@ local CAST_DATA = {
             { key = "frostres",      castIds = { 19888, 19897, 19898, 27152, 48945 } },
             { key = "fireres",       castIds = { 19891, 19899, 19900, 27153, 48947 } },
             { key = "crusader",      castIds = { 32223 } },
-        } },
+        }, menu = true },
         seal = { variants = {
             { key = "righteousness", castIds = { 21084, 20154 } },
             { key = "command",       castIds = { 20375 } },
@@ -561,7 +579,8 @@ local CAST_DATA = {
             { key = "corruption",    castIds = { 53736 } },
             { key = "martyr",        castIds = { 53720 } },
             { key = "blood",         castIds = { 31892 } },
-        } },
+            { key = "crusader",      castIds = { 21082, 20162, 20305, 20306, 20307, 20308, 27158 } },
+        }, menu = true },
         blessing = { variants = {
             { key = "might",
               castIds = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 27140, 48931, 48932 },
@@ -578,9 +597,9 @@ local CAST_DATA = {
             { key = "lightning", castIds = { 324, 325, 905, 945, 8134, 10431, 10432, 25469, 25472, 49280, 49281 } },
             { key = "water",     castIds = { 52127, 52129, 52131, 52134, 52136, 52138, 24398, 33736, 57960 } },
             { key = "earth",     castIds = { 974, 32593, 32594, 49283, 49284 } },
-        } },
-        imbue_mh = { variants = SHAMAN_IMBUES },
-        imbue_oh = { variants = SHAMAN_IMBUES },
+        }, menu = true },
+        imbue_mh = { variants = SHAMAN_IMBUES, menu = true },
+        imbue_oh = { variants = SHAMAN_IMBUES, menu = true },
     },
     HUNTER = {
         aspect = { variants = {
@@ -592,7 +611,7 @@ local CAST_DATA = {
             { key = "wild",       castIds = { 20043, 20190, 27045, 49071 } },
             { key = "viper",      castIds = { 34074 } },
             { key = "dragonhawk", castIds = { 61846, 61847 } },
-        } },
+        }, menu = true },
         trueshot = { castIds = { 19506 } },
     },
     WARRIOR = {
@@ -1553,6 +1572,7 @@ local function PrepareCast(e, class)
     local c = CAST_DATA[class] and CAST_DATA[class][e.key]
     if not c then return end
     e.castIds, e.variants = c.castIds, c.variants
+    e.variantMenu = c.menu == true   -- Variantenmenü per Rechtsklick (nicht für die Segen)
     for _, v in ipairs(e.variants or {}) do
         if not v.matchSet then            -- Imbue-Varianten sind zwischen MH/OH geteilt
             v.matchSet, v.nameSet = {}, {}
@@ -1583,6 +1603,28 @@ local function CastSpellFor(e)
         if v then return BestCast(v.castIds) end
     end
     return nil
+end
+
+-- Variantenmenü (experimentell, Schalter expVariantMenu): nur für markierte Variantengruppen
+-- (CAST_DATA menu = true), mit "Linksklick zaubert Buff" und nicht für Gruppen-Zeilen
+function Variant.MenuOn(e)
+    return e ~= nil and e.variantMenu == true and not e.groupActive and db.clickCast
+        and ExpOn("expVariantMenu") and true or false
+end
+
+-- erlernte Varianten in der Reihenfolge von CAST_DATA, je mit dem höchsten erlernten Rang:
+-- { { spell = ID/Name, vkey, name, icon, last = zuletzt genutzt }, ... }
+function Variant.Choices(e)
+    local list, last = {}, cdb.lastVariant[e.key]
+    for _, v in ipairs(e.variants or {}) do
+        local spell = BestCast(v.castIds)
+        if spell then
+            local name = (type(spell) == "string" and spell) or SpellName(spell) or SpellName(v.castIds[1]) or v.key
+            list[#list + 1] = { spell = spell, vkey = v.key, name = name, last = v.key == last,
+                icon = SpellIcon(spell) or SpellIcon(v.castIds[1]) or FALLBACK_ICON }
+        end
+    end
+    return list
 end
 
 -- Quelle 1: eigener erfolgreicher Zauber (UNIT_SPELLCAST_SUCCEEDED)
@@ -2556,6 +2598,8 @@ function Display.GetRow(i)
         if self.useItem then
             GameTooltip:AddLine(L.LEFTCLICK_USE:format(ItemName(self.useItem)), 0.8, 0.8, 0.8)
             GameTooltip:AddLine(L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
+        elseif Variant.MenuOn(self.entry) then
+            GameTooltip:AddLine(L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
         else
             GameTooltip:AddLine(L.RIGHTCLICK, 0.8, 0.8, 0.8)
         end
@@ -2654,13 +2698,13 @@ function Display.ShowRows(list, dragMode, expFrom)
             if e.eatStart and not isExp then
                 Display.SetRowHint(r, L.HINT_EATING)
             elseif spell then
-                Display.SetRowHint(r, L.HINT_CAST)
+                Display.SetRowHint(r, Variant.MenuOn(e) and L.HINT_CAST_CHOOSE or L.HINT_CAST)
             elseif item then
                 Display.SetRowHint(r, L.HINT_ITEM:format(ItemName(item)))
             elseif noItem then
                 Display.SetRowHint(r, L.HINT_NOITEM)
             else
-                Display.SetRowHint(r, L.HINT_MUTE)
+                Display.SetRowHint(r, Variant.MenuOn(e) and L.HINT_CHOOSE or L.HINT_MUTE)
             end
         end
         r:Show()
@@ -2868,6 +2912,18 @@ itemPanel.buttons = {}
 menu.stars = {}
 
 
+-- Tooltip einer Menüzeile: Item (itemID) oder Zauber (spellID, Variantenmenü)
+function Menu.ShowButtonTooltip(b)
+    if not b.itemID and not b.spellID then return end
+    GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
+    if b.itemID then
+        GameTooltip:SetItemByID(b.itemID)
+    elseif not (GameTooltip.SetSpellByID and pcall(GameTooltip.SetSpellByID, GameTooltip, b.spellID)) then
+        GameTooltip:SetText(SpellName(b.spellID) or "?", 1, 1, 1)
+    end
+    GameTooltip:Show()
+end
+
 function Menu.GetItemButton(i)
     if itemPanel.buttons[i] then return itemPanel.buttons[i] end
     local b = CreateFrame("Button", nil, itemPanel, "SecureActionButtonTemplate")
@@ -2896,17 +2952,16 @@ function Menu.GetItemButton(i)
     end
     b:SetScript("PostClick", function(self, _, down)
         if not Display.IsActionPhase(down) then return end
-        if menu.entry and menu.entry.itemKind == "flask" then cdb.lastFlask = self.itemID end
+        local e, vkey = menu.entry, self.variantKey
+        if e and e.itemKind == "flask" and self.itemID then cdb.lastFlask = self.itemID end
+        -- Variantenmenü: gewählte Variante wird zur zuletzt genutzten (Linksklick der Warnung)
+        if e and vkey then cdb.lastVariant[e.key] = vkey end
         menu:Hide()   -- schließt auch das itemPanel
+        if vkey then Evaluate() end
     end)
-    -- Item-Tooltip beim Überfahren. HookScript statt SetScript: ergänzt nur die Anzeige,
-    -- die Secure-Klickfunktion des Buttons bleibt unberührt.
-    b:HookScript("OnEnter", function(self)
-        if not self.itemID then return end
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetItemByID(self.itemID)
-        GameTooltip:Show()
-    end)
+    -- Item- bzw. Zauber-Tooltip beim Überfahren. HookScript statt SetScript: ergänzt nur die
+    -- Anzeige, die Secure-Klickfunktion des Buttons bleibt unberührt.
+    b:HookScript("OnEnter", Menu.ShowButtonTooltip)
     b:HookScript("OnLeave", function(self)
         if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
     end)
@@ -2983,6 +3038,8 @@ end
 
 -- Secure-Aktion einer Item-Zeile: normal "item", Waffen-Items per Makro auf den Slot
 function Menu.SetItemButtonAction(b, id, e, kind)
+    b:SetAttribute("spell", nil)
+    b:SetAttribute("unit", nil)
     if kind == "weapon" or kind == "poison" then
         b:SetAttribute("type", "macro")
         b:SetAttribute("macrotext", Items.WeaponMacro(id, Items.WeaponSlot(e)))
@@ -2992,6 +3049,15 @@ function Menu.SetItemButtonAction(b, id, e, kind)
         b:SetAttribute("item", "item:" .. id)
         b:SetAttribute("macrotext", nil)
     end
+end
+
+-- Secure-Aktion einer Varianten-Zeile: Zauber (höchster erlernter Rang) auf sich selbst
+function Menu.SetSpellButtonAction(b, spell)
+    b:SetAttribute("type", "spell")
+    b:SetAttribute("spell", spell)
+    b:SetAttribute("unit", "player")
+    b:SetAttribute("item", nil)
+    b:SetAttribute("macrotext", nil)
 end
 
 function Menu.ItemHeadText(kind)
@@ -3039,6 +3105,8 @@ function Menu.LayoutMenu(e)
 
     local kind = Items.KindOf(e)
     local withItems = kind and db.clickCast and not combat
+    -- Variantenmenü (experimentell): erlernte Varianten statt Items; nie im Kampf
+    local variants = not combat and not withItems and Variant.MenuOn(e) and Variant.Choices(e) or nil
     local sub
     if combat then
         sub = L.SUB_COMBAT
@@ -3050,6 +3118,8 @@ function Menu.LayoutMenu(e)
         sub = Conjure.Text(e)
     elseif withItems then
         sub = L.SUB_ITEMS
+    elseif variants then
+        sub = L.SUB_VARIANT
     else
         sub = L.SUB_MUTE
     end
@@ -3079,19 +3149,20 @@ function Menu.LayoutMenu(e)
         y = y - 16
     end
 
-    -- Item-Auswahl
-    local n, itemTop, rowsWidth = 0, 0, inner - Menu.STAR_SIZE - 8
+    -- Item-Auswahl bzw. Varianten (gleiche Secure-Zeilen im itemPanel; Varianten ohne Sterne)
+    local n, itemTop = 0, 0
+    local rowsWidth = variants and inner or (inner - Menu.STAR_SIZE - 8)
     local h = ms.itemHeight
-    if withItems then
+    if withItems or variants then
         Separator()
-        Head(menu.itemHead, Menu.ItemHeadText(kind))
-        local choices = Items.ItemChoices(e)
+        Head(menu.itemHead, variants and L.MENU_VARIANT or Menu.ItemHeadText(kind))
+        local choices = variants or Items.ItemChoices(e)
         n = math.min(#choices, Menu.MAX_ITEM_CHOICES)
         itemTop = y
         if n == 0 then
             menu.itemNone:ClearAllPoints()
             menu.itemNone:SetPoint("TOPLEFT", pad + 4, y)
-            menu.itemNone:SetText(L.NONE_IN_BAGS)
+            menu.itemNone:SetText(variants and L.NO_VARIANT or L.NONE_IN_BAGS)
             menu.itemNone:Show()
             y = y - 18
         else
@@ -3099,8 +3170,14 @@ function Menu.LayoutMenu(e)
         end
         for i = 1, n do
             local c, b = choices[i], Menu.GetItemButton(i)
-            b.itemID = c.id
-            Menu.SetItemButtonAction(b, c.id, e, kind)
+            if variants then
+                b.itemID, b.variantKey = nil, c.vkey
+                b.spellID = type(c.spell) == "number" and c.spell or nil
+                Menu.SetSpellButtonAction(b, c.spell)
+            else
+                b.itemID, b.variantKey, b.spellID = c.id, nil, nil
+                Menu.SetItemButtonAction(b, c.id, e, kind)
+            end
             b:SetSize(rowsWidth, h)
             b:ClearAllPoints()
             b:SetPoint("TOPLEFT", 0, -(i - 1) * (h + 1))
@@ -3108,20 +3185,25 @@ function Menu.LayoutMenu(e)
             b.icon:SetSize(iconSize, iconSize)
             b.icon:ClearAllPoints()
             b.icon:SetPoint("LEFT", 4, 0)
-            b.icon:SetTexture(ItemIcon(c.id) or FALLBACK_ICON)
+            b.icon:SetTexture(variants and c.icon or (ItemIcon(c.id) or FALLBACK_ICON))
             Style.StyleIconBorder(b.iconBorder, b.icon, st.iconBorder)
             b.count:ClearAllPoints()
             b.count:SetPoint("RIGHT", -4, 0)
-            b.count:SetText(c.count)
+            b.count:SetText(variants and "" or c.count)
             -- Zeile 1: Name (+ XP-Abzeichen); Zeile 2: Kategorie + "beste Wahl"
-            local best = i == 1
-            local info = Menu.ItemInfoText(c)
+            -- (Varianten: Zeile 2 = "zuletzt genutzt" bei der Variante des Linksklicks)
+            local best = i == 1 and not variants
+            local info = variants and (c.last and L.LAST_USED or "") or Menu.ItemInfoText(c)
             local nameY = ms.itemTwoLines and 6 or 0
+            if variants and info == "" then nameY = 0 end   -- Variante ohne Zeile 2: mittig
             b.name:ClearAllPoints()
             b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, nameY)
             Style.SetColor(b.name, "SetTextColor", ms.textColor)
-            local name = ItemName(c.id)
+            local name = variants and c.name or ItemName(c.id)
             if best and not ms.itemTwoLines then name = Style.StarMarkup(12) .. " " .. name end
+            if variants and c.last and not ms.itemTwoLines then
+                name = name .. " |cff999999(" .. L.LAST_USED .. ")|r"
+            end
             b.name:SetText(name)
             local maxName = rowsWidth - iconSize - 50 - (c.xp and 26 or 0)
             local w = (b.name.GetUnboundedStringWidth and b.name:GetUnboundedStringWidth()) or b.name:GetStringWidth()
@@ -3134,7 +3216,7 @@ function Menu.LayoutMenu(e)
             else
                 b.xp:Hide(); b.xpBg:Hide()
             end
-            if ms.itemTwoLines then
+            if ms.itemTwoLines and nameY ~= 0 then
                 local line = info
                 if best then
                     local mark = "|cffffd100" .. Style.StarMarkup(10) .. " " .. L.BEST .. "|r"
@@ -3150,14 +3232,16 @@ function Menu.LayoutMenu(e)
             end
             b:Show()
             -- Auswahl neu befüllt, während die Maus darauf steht: Tooltip nachziehen
-            if GameTooltip:IsOwned(b) then GameTooltip:SetItemByID(c.id); GameTooltip:Show() end
+            if GameTooltip:IsOwned(b) then Menu.ShowButtonTooltip(b) end
 
-            local s = Menu.GetStar(i)
-            s.itemID = c.id
-            Menu.SetStar(s, cdb.favorites[c.id] == true, st)
-            s:ClearAllPoints()
-            s:SetPoint("TOPLEFT", pad + rowsWidth + 4, itemTop - (i - 1) * (h + 1) - (h - Menu.STAR_SIZE - 4) / 2)
-            s:Show()
+            if not variants then
+                local s = Menu.GetStar(i)
+                s.itemID = c.id
+                Menu.SetStar(s, cdb.favorites[c.id] == true, st)
+                s:ClearAllPoints()
+                s:SetPoint("TOPLEFT", pad + rowsWidth + 4, itemTop - (i - 1) * (h + 1) - (h - Menu.STAR_SIZE - 4) / 2)
+                s:Show()
+            end
         end
         y = y - n * (h + 1)
     else
@@ -3169,12 +3253,14 @@ function Menu.LayoutMenu(e)
             local b = itemPanel.buttons[i]
             if GameTooltip:IsOwned(b) then GameTooltip:Hide() end
             b:Hide()
-            b.itemID = nil
+            b.itemID, b.variantKey, b.spellID = nil, nil, nil
             b:SetAttribute("item", nil)
             b:SetAttribute("macrotext", nil)
+            b:SetAttribute("spell", nil)
         end
     end
-    for i = n + 1, #menu.stars do menu.stars[i]:Hide() end
+    -- Sterne nur bei Items (Varianten: keine Favoriten)
+    for i = (variants and 0 or n) + 1, #menu.stars do menu.stars[i]:Hide() end
 
     -- Stummschalten: vier Schaltflächen nebeneinander
     Separator()
@@ -3216,7 +3302,7 @@ function Menu.LayoutMenu(e)
     menu:ClearAllPoints()
     menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, top)
 
-    if withItems and n > 0 then
+    if (withItems or variants) and n > 0 then
         itemPanel:ClearAllPoints()
         itemPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x + pad, top + itemTop)
         itemPanel:SetSize(rowsWidth, n * (h + 1))
@@ -3569,6 +3655,7 @@ function RefreshConfig()
         Cfg.SyncSlider(config.conjureSlider, t, t > 0 and L.CONJURE_THRESHOLD:format(t) or L.CONJURE_OFF, expCons)
     end
     config.expWeaponCB:SetChecked(ExpOn("expWeaponItems"))
+    config.expVariantCB:SetChecked(ExpOn("expVariantMenu"))
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
     config.iconsCB:SetChecked(db.iconsOnly)
@@ -4030,6 +4117,15 @@ local function BuildConfig()
         RefreshConfig()
     end)
     y = y - 26
+    -- Variantenmenü per Rechtsklick (Aura, Siegel, Aspekt, Rüstung, Schild, Waffenverzauberung)
+    config.expVariantCB = Cfg.MakeCheck(p, L.EXP_VARIANTMENU, 16, y, function(self)
+        db.expVariantMenu = self:GetChecked() and true or false
+        if menu:IsShown() then menu:Hide() end   -- nächstes Öffnen mit/ohne Varianten
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
     y = y - 10
 
     config.soundBtn = Cfg.MakeButton(p, "", 100)
@@ -4438,6 +4534,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         for k in pairs(DEFAULTS) do db[k] = nil end
         -- Experimental-Schalter: wieder Build-abhängig
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
+        db.expVariantMenu = nil
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
