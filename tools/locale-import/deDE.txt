@@ -227,3 +227,8 @@ L["BETA_FOOTER"] = "(beta) = experimentell: in Beta-Versionen an, in Releases st
 L["HELP_MOVE"] = "/br move – Anzeige zum Verschieben entsperren"
 L["HELP_LOCK"] = "/br lock – Anzeige fixieren"
 L["MENU_MOVE"] = "Anzeige verschieben"
+L["EXP_ELIXIRS"] = "Elixiere"
+L["ELIXIRS_EMPTY"] = "Elixiere aus deinen Taschen erscheinen hier."
+L["HINT_USE"] = "Linksklick: benutzen · Rechtsklick: stumm"
+L["EXP_SCROLLS"] = "Rollen"
+L["MENU_SCROLL"] = "Rollen in den Taschen"

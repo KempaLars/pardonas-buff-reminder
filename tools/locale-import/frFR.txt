@@ -227,3 +227,8 @@ L["BETA_FOOTER"] = "(bêta) = expérimental : actif dans les versions bêta, dé
 L["HELP_MOVE"] = "/br move – déverrouiller l'affichage pour le déplacer"
 L["HELP_LOCK"] = "/br lock – verrouiller l'affichage"
 L["MENU_MOVE"] = "Déplacer l'affichage"
+L["EXP_ELIXIRS"] = "Élixirs"
+L["ELIXIRS_EMPTY"] = "Les élixirs des sacs apparaissent ici."
+L["HINT_USE"] = "Clic gauche : utiliser · Clic droit : masquer"
+L["EXP_SCROLLS"] = "Parchemins"
+L["MENU_SCROLL"] = "Parchemins dans les sacs"

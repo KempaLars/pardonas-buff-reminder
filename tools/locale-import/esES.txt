@@ -227,3 +227,8 @@ L["BETA_FOOTER"] = "(beta) = experimental: activo en versiones beta, desactivado
 L["HELP_MOVE"] = "/br move – desbloquear los avisos para moverlos"
 L["HELP_LOCK"] = "/br lock – fijar los avisos"
 L["MENU_MOVE"] = "Mover avisos"
+L["EXP_ELIXIRS"] = "Elixires"
+L["ELIXIRS_EMPTY"] = "Aquí aparecen los elixires de tus bolsas."
+L["HINT_USE"] = "Clic izq.: usar · Clic der.: silenciar"
+L["EXP_SCROLLS"] = "Pergaminos"
+L["MENU_SCROLL"] = "Pergaminos en tus bolsas"

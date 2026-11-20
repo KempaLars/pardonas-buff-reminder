@@ -5376,6 +5376,8 @@ Demo.ROWS = {
     { key = "reagent",  item = 17028, count = 3, hint = "HINT_MUTE" },                          -- Heilige Kerze
     { key = "tracking", spell = 2580, track = true, hint = "HINT_TRACK" },                      -- Mineraliensuche
     { key = "expiry",   spell = 1126, expiry = "1:45", hint = "HINT_CAST" },                    -- Mal der Wildnis
+    { key = "elixir",   item = 13452, hint = "HINT_USE" },                                      -- Elixier des Mungos
+    { key = "scroll",   item = 10309, hintItem = 10309 },                                       -- Rolle der Beweglichkeit IV
 }
 Demo.FOOD = {
     { id = 13931, count = 12, cat = "SpellDamage", xp = true, fav = true },
