@@ -35,6 +35,7 @@ Built for **WoW Forever** (Interface `16001`).
   - Warrior: Battle / Commanding Shout
   - Death Knight: Horn of Winter
   - Situational buffs (e.g. Thorns, Shadowform, Righteous Fury, shouts) are off by default.
+  - Reminders that accept several variants are labeled with a base word and the variants the game client knows, e.g. "Armor (Frost/Ice/Mage)". Variants that do not exist in WoW Forever are left out of the label.
 - **Weapon imbues and poisons** – Shaman main-hand/off-hand weapon imbues and Rogue main-hand/off-hand poisons. Off-hand checks only apply when an actual weapon is equipped there.
 - **General buffs (optional, off by default)** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag). Gathering tracking (Find Herbs, Find Minerals, Find Fish) is an experimental feature, see [Tracking reminder](#experimental-features-opt-in).
 - **Use food and flasks by click** – for the Well Fed and Flask reminders:
@@ -65,7 +66,7 @@ Built for **WoW Forever** (Interface `16001`).
 - **Keybinding (beta)** – one key for the top reminder, see [Keybinding](#keybinding-beta).
 - **Pardona's Addons entry point (beta)** – see [below](#pardonas-addons-beta).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
-- **Languages** – German and English, picked automatically from the game client language.
+- **Languages** – English and German, picked automatically from the game client language; more languages through CurseForge, see [Localization](#localization).
 
 ## Right-click menu (beta)
 
@@ -148,6 +149,17 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - **Left-click** casts the group version on the first player without the buff, which covers that player's party or raid subgroup (or class for Greater Blessings, using your last-used blessing variant). If you have not learned the group version or are out of its reagent (see reagent warnings), the single-target version is cast instead. **Ctrl+Left-click** casts the single-target version on the next player without the buff. After each cast or buff change the target is chosen again. Hint: "Left-click: group · Ctrl+Left-click: single · Right-click: mute".
   - Detail settings below the "Group buffs" checkbox (Priest, Mage, Druid and Paladin only): "Check group buffs" (on by default; both checkboxes must be on) and "Check in: Always / Dungeons & raids only / Raids only" (default Always); for Paladins also "Paladin blessings in group buffs". Each buff's own on/off checkbox still applies.
 
+## Localization
+
+The addon's texts are translated on CurseForge: https://legacy.curseforge.com/wow/addons/pardonas-buff-reminder/localization
+
+- **English** is the base language; every text exists in English.
+- **German** is complete.
+- **French, Spanish (Spain and Mexico), Russian, Brazilian Portuguese and Italian** start with a first translation from the next beta on. Texts that are not translated yet appear in English.
+- Help with translations is welcome – log in on CurseForge and edit the phrases on the localization page.
+
+Spell, item and tracking names as well as standard game texts come from the game client and are always in the client's language.
+
 ## Slash commands
 
 `/buffreminder` works as an alias for `/br`.
@@ -181,6 +193,21 @@ luacheck .
 It must report 0 warnings / 0 errors.
 
 On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on every push to `main` or `develop` and on every pull request. The release workflow runs the same lint job first; the addon is only packaged and uploaded if lint passes.
+
+**Localization:** all texts are looked up through `L` (`ns.L` in the addon namespace, no globals).
+
+- `Locales/Locales.lua` creates the language tables (`ns.Locales`) and the lookup: active language, otherwise English, otherwise the key itself. Spanish (Mexico) falls back to Spanish (Spain) while it has no texts of its own.
+- `Locales/enUS.lua` holds every phrase key and the English text as `L["KEY"] = "text"` lines. Keys are stable, upper case and use only `A-Z`, `0-9` and `_`.
+- `Locales/deDE.lua`, `frFR.lua`, `esES.lua`, `esMX.lua`, `ruRU.lua`, `ptBR.lua` and `itIT.lua` contain only a `--@localization(...)@` token. The packager replaces it with the translations from CurseForge, so a build straight from the repository shows English only, whatever the client language.
+- All language files are loaded; the TOC lists them before the libraries and the addon code.
+
+When you add or change a text:
+
+1. Edit `Locales/enUS.lua` (new keys get a new line; keep existing keys).
+2. Run `.\tools\export-locale-import.ps1`. It regenerates `tools/locale-import/enUS.txt` and checks the other files in `tools/locale-import` (e.g. `deDE.txt`): keys that are not in enUS are reported as warnings, missing keys are listed.
+3. Import `tools/locale-import/enUS.txt` on the CurseForge localization page (format: Lua additive table). Update `deDE.txt` and import it for German as well.
+
+Visible texts for the Latin-script languages use only characters from Windows-1252.
 
 **Development build notice:** when the addon runs straight from the repository (the `@project-version@` placeholder in the TOC is not replaced), it prints "Development build loaded" to chat on login.
 
@@ -219,7 +246,15 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 │   └── logo.svg                    # Logo (vector, shown at the top of this README)
 ├── Textures/
 │   └── Icon.tga                    # Addon list and Pardona menu icon (64x64, 32-bit TGA with alpha)
+├── Locales/
+│   ├── Locales.lua                 # Language tables and lookup (ns.L), loaded first
+│   ├── enUS.lua                    # All phrase keys with the English texts (base language)
+│   └── deDE.lua, frFR.lua, …       # One file per language with the CurseForge localization token
 ├── tools/
+│   ├── locale-import/
+│   │   ├── enUS.txt                # English phrases for the CurseForge import (generated from Locales/enUS.lua)
+│   │   └── deDE.txt                # German phrases for the CurseForge import
+│   ├── export-locale-import.ps1    # Regenerates enUS.txt and checks the other import files
 │   └── fetch-libs.ps1              # Fetches LibPardona-1.0 into Libs/ for local testing
 ├── .gitignore                      # Also ignores Libs/ (fetched by the packager or tools/fetch-libs.ps1)
 ├── .luacheckrc                     # luacheck configuration
@@ -230,4 +265,4 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 └── README.md
 ```
 
-`README.md`, `.luacheckrc`, `media/` and `tools/` are excluded from the packaged addon. The packaged addon contains `Libs/lib-pardona` (LibPardona-1.0 with LibStub), loaded by the TOC before the addon code.
+`README.md`, `.luacheckrc`, `media/` and `tools/` are excluded from the packaged addon. The packaged addon contains `Locales/` (with the translations inserted by the packager) and `Libs/lib-pardona` (LibPardona-1.0 with LibStub), both loaded by the TOC before the addon code.
