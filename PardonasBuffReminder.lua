@@ -1142,6 +1142,38 @@ function Items.ItemLevels(item)
     return ilvl, minLevel
 end
 
+-- Zahl aus einer parameterlosen API-Funktion; nil = Funktion fehlt, Fehler oder Secret-Wert
+function Items.SafeNumber(fn)
+    if type(fn) ~= "function" then return nil end
+    local ok, v = pcall(fn)
+    if ok and type(v) == "number" and not IsSecret(v) then return v end
+    return nil
+end
+
+-- Maximalstufe des Spielers; nil = nicht ermittelbar
+function Items.MaxPlayerLevel()
+    local max = Items.SafeNumber(GetMaxLevelForPlayerExpansion) or Items.SafeNumber(GetMaxPlayerLevel)
+    if max then return max end
+    if type(MAX_PLAYER_LEVEL) == "number" and not IsSecret(MAX_PLAYER_LEVEL) then return MAX_PLAYER_LEVEL end
+    return nil
+end
+
+-- Zählt Erfahrung für den Spieler? Nicht bei Maximalstufe und nicht bei abgeschalteter
+-- Erfahrung (IsXPUserDisabled). Ergebnis in Items.xpOn; neu bewertet bei Login,
+-- PLAYER_LEVEL_UP (level = neue Stufe), ENABLE_XP_GAIN und DISABLE_XP_GAIN.
+function Items.UpdateXP(level)
+    local on = true
+    if type(IsXPUserDisabled) == "function" then
+        local ok, off = pcall(IsXPUserDisabled)
+        if ok and not IsSecret(off) and off then on = false end
+    end
+    local lvl = level
+    if type(lvl) ~= "number" or IsSecret(lvl) then lvl = UnitLevel("player") end
+    local max = Items.MaxPlayerLevel()
+    if on and max and type(lvl) == "number" and not IsSecret(lvl) and lvl >= max then on = false end
+    Items.xpOn = on
+end
+
 -- Nennt der Tooltip einen XP-Bonus? (enUS "experience", deDE "Erfahrung")
 function Items.HasXPBonus(item)
     if Items.xpCache[item] ~= nil then return Items.xpCache[item] end
@@ -1218,7 +1250,9 @@ function Items.ItemChoices(e)
             if Items.foodScore[id] then
                 local _, minLevel = Items.ItemLevels(id)
                 if not minLevel or minLevel <= lvl then
-                    list[#list + 1] = { id = id, count = n, xp = Items.HasXPBonus(id), score = Items.foodScore[id],
+                    -- XP-Bonus nur, wenn Erfahrung für den Spieler zählt (Abzeichen + Bevorzugung)
+                    local xp = Items.xpOn ~= false and Items.HasXPBonus(id) or false
+                    list[#list + 1] = { id = id, count = n, xp = xp, score = Items.foodScore[id],
                         cat = Items.foodCat[id], fav = favs[id] == true }
                 end
             end
@@ -4006,6 +4040,8 @@ SafeRegisterEvent(ev, "ZONE_CHANGED_NEW_AREA")
 SafeRegisterEvent(ev, "BAG_UPDATE_DELAYED")
 SafeRegisterEvent(ev, "PLAYER_REGEN_DISABLED")
 SafeRegisterEvent(ev, "GET_ITEM_INFO_RECEIVED")
+SafeRegisterEvent(ev, "ENABLE_XP_GAIN")
+SafeRegisterEvent(ev, "DISABLE_XP_GAIN")
 -- Ladebildschirm-Events gibt es nicht in jedem Client (IsEventValid filtert sie dann aus)
 SafeRegisterEvent(ev, "LOADING_SCREEN_ENABLED")
 SafeRegisterEvent(ev, "LOADING_SCREEN_DISABLED")
@@ -4079,6 +4115,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
         end
         for id in pairs(db.flaskSpells) do flaskEntry.idSet[id] = true end
         Items.BuildFoodScores(class)
+        Items.UpdateXP()            -- zählt Erfahrung? (XP-Essen bevorzugen / Abzeichen)
         Eat.ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
         Items.ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
@@ -4195,6 +4232,14 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
     if event == "PLAYER_ENTERING_WORLD" or event == "LOADING_SCREEN_DISABLED" then
         StartGrace()
         return
+    end
+
+    if event == "ENABLE_XP_GAIN" or event == "DISABLE_XP_GAIN" or event == "PLAYER_LEVEL_UP" then
+        -- XP-Bonus neu bewerten (arg1 = neue Stufe bei PLAYER_LEVEL_UP); offenes Item-Menü
+        -- und Warnzeilen (beste Wahl) folgen
+        Items.UpdateXP(event == "PLAYER_LEVEL_UP" and arg1 or nil)
+        Menu.RefreshItemPanel()
+        if event ~= "PLAYER_LEVEL_UP" then Evaluate(); return end
     end
 
     if event == "SPELLS_CHANGED" or event == "PLAYER_LEVEL_UP" then
