@@ -95,7 +95,7 @@ local CLASS_BUFFS = {
         { key = "intellect", level = 1,
           ids = { 1459, 1460, 1461, 10156, 10157, 27126, 42995, 23028, 27127, 43002, 61024, 61316 },
           nameIds = { 1459, 23028, 61024, 61316 } },
-        { key = "armor", level = 1, label = "MAGE_ARMOR",
+        { key = "armor", level = 1, label = "ARMOR",
           ids = { 168, 7300, 7301, 7302, 7320, 10219, 10220, 27124, 43008, 6117, 22782, 22783,
                   27125, 43023, 43024, 30482, 43045, 43046 },
           nameIds = { 168, 7302, 6117, 30482 } },
@@ -108,7 +108,7 @@ local CLASS_BUFFS = {
           conj = Conjure.GEM, knownIds = Conjure.GEM.spells },
     },
     WARLOCK = {
-        { key = "armor", level = 1, label = "LOCK_ARMOR",
+        { key = "armor", level = 1, label = "ARMOR",
           ids = { 687, 696, 706, 1086, 11733, 11734, 11735, 27260, 47793, 47889, 28176, 28189, 47892, 47893 },
           nameIds = { 687, 706, 28176 } },
         { key = "wl_healthstone", kind = "conjure", level = 10, hideUnknown = true,
@@ -124,18 +124,18 @@ local CLASS_BUFFS = {
           ids = { 467, 782, 1075, 8914, 9756, 9910, 26992, 53307 }, nameIds = { 467 } },
     },
     PALADIN = {
-        { key = "aura", level = 1, label = "ANY_AURA",
+        { key = "aura", level = 1, label = "AURA",
           ids = { 465, 10290, 643, 10291, 1032, 10292, 10293, 27149, 48941, 48942,
                   7294, 10298, 10299, 10300, 10301, 27150, 54042, 19746,
                   19876, 19895, 19896, 27151, 48943, 19888, 19897, 19898, 27152, 48945,
                   19891, 19899, 19900, 27153, 48947, 32223 },
           nameIds = { 465, 7294, 19746, 19876, 19888, 19891, 32223 } },
-        { key = "seal", level = 1, label = "ANY_SEAL",
+        { key = "seal", level = 1, label = "SEAL",
           -- Siegel des Kreuzfahrers (21082 …): Classic-IDs, im Spiel per /br auras zu bestätigen
           ids = { 21084, 20154, 20375, 20165, 20166, 20164, 31801, 53736, 53720, 31892,
                   21082, 20162, 20305, 20306, 20307, 20308, 27158 },
           nameIds = { 21084, 20154, 20375, 20165, 20166, 20164, 31801, 53736, 53720, 31892, 21082 } },
-        { key = "blessing", level = 4, label = "ANY_BLESSING",
+        { key = "blessing", level = 4, label = "BLESSING",
           ids = { 19740, 19834, 19835, 19836, 19837, 19838, 25291, 27140, 48931, 48932,
                   25782, 25916, 27141, 48933, 48934,
                   19742, 19850, 19852, 19853, 19854, 25290, 27142, 48935, 48936,
@@ -144,7 +144,7 @@ local CLASS_BUFFS = {
         { key = "rfury", level = 16, defaultOff = true, ids = { 25780 } },
     },
     SHAMAN = {
-        { key = "shield", level = 8, label = "SHAMAN_SHIELD",
+        { key = "shield", level = 8, label = "SHIELD",
           ids = { 324, 325, 905, 945, 8134, 10431, 10432, 25469, 25472, 49280, 49281,
                   52127, 52129, 52131, 52134, 52136, 52138, 24398, 33736, 57960,
                   974, 32593, 32594, 49283, 49284 },
@@ -162,7 +162,7 @@ local CLASS_BUFFS = {
           icon = "Interface\\Icons\\Ability_Poisons", poisonItems = true },
     },
     HUNTER = {
-        { key = "aspect", level = 4, label = "ANY_ASPECT",
+        { key = "aspect", level = 4, label = "ASPECT",
           ids = { 13163, 13165, 14318, 14319, 14320, 14321, 14322, 25296, 27044, 5118, 13159, 13161,
                   20043, 20190, 27045, 49071, 34074, 61846, 61847 },
           nameIds = { 13163, 13165, 5118, 13159, 13161, 20043, 34074, 61846 } },
@@ -1196,7 +1196,9 @@ local function EntryLabel(e)
     if e.demoLabel then return e.demoLabel end   -- Demo-Modus: Name aus dem Client (Demo.Entry)
     if e.kind == "reagent" then return ItemName(e.item) end
     if e.kind == "tracking" then return Tracking.Label(e.trackType) end
-    if e.label then return L[e.label] end
+    if e.label then   -- Variantengruppen: Grundwort + bekannte Varianten (Variant.GroupLabel)
+        return e.variantClass and Variant.GroupLabel(e.variantClass, e.key, e.label) or L[e.label]
+    end
     local first = (e.ids or e.knownIds or {})[1]
     return (first and SpellName(first)) or e.key
 end
@@ -1488,6 +1490,7 @@ local function PrepareCast(e, class)
     local c = CAST_DATA[class] and CAST_DATA[class][e.key]
     if not c then return end
     e.castIds, e.variants = c.castIds, c.variants
+    if c.variants then e.variantClass = class end   -- Beschriftung per Variant.GroupLabel
     e.variantMenu = c.menu == true   -- Variantenmenü per Rechtsklick (nicht für die Segen)
     for _, v in ipairs(e.variants or {}) do
         if not v.matchSet then            -- Imbue-Varianten sind zwischen MH/OH geteilt
@@ -1519,6 +1522,37 @@ local function CastSpellFor(e)
         if v then return BestCast(v.castIds) end
     end
     return nil
+end
+
+-- Beschriftung einer Variantengruppe: Grundwort aus L + " (" + Kurznamen der Varianten, die der
+-- Client kennt (Zaubername von castIds[1] vorhanden), getrennt mit "/" + ")". Ohne bekannte
+-- Variante nur das Grundwort (dann kein Cache: Spell-Daten evtl. noch nicht da).
+-- Kurznamen: L["VARIANT_<KLASSE>_<GRUPPE>_<VARIANTE>"], Gruppe = Eintrag-Key ohne _mh/_oh
+-- (z. B. VARIANT_MAGE_ARMOR_FROST, VARIANT_SHAMAN_IMBUE_WINDFURY).
+Variant.labels = {}   -- "<KLASSE>_<GRUPPE>:<Grundwort-Key>" -> Text (Sprache steht ab ADDON_LOADED fest)
+function Variant.GroupLabel(class, key, base)
+    local group = key:gsub("_[mo]h$", "")
+    local prefix = class .. "_" .. group:upper()
+    local cacheKey = prefix .. ":" .. base
+    if Variant.labels[cacheKey] then return Variant.labels[cacheKey] end
+    local c = CAST_DATA[class] and CAST_DATA[class][key]
+    local names = {}
+    for _, v in ipairs(c and c.variants or {}) do
+        if v.castIds and v.castIds[1] and SpellName(v.castIds[1]) ~= nil then
+            names[#names + 1] = L["VARIANT_" .. prefix .. "_" .. v.key:upper()]
+        end
+    end
+    if #names == 0 then return L[base] end
+    local text = L[base] .. " (" .. table.concat(names, "/") .. ")"
+    Variant.labels[cacheKey] = text
+    return text
+end
+
+-- Beschriftungen der Variantengruppen einmal berechnen (PLAYER_LOGIN, nach PrepareCast)
+function Variant.PrepareLabels(list)
+    for _, e in ipairs(list) do
+        if e.variantClass and e.label then Variant.GroupLabel(e.variantClass, e.key, e.label) end
+    end
 end
 
 -- Variantenmenü (experimentell, Schalter expVariantMenu): nur für markierte Variantengruppen
@@ -4708,7 +4742,7 @@ end
 Demo.GROUP_NAMES = "Thrall, Jaina, Uther"   -- Beispielnamen der Gruppen-Zeile
 Demo.ROWS = {
     { key = "class",    spell = 1459, hint = "HINT_CAST" },                                    -- Arkane Intelligenz
-    { key = "armor",    spell = 7302, label = "MAGE_ARMOR", hint = "HINT_CAST_CHOOSE", menu = "variant" },
+    { key = "armor",    spell = 7302, label = "ARMOR", variantOf = "MAGE", hint = "HINT_CAST_CHOOSE", menu = "variant" },
     { key = "food",     spell = 19705, hintItem = 13931, menu = "food" },                      -- Well Fed
     { key = "flask",    item = 13510, label = "FLASK", hintItem = 13510 },                      -- Fläschchen der Titanen
     { key = "weapon",   item = 20749, label = "WEAPON_MH", plain = true, hintItem = 20749 },    -- Brillantes Zauberöl
@@ -4747,7 +4781,7 @@ Demo.SHOTS = Demo.BuildShots()
 
 -- Eintrag für ein Motiv (Name/Icon aus dem Client; Demo.Show lässt unbekannte Motive aus)
 function Demo.Entry(d)
-    local label = (d.label and L[d.label]) or (d.spell and SpellName(d.spell)) or (d.item and ItemName(d.item)) or "?"
+    local label = (d.variantOf and Variant.GroupLabel(d.variantOf, d.key, d.label)) or (d.label and L[d.label]) or (d.spell and SpellName(d.spell)) or (d.item and ItemName(d.item)) or "?"
     local icon = (d.spell and SpellIcon(d.spell)) or (d.item and ItemIcon(d.item)) or FALLBACK_ICON
     return { key = "demo_" .. d.key, demo = d, demoLabel = label, demoIcon = icon,
         itemKind = d.menu == "food" and "food" or nil, demoVariants = d.menu == "variant" }
@@ -5323,6 +5357,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             local g = GROUP_BUFFS[class] and GROUP_BUFFS[class][e.key]
             if g then e.groupIds, e.manaOnly, e.groupByVariant, e.ownOnly = g.groupIds, g.manaOnly, g.groupByVariant, g.ownOnly end
         end
+        Variant.PrepareLabels(classEntries)   -- Beschriftungen der Variantengruppen (Cache)
         Conjure.Preload(classEntries)   -- Namen der Verbrauchsgüter-Items vorladen
         Group.DetectPallyPower()        -- Segen in den Gruppenbuffs aus, solange Pally Power geladen ist
         -- Waffen-Items: nicht für Schamanen (eigene Waffenverzauberungen); Schurke: an den
