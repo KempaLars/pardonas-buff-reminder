@@ -4021,6 +4021,7 @@ function Cfg.SetCheckEnabled(cb, on)
     if on then cb:Enable() else cb:Disable() end
     if cb.label then
         if on then cb.label:SetTextColor(1, 1, 1) else cb.label:SetTextColor(0.5, 0.5, 0.5) end
+        if cb.betaBase then cb.label:SetText(Cfg.BetaText(cb.betaBase, on)) end
     end
 end
 
@@ -4429,8 +4430,20 @@ function Cfg.FitTabs()
     end
 end
 
--- Text eines experimentellen Schalters: "<Text> (beta)"
-function Cfg.Beta(text) return text .. " " .. L.BETA_TAG end
+-- Farben des Kennzeichens "(beta)" (die Texte BETA_TAG/BETA_FOOTER selbst sind ohne Farbcodes)
+Cfg.BETA_COLOR, Cfg.BETA_DIM, Cfg.BETA_FOOTER_COLOR = "|cffff9933", "|cff806040", "|cffcc8844"
+
+-- Text eines experimentellen Schalters: "<Text> (beta)", Kennzeichen orange (on == false: gedämpft)
+function Cfg.BetaText(text, on)
+    return text .. " " .. (on == false and Cfg.BETA_DIM or Cfg.BETA_COLOR) .. L.BETA_TAG .. "|r"
+end
+
+-- Häkchen eines experimentellen Schalters (Cfg.SetCheckEnabled dämpft das Kennzeichen mit)
+function Cfg.MakeBetaCheck(parent, text, x, y, onClick)
+    local cb = Cfg.MakeCheck(parent, Cfg.BetaText(text), x, y, onClick)
+    cb.betaBase = text
+    return cb
+end
 
 -- Fußzeile "(beta) = experimentell …" unten in Tabs mit Beta-Funktionen; Rückgabe: neues y
 function Cfg.AddFooter(p, y)
@@ -4438,7 +4451,7 @@ function Cfg.AddFooter(p, y)
     fs:SetPoint("TOPLEFT", 16, y - 10)
     fs:SetWidth(Cfg.WIDTH - 32)
     fs:SetJustifyH("LEFT")
-    fs:SetText(L.BETA_FOOTER)
+    fs:SetText(Cfg.BETA_FOOTER_COLOR .. L.BETA_FOOTER .. "|r")
     return y - 40
 end
 
@@ -4630,7 +4643,7 @@ function Cfg.BuildDisplayTab()
     y = y - 26
 
     -- Warnung vor Ablauf (beta) + Detail-Regler (Schwelle, Transparenz)
-    config.expExpiryCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_EXPIRY), 16, y, function(self)
+    config.expExpiryCB = Cfg.MakeBetaCheck(p, L.EXP_EXPIRY, 16, y, function(self)
         db.expExpiry = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4676,7 +4689,7 @@ function Cfg.BuildClassTab()
     config.below = b
     local by = -8
     -- Variantenmenü per Rechtsklick (Aura, Siegel, Aspekt, Rüstung, Schild, Waffenverzauberung)
-    config.expVariantCB = Cfg.MakeCheck(b, Cfg.Beta(L.EXP_VARIANTMENU), 16, by, function(self)
+    config.expVariantCB = Cfg.MakeBetaCheck(b, L.EXP_VARIANTMENU, 16, by, function(self)
         db.expVariantMenu = self:GetChecked() and true or false
         if menu:IsShown() then menu:Hide() end   -- nächstes Öffnen mit/ohne Varianten
         NoteDeferred()
@@ -4705,7 +4718,7 @@ function Cfg.BuildOtherTab()
     y = y - 32
 
     -- Steine, Öle, Gifte per Klick
-    config.expWeaponCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_WEAPONITEMS), 16, y, function(self)
+    config.expWeaponCB = Cfg.MakeBetaCheck(p, L.EXP_WEAPONITEMS, 16, y, function(self)
         db.expWeaponItems = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4715,7 +4728,7 @@ function Cfg.BuildOtherTab()
 
     -- Klassen-Verbrauchsgüter (Einträge stehen in der Klassenliste); Schwelle für gezaubertes
     -- Essen/Wasser nur bei Klassen mit solchen Einträgen (Magier)
-    config.expConsCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_CONSUMABLES), 16, y, function(self)
+    config.expConsCB = Cfg.MakeBetaCheck(p, L.EXP_CONSUMABLES, 16, y, function(self)
         db.expConsumables = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4738,7 +4751,7 @@ function Cfg.BuildOtherTab()
     end
 
     -- Reagenzien-Warnung; Schwellenwerte nur für die Reagenzien der eigenen Klasse
-    config.expReagCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_REAGENTS), 16, y, function(self)
+    config.expReagCB = Cfg.MakeBetaCheck(p, L.EXP_REAGENTS, 16, y, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4759,7 +4772,7 @@ function Cfg.BuildOtherTab()
 
     -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine")
     y = y - 4
-    config.expTrackCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_TRACKING), 16, y, function(self)
+    config.expTrackCB = Cfg.MakeBetaCheck(p, L.EXP_TRACKING, 16, y, function(self)
         db.expTracking = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4783,7 +4796,7 @@ end
 function Cfg.BuildGroupTab(hasBlessings)
     local p = Cfg.NewTab("group", "TAB_GROUP")
     local y = -8
-    config.expGroupCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_GROUP), 16, y, function(self)
+    config.expGroupCB = Cfg.MakeBetaCheck(p, L.EXP_GROUP, 16, y, function(self)
         db.expGroup = self:GetChecked() and true or false
         if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
         NoteDeferred()
@@ -4812,7 +4825,7 @@ function Cfg.BuildGroupTab(hasBlessings)
     y = y - 30
     -- Segen des Paladins in den Gruppenbuffs (nur Paladine; aus, solange Pally Power geladen ist)
     if hasBlessings then
-        config.blessCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_BLESSINGS), 36, y, function(self)
+        config.blessCB = Cfg.MakeBetaCheck(p, L.EXP_BLESSINGS, 36, y, function(self)
             db.expBlessings = self:GetChecked() and true or false
             wipe(Group.groupState)
             Group.MarkGroupDirty()
