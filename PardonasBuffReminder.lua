@@ -595,7 +595,7 @@ local DEFAULTS = {
     instanceOnly = true,
     groupCheck   = true,       -- Gruppen-Buffs bei Party-/Raid-Mitgliedern prüfen
     groupMode    = "always",   -- "always" | "instance" (Dungeon & Raid) | "raid"
-    cfgTab       = "general",  -- zuletzt gewählter Tab der Einstellungen (Cfg.TAB_ORDER)
+    cfgTab       = "display",  -- zuletzt gewählter Tab der Einstellungen (Cfg.TAB_ORDER)
     clickCast    = true,   -- Linksklick auf Erinnerung zaubert den Buff
     style        = "pardona",   -- Stil von Warnanzeige und Menü (STYLES)
     iconsOnly    = false,       -- nur bei Stil "compact": nur Icons zeigen
@@ -4348,7 +4348,7 @@ end
 -- (gewählter Tab = gesperrt). Funktion und Speicherung der Einstellungen sind unabhängig davon.
 ---------------------------------------------------------------------------
 Cfg.TAB_ORDER = {
-    { "general", "TAB_GENERAL" }, { "class", "TAB_CLASS" }, { "buffs", "GENERAL" }, { "group", "TAB_GROUP" },
+    { "display", "TAB_DISPLAY" }, { "class", "TAB_CLASS" }, { "other", "TAB_OTHER" }, { "group", "TAB_GROUP" },
 }
 Cfg.TAB_TEMPLATES = { "PanelTopTabButtonTemplate", "TabButtonTemplate", "PanelTabButtonTemplate",
     "CharacterFrameTabButtonTemplate" }
@@ -4545,9 +4545,9 @@ function Cfg.FinishTab(p, y)
     p:SetSize(Cfg.WIDTH, -y + 10)
 end
 
--- Tab "Allgemein": Knopfreihe, Grundeinstellungen, Stil, Ton, Taste, Warnung vor Ablauf (beta)
-function Cfg.BuildGeneralTab()
-    local p = Cfg.NewTab("general", "TAB_GENERAL")
+-- Tab "Anzeige": Knopfreihe, Grundeinstellungen, Stil, Ton, Taste, Warnung vor Ablauf (beta)
+function Cfg.BuildDisplayTab()
+    local p = Cfg.NewTab("display", "TAB_DISPLAY")
     local y = -8
     config.moveBtn = Cfg.MakeButton(p, L.MOVE, 100)
     config.moveBtn:SetPoint("TOPLEFT", 16, y)
@@ -4687,10 +4687,10 @@ function Cfg.BuildClassTab()
     Cfg.belowHeight = -Cfg.AddFooter(b, by) + 10
 end
 
--- Tab "Allgemeine Buffs": Liste + "Nur in Instanzen", Waffen-Items, Verbrauchsgüter,
+-- Tab "Weitere Buffs": Liste + "Nur in Instanzen", Waffen-Items, Verbrauchsgüter,
 -- Reagenzien und Verfolgung (alle beta) mit ihren Detail-Einstellungen
-function Cfg.BuildBuffsTab()
-    local p = Cfg.NewTab("buffs", "GENERAL")
+function Cfg.BuildOtherTab()
+    local p = Cfg.NewTab("other", "TAB_OTHER")
     local y = -8
     for _, e in ipairs(GENERAL_BUFFS) do
         Cfg.MakeEntryRow(p, e, y)
@@ -4867,9 +4867,9 @@ local function BuildConfig()
     Cfg.inset:SetPoint("TOPLEFT", config, "TOPLEFT", 8, -74)
     Cfg.inset:SetPoint("BOTTOMRIGHT", config, "BOTTOMRIGHT", -8, 6)
 
-    Cfg.BuildGeneralTab()
+    Cfg.BuildDisplayTab()
     Cfg.BuildClassTab()
-    Cfg.BuildBuffsTab()
+    Cfg.BuildOtherTab()
     -- Tab "Gruppe" nur für Klassen mit Gruppen-Buffs
     local hasGroup, hasBlessings = false, false
     for _, e in ipairs(classEntries) do
@@ -4993,7 +4993,7 @@ Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
 }
 Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" } }
 Demo.SETTINGS_TABS = {      -- { Tab-Key (Cfg.TAB_ORDER), Name im Dateinamen }
-    { "general", "general" }, { "class", "class-buffs" }, { "buffs", "general-buffs" }, { "group", "group" },
+    { "display", "display" }, { "class", "class-buffs" }, { "other", "other-buffs" }, { "group", "group" },
 }
 
 function Demo.BuildShots()
