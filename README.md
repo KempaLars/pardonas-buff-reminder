@@ -62,6 +62,7 @@ Built for **WoW Forever** (Interface `16001`).
   - **Pardona** (default) – dark purple gradient, gold border with rounded corners, colored status stripe on the left (red = missing, orange = low reagent, green = eating), icon with gold frame, golden title, grey-purple hint line.
   - **Classic** – stone/brown background, square gold frame, title in WoW yellow, beige hint line.
   - **Compact** – slim dark bars with a status stripe on the left and "missing" on the right; hints only in the tooltip. The extra option **Icons only** (only available with Compact) shows just the icons side by side; name and hints are in the tooltip.
+- **Keybinding** – one key for the top reminder, see [Keybinding](#keybinding).
 - **Pardona's Addons entry point (beta)** – see [below](#pardonas-addons-beta).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – German and English, picked automatically from the game client language.
@@ -75,6 +76,14 @@ Right-clicking a reminder opens one window in the selected style:
 - **Mute** – four buttons side by side: 5 min, 15 min, 60 min, Session.
 - **Close (Esc)** – the footer closes the window; Esc closes it as well, and it closes on its own when the mouse has left it for 2 seconds.
 - **In combat** only the header and the mute buttons are shown (the item lines are secure buttons and cannot be created or changed in combat). An open window with items closes when combat starts.
+
+## Keybinding
+
+Under Options → Keybindings → AddOns → **Pardona's Buff Reminder** you can bind a key to **"Use top warning"**. Pressing it does the same as a left-click on the reminder at the very top of the screen: cast the buff, eat, drink a flask, imbue the weapon, or the group action of a group buff line. With "New warnings appear: above" that is the last reminder added (the highest one on screen); with Compact "Icons only" it is the leftmost icon of the top row. If no reminder is shown, the key does nothing.
+
+- The key follows the list out of combat. In combat it keeps the action it had when combat started and is updated when combat ends.
+- The settings show the current key (or "not bound") below the growth direction option.
+- Macro alternative: `/click PardonasBuffReminderKeyButton`. If your client casts on key down ("Cast action keybinds on key down" on) and this macro does nothing, use `/click PardonasBuffReminderKeyButton LeftButton 1` instead.
 
 ## Pardona's Addons (beta)
 
@@ -197,6 +206,7 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 ├── .gitignore                      # Also ignores Libs/ (fetched by the packager or tools/fetch-libs.ps1)
 ├── .luacheckrc                     # luacheck configuration
 ├── .pkgmeta                        # Packager configuration
+├── Bindings.xml                    # Keybinding "Use top warning" (loaded automatically, not listed in the TOC)
 ├── PardonasBuffReminder.lua        # Addon code
 ├── PardonasBuffReminder.toc        # Addon metadata
 └── README.md

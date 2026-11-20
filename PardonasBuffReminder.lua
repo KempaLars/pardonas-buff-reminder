@@ -18,6 +18,7 @@ local Menu    = {}   -- Rechtsklick-Menü
 local Cfg     = {}   -- Einstellungsfenster
 local Expiry  = {}   -- Warnung vor Ablauf (experimentell)
 local Conjure = {}   -- Klassen-Verbrauchsgüter: Magier-Essen/-Wasser/Manastein, Hexenmeister-Steine (experimentell)
+local Keybind = {}   -- Tastenbelegung "Oberste Warnung auslösen" (unsichtbarer Secure Button)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -148,6 +149,11 @@ if GetLocale() == "deDE" then
         GROW          = "Neue Warnungen erscheinen: %s",
         GROW_DOWN     = "unterhalb",
         GROW_UP       = "oberhalb",
+        -- Tastenbelegung
+        KEY_NAME      = "Oberste Warnung auslösen",
+        KEY_LINE      = "Taste „%s“: %s",
+        KEY_NONE      = "nicht belegt",
+        KEY_WHERE     = "Belegen unter Optionen → Tastaturbelegung → AddOns → Pardona's Buff Reminder",
         -- Rechtsklick-Menü
         MENU_FOOD     = "Essen in den Taschen",
         MENU_FLASK    = "Fläschchen",
@@ -283,6 +289,10 @@ else
         GROW          = "New warnings appear: %s",
         GROW_DOWN     = "below",
         GROW_UP       = "above",
+        KEY_NAME      = "Use top warning",
+        KEY_LINE      = "Key \"%s\": %s",
+        KEY_NONE      = "not bound",
+        KEY_WHERE     = "Set it under Options → Keybindings → AddOns → Pardona's Buff Reminder",
         MENU_FOOD     = "Food in your bags",
         MENU_FLASK    = "Flasks",
         MENU_MUTE     = "Mute",
@@ -2663,6 +2673,7 @@ function Display.ShowRows(list, dragMode, expFrom)
         Display.SetRowAction(rows[i], nil)
     end
     Display.SyncPulse(#list)
+    Keybind.Update(#list)
     if #list > 0 then
         if not anchor:IsShown() then
             anchor:SetAlpha(1)
@@ -2700,6 +2711,61 @@ function Display.TickExpiry()
             r.text:SetText(Expiry.Text(r.entry))
         end
     end
+end
+
+---------------------------------------------------------------------------
+-- Tastenbelegung "Oberste Warnung auslösen" (Bindings.xml: CLICK PardonasBuffReminderKeyButton:LeftButton)
+-- Unsichtbarer Secure Button ohne Parent und ohne Maus. Außerhalb des Kampfes übernimmt er bei
+-- jeder Änderung der Liste (ShowRows) die Linksklick-Attribute der obersten Zeile am Bildschirm;
+-- ohne Warnung werden sie geleert. Im Kampf bleibt die Belegung vom Kampfbeginn, nach dem Kampf
+-- zieht Evaluate (PLAYER_REGEN_ENABLED) sie nach. Auch per Makro: /click PardonasBuffReminderKeyButton
+---------------------------------------------------------------------------
+Keybind.BINDING = "CLICK PardonasBuffReminderKeyButton:LeftButton"
+_G.BINDING_HEADER_PARDONASBUFFREMINDER = L.TITLE
+_G["BINDING_NAME_" .. Keybind.BINDING] = L.KEY_NAME
+
+Keybind.button = CreateFrame("Button", "PardonasBuffReminderKeyButton", nil, "SecureActionButtonTemplate")
+Keybind.button:SetSize(1, 1)
+Keybind.button:EnableMouse(false)
+-- beide Phasen: funktioniert mit beiden Werten von ActionButtonUseKeyDown und mit /click
+Keybind.button:RegisterForClicks("AnyUp", "AnyDown")
+Keybind.button:SetScript("PostClick", function(self, button, down)
+    if button ~= "LeftButton" or not Display.IsActionPhase(down) then return end
+    -- per Taste benutztes Fläschchen als "zuletzt benutzt" merken (wie beim Linksklick)
+    if self.useItem and self.entry and self.entry.itemKind == "flask" and cdb then cdb.lastFlask = self.useItem end
+end)
+
+-- Index der Zeile, die am Bildschirm ganz oben steht (n = Anzahl angezeigter Zeilen):
+-- nach unten: Zeile 1; nach oben: die letzte Zeile; "Nur Icons" nach oben: erstes (linkes)
+-- Icon der obersten Reihe
+function Display.TopRowIndex(n)
+    if not Display.GrowUp() then return 1 end
+    if Style.IconsOnly(Style.CurrentStyle()) then
+        local per = Display.ICONS_PER_LINE
+        return math.floor((n - 1) / per) * per + 1
+    end
+    return n
+end
+
+-- Attribute der obersten Warnzeile übernehmen (nur außerhalb des Kampfes)
+function Keybind.Update(n)
+    if InCombatLockdown() then return end
+    local r = n > 0 and rows[Display.TopRowIndex(n)] or nil
+    local e = r and r.entry or nil   -- Verschiebe-Modus: keine Aktion
+    Keybind.button.entry = e
+    Display.SetRowAction(Keybind.button, e and r.action or nil)
+end
+
+-- Aktuelle Taste als Text; nil = nicht belegt bzw. nicht lesbar
+function Keybind.KeyText()
+    if type(GetBindingKey) ~= "function" then return nil end
+    local ok, key = pcall(GetBindingKey, Keybind.BINDING)
+    if not ok or type(key) ~= "string" or IsSecret(key) or key == "" then return nil end
+    if type(GetBindingText) == "function" then
+        local ok2, text = pcall(GetBindingText, key)
+        if ok2 and type(text) == "string" and not IsSecret(text) and text ~= "" then return text end
+    end
+    return key
 end
 
 -- Ess-Countdown: nur den Text der Zeilen aktualisieren (höchstens alle 0,2 Sek.).
@@ -3508,6 +3574,7 @@ function RefreshConfig()
     config.iconsCB:SetChecked(db.iconsOnly)
     Cfg.SetCheckEnabled(config.iconsCB, Style.STYLES[db.style] ~= nil and Style.STYLES[db.style].iconsOnly)
     config.growBtn:SetText(L.GROW:format(db.growUp and L.GROW_UP or L.GROW_DOWN))
+    config.keyText:SetText(L.KEY_LINE:format(L.KEY_NAME, Keybind.KeyText() or L.KEY_NONE))
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
 end
 
@@ -3822,7 +3889,18 @@ local function BuildConfig()
         Evaluate()
         RefreshConfig()
     end)
-    y = y - 34
+    y = y - 30
+
+    -- Tastenbelegung "Oberste Warnung auslösen": aktuelle Taste + wo sie belegt wird
+    config.keyText = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    config.keyText:SetPoint("TOPLEFT", 20, y)
+    config.keyText:SetJustifyH("LEFT")
+    y = y - 14
+    local keyWhere = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    keyWhere:SetPoint("TOPLEFT", 20, y)
+    keyWhere:SetJustifyH("LEFT")
+    keyWhere:SetText(L.KEY_WHERE)
+    y = y - 24
 
     -- Experimentelle Funktionen: klar abgesetzter Abschnitt; Detail-Einstellungen direkt
     -- unter dem jeweiligen Schalter, ausgegraut solange dieser aus ist
@@ -4090,6 +4168,7 @@ SafeRegisterEvent(ev, "PLAYER_REGEN_DISABLED")
 SafeRegisterEvent(ev, "GET_ITEM_INFO_RECEIVED")
 SafeRegisterEvent(ev, "ENABLE_XP_GAIN")
 SafeRegisterEvent(ev, "DISABLE_XP_GAIN")
+SafeRegisterEvent(ev, "UPDATE_BINDINGS")   -- Tasten-Hinweis in den Einstellungen
 -- Ladebildschirm-Events gibt es nicht in jedem Client (IsEventValid filtert sie dann aus)
 SafeRegisterEvent(ev, "LOADING_SCREEN_ENABLED")
 SafeRegisterEvent(ev, "LOADING_SCREEN_DISABLED")
@@ -4212,6 +4291,11 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3)
                 return
             end
         end
+        return
+    end
+
+    if event == "UPDATE_BINDINGS" then
+        if RefreshConfig then RefreshConfig() end   -- nur bei sichtbaren Einstellungen
         return
     end
 

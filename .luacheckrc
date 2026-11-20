@@ -39,6 +39,8 @@ read_globals = {
     "SOUNDKIT",
     -- functions
     "GetAddOnMetadata",
+    "GetBindingKey",
+    "GetBindingText",
     "GetCursorPosition",
     "GetCVar",
     "GetCVarBool",
