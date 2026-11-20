@@ -58,6 +58,7 @@ read_globals = {
     "GetNormalizedRealmName",
     "GetNumGroupMembers",
     "GetNumTrackingTypes",
+    "GetPhysicalScreenSize",
     "GetRealmName",
     "GetSpellInfo",
     "GetSpellTexture",

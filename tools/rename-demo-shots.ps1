@@ -1,16 +1,24 @@
 <#
 .SYNOPSIS
-    Copies the screenshots of a demo run (/br demo shot) under descriptive names.
+    Copies the screenshots of a demo run (/br demo shot) under descriptive names, cropped to
+    the shown reminders, menus or settings window.
 
 .DESCRIPTION
     The hidden demo mode of Pardona's Buff Reminder takes a series of screenshots and records
-    their order and names in the SavedVariables (BuffReminderDB.demoShots). This script reads
-    that list, takes the screenshot files (WoWScrnShot_*.png) written since the run started,
-    in chronological order, and COPIES them as "01-pardona-list.png", "02-pardona-food-menu.png"
-    and so on into the output folder. The original screenshots are not changed.
+    their order, names and crop rectangles in the SavedVariables (BuffReminderDB.demoShots).
+    This script reads that list, takes the screenshot files (WoWScrnShot_*.png) written since
+    the run started, in chronological order, and writes copies named "01-pardona-list.png",
+    "02-pardona-food-menu.png" and so on into the output folder:
+
+      default   cropped copy: crop rectangle plus a 32 px margin on each side (limited to the
+                image); shots without a crop rectangle are copied uncropped
+      -Full     additionally the uncropped image as "01-pardona-list-full.png"
+      -NoCrop   only uncropped copies named "01-pardona-list.png" (previous behaviour)
 
     If the number of screenshots does not match the number of recorded shots, the script warns
-    and stops without copying anything.
+    and stops without writing anything. If an image size differs from the recorded screen size,
+    the crop rectangle is scaled proportionally and a warning is shown.
+    The original screenshots are never changed.
 
     Important: WoW writes the SavedVariables only on /reload, logout or exit. After the run,
     type /reload (or log out) before running this script.
@@ -20,11 +28,21 @@
         BuffReminderDB = {
             ["demoShots"] = {
                 ["started"] = 1763650000,        -- Unix time (seconds) when the run started
+                ["screen"] = {                   -- physical screen size in pixels (optional)
+                    ["w"] = 3440,
+                    ["h"] = 1440,
+                },
                 ["shots"] = {
                     {
                         ["n"] = 1,
                         ["name"] = "pardona-list",
                         ["t"] = 1763650004,      -- Unix time of the screenshot
+                        ["crop"] = {             -- optional; screen pixels, origin top left
+                            ["x"] = 1210,
+                            ["y"] = 402,
+                            ["w"] = 564,
+                            ["h"] = 498,
+                        },
                     }, -- [1]
                     ...
                 },
@@ -32,8 +50,11 @@
             ...
         }
 
-    The block is located with a regular expression and brace matching; key order inside the
+    The blocks are located with regular expressions and brace matching; key order inside the
     tables does not matter.
+
+    Cropping uses System.Drawing (Windows PowerShell 5.1 and PowerShell 7 on Windows); the
+    output is PNG (lossless).
 
 .PARAMETER WowPath
     Game folder of the client (contains WTF and Screenshots).
@@ -43,24 +64,39 @@
     written) PardonasBuffReminder.lua under WTF\Account\*\SavedVariables is used.
 
 .PARAMETER OutDir
-    Output folder for the renamed copies. Default: <WowPath>\Screenshots\PardonasDemo
+    Output folder for the copies. Default: <WowPath>\Screenshots\PardonasDemo
+
+.PARAMETER Full
+    Also write the uncropped images as "NN-name-full.png".
+
+.PARAMETER NoCrop
+    Write only uncropped copies as "NN-name.png" (no cropping at all).
 
 .EXAMPLE
     .\tools\rename-demo-shots.ps1
 
-    Uses the default WoW Forever folder and the most recent SavedVariables file.
+    Uses the default WoW Forever folder and the most recent SavedVariables file; writes
+    cropped copies.
 
 .EXAMPLE
-    .\tools\rename-demo-shots.ps1 -Account MYACCOUNT -OutDir D:\Images\BuffReminder
+    .\tools\rename-demo-shots.ps1 -Full
+
+    Cropped copies plus the uncropped images ("01-pardona-list-full.png" ...).
+
+.EXAMPLE
+    .\tools\rename-demo-shots.ps1 -Account MYACCOUNT -OutDir D:\Images\BuffReminder -NoCrop
 #>
 [CmdletBinding()]
 param(
     [string]$WowPath = 'C:\Program Files (x86)\World of Warcraft\_forever_',
     [string]$Account,
-    [string]$OutDir
+    [string]$OutDir,
+    [switch]$Full,
+    [switch]$NoCrop
 )
 
 $ErrorActionPreference = 'Stop'
+$Margin = 32
 
 if (-not $OutDir) { $OutDir = Join-Path $WowPath 'Screenshots\PardonasDemo' }
 
@@ -105,32 +141,84 @@ function Get-TableText([string]$s, [int]$start) {
     return $null
 }
 
+# Texts of the direct child tables of a table text (e.g. the entries of the shots list).
+function Get-ChildTables([string]$s) {
+    $result = @()
+    $depth = 0
+    $inString = $false
+    $begin = -1
+    for ($i = 0; $i -lt $s.Length; $i++) {
+        $c = $s[$i]
+        if ($inString) {
+            if ($c -eq '\') { $i++; continue }
+            if ($c -eq '"') { $inString = $false }
+            continue
+        }
+        if ($c -eq '"') { $inString = $true; continue }
+        if ($c -eq '{') {
+            $depth++
+            if ($depth -eq 2) { $begin = $i }
+        } elseif ($c -eq '}') {
+            if ($depth -eq 2) { $result += $s.Substring($begin, $i - $begin + 1) }
+            $depth--
+        }
+    }
+    return ,$result
+}
+
+# Value of ["key"] = <number> in a table text; $null if missing.
+function Get-Number([string]$s, [string]$key) {
+    $m = [regex]::Match($s, '\["' + $key + '"\]\s*=\s*(-?\d+(?:\.\d+)?)')
+    if ($m.Success) { return [double]$m.Groups[1].Value }
+    return $null
+}
+
+# Sub-table ["key"] = { ... } of a table text; $null if missing.
+function Get-SubTable([string]$s, [string]$key) {
+    $m = [regex]::Match($s, '\["' + $key + '"\]\s*=\s*\{')
+    if ($m.Success) { return Get-TableText $s $m.Index }
+    return $null
+}
+
 $m = [regex]::Match($text, '\["demoShots"\]\s*=\s*\{')
 if (-not $m.Success) { throw 'No demoShots found. Run /br demo shot, then /reload, then this script.' }
 $demo = Get-TableText $text $m.Index
-$started = [regex]::Match($demo, '\["started"\]\s*=\s*(\d+)')
-if (-not $started.Success) { throw 'demoShots has no "started" value.' }
-$startedUnix = [long]$started.Groups[1].Value
+$startedUnix = Get-Number $demo 'started'
+if ($null -eq $startedUnix) { throw 'demoShots has no "started" value.' }
 
-$sm = [regex]::Match($demo, '\["shots"\]\s*=\s*\{')
+$screen = $null
+$screenText = Get-SubTable $demo 'screen'
+if ($screenText) {
+    $sw = Get-Number $screenText 'w'
+    $sh = Get-Number $screenText 'h'
+    if ($sw -gt 0 -and $sh -gt 0) { $screen = [pscustomobject]@{ W = $sw; H = $sh } }
+}
+
 $shots = @()
-if ($sm.Success) {
-    $shotsText = Get-TableText $demo $sm.Index
-    # inner tables of the shots list (no nested tables inside an entry)
-    foreach ($entry in [regex]::Matches($shotsText.Substring(1), '\{([^{}]*)\}')) {
-        $body = $entry.Groups[1].Value
-        $n = [regex]::Match($body, '\["n"\]\s*=\s*(\d+)')
-        $name = [regex]::Match($body, '\["name"\]\s*=\s*"([^"]*)"')
-        if ($n.Success -and $name.Success) {
-            $shots += [pscustomobject]@{ N = [int]$n.Groups[1].Value; Name = $name.Groups[1].Value }
+$shotsText = Get-SubTable $demo 'shots'
+if ($shotsText) {
+    foreach ($entry in (Get-ChildTables $shotsText)) {
+        $n = Get-Number $entry 'n'
+        $name = [regex]::Match($entry, '\["name"\]\s*=\s*"([^"]*)"')
+        if ($null -eq $n -or -not $name.Success) { continue }
+        $crop = $null
+        $cropText = Get-SubTable $entry 'crop'
+        if ($cropText) {
+            $cx = Get-Number $cropText 'x'; $cy = Get-Number $cropText 'y'
+            $cw = Get-Number $cropText 'w'; $ch = Get-Number $cropText 'h'
+            if ($null -ne $cx -and $null -ne $cy -and $cw -gt 0 -and $ch -gt 0) {
+                $crop = [pscustomobject]@{ X = $cx; Y = $cy; W = $cw; H = $ch }
+            }
         }
+        $shots += [pscustomobject]@{ N = [int]$n; Name = $name.Groups[1].Value; Crop = $crop }
     }
 }
 $shots = @($shots | Sort-Object N)
 if ($shots.Count -eq 0) { throw 'demoShots contains no shots.' }
 
-$startedLocal = [DateTimeOffset]::FromUnixTimeSeconds($startedUnix).LocalDateTime
+$startedLocal = [DateTimeOffset]::FromUnixTimeSeconds([long]$startedUnix).LocalDateTime
 Write-Host ("Run started {0}, {1} shots recorded" -f $startedLocal, $shots.Count)
+if ($screen) { Write-Host ("Recorded screen size: {0} x {1}" -f $screen.W, $screen.H) }
 
 # --- Screenshot files ----------------------------------------------------------------------
 $shotDir = Join-Path $WowPath 'Screenshots'
@@ -140,16 +228,64 @@ $files = @(Get-ChildItem -Path (Join-Path $shotDir 'WoWScrnShot_*.png') -ErrorAc
     Sort-Object LastWriteTime, Name)
 
 if ($files.Count -ne $shots.Count) {
-    Write-Warning ("Found {0} screenshot(s) since the run started, but {1} shot(s) are recorded. Nothing copied." -f $files.Count, $shots.Count)
+    Write-Warning ("Found {0} screenshot(s) since the run started, but {1} shot(s) are recorded. Nothing written." -f $files.Count, $shots.Count)
     foreach ($f in $files) { Write-Host ("  {0}  {1}" -f $f.LastWriteTime, $f.Name) }
     exit 1
 }
 
 if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
+if (-not $NoCrop) { Add-Type -AssemblyName System.Drawing }
+
+# Writes the cropped copy of $source to $target. Returns $false if the rectangle is empty.
+function Save-Cropped([string]$source, [string]$target, $crop) {
+    $stream = $null; $image = $null; $part = $null
+    try {
+        # read via stream so the original file is not locked or changed
+        $stream = [IO.File]::OpenRead($source)
+        $image = New-Object System.Drawing.Bitmap $stream
+        $x = $crop.X; $y = $crop.Y; $w = $crop.W; $h = $crop.H
+        if ($screen -and ($image.Width -ne $screen.W -or $image.Height -ne $screen.H)) {
+            Write-Warning ("{0}: image is {1} x {2}, recorded screen {3} x {4}; scaling the crop rectangle" -f `
+                (Split-Path -Leaf $source), $image.Width, $image.Height, $screen.W, $screen.H)
+            $kx = $image.Width / $screen.W; $ky = $image.Height / $screen.H
+            $x = $x * $kx; $w = $w * $kx; $y = $y * $ky; $h = $h * $ky
+        }
+        $left   = [Math]::Max(0, [int][Math]::Floor($x - $Margin))
+        $top    = [Math]::Max(0, [int][Math]::Floor($y - $Margin))
+        $right  = [Math]::Min($image.Width,  [int][Math]::Ceiling($x + $w + $Margin))
+        $bottom = [Math]::Min($image.Height, [int][Math]::Ceiling($y + $h + $Margin))
+        if ($right -le $left -or $bottom -le $top) { return $false }
+        $rect = New-Object System.Drawing.Rectangle $left, $top, ($right - $left), ($bottom - $top)
+        $part = $image.Clone($rect, $image.PixelFormat)
+        $part.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
+        return $true
+    } finally {
+        if ($part) { $part.Dispose() }
+        if ($image) { $image.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
 
 for ($i = 0; $i -lt $shots.Count; $i++) {
-    $target = Join-Path $OutDir ('{0:D2}-{1}.png' -f $shots[$i].N, $shots[$i].Name)
-    Copy-Item -LiteralPath $files[$i].FullName -Destination $target -Force
-    Write-Host ("{0} -> {1}" -f $files[$i].Name, (Split-Path -Leaf $target))
+    $shot = $shots[$i]
+    $source = $files[$i].FullName
+    $base = '{0:D2}-{1}' -f $shot.N, $shot.Name
+    $target = Join-Path $OutDir "$base.png"
+    if ($NoCrop) {
+        Copy-Item -LiteralPath $source -Destination $target -Force
+        Write-Host ("{0} -> {1}" -f $files[$i].Name, "$base.png")
+        continue
+    }
+    if ($shot.Crop -and (Save-Cropped $source $target $shot.Crop)) {
+        Write-Host ("{0} -> {1} (cropped)" -f $files[$i].Name, "$base.png")
+    } else {
+        if ($shot.Crop) { Write-Warning ("{0}: crop rectangle outside the image, copied uncropped" -f $base) }
+        Copy-Item -LiteralPath $source -Destination $target -Force
+        Write-Host ("{0} -> {1} (uncropped, no crop rectangle)" -f $files[$i].Name, "$base.png")
+    }
+    if ($Full) {
+        Copy-Item -LiteralPath $source -Destination (Join-Path $OutDir "$base-full.png") -Force
+        Write-Host ("{0} -> {1}" -f $files[$i].Name, "$base-full.png")
+    }
 }
-Write-Host ("{0} file(s) copied to {1}" -f $shots.Count, $OutDir)
+Write-Host ("{0} shot(s) written to {1}" -f $shots.Count, $OutDir)

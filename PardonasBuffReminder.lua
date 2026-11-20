@@ -5213,6 +5213,8 @@ function Demo.BeginRun()
     if sv.cvars.screenshotFormat then Demo.SetCVar("screenshotFormat", "png") end
     if sv.cvars.screenshotQuality then Demo.SetCVar("screenshotQuality", "10") end
     db.demoShots = { started = time(), shots = {} }
+    local _, sw, sh = Demo.PixelScale()
+    if sw then db.demoShots.screen = { w = sw, h = sh } end   -- physische Pixel (Prüfung im Skript)
     if menu:IsShown() then menu:Hide() end
     Demo.ToWorld(anchor, true)
     Demo.ToWorld(menu)
@@ -5288,10 +5290,71 @@ end
 
 -- Bild auslösen und auf SCREENSHOT_SUCCEEDED/FAILED warten (5 Sek.). Kommt kein Ereignis,
 -- gilt Screenshot() als blockiert: Hinweis "Druck-Taste" und warten (60 Sek.).
+-- Physische Bildschirmgröße und Faktor 768er-Raster -> Pixel; nil = nicht lesbar
+function Demo.PixelScale()
+    if type(GetPhysicalScreenSize) ~= "function" then return nil end
+    local ok, w, h = pcall(GetPhysicalScreenSize)
+    if not ok or type(w) ~= "number" or type(h) ~= "number" or IsSecret(w) or IsSecret(h) or h <= 0 then
+        return nil
+    end
+    return h / 768, w, h
+end
+
+-- Zuschnitt-Rechteck in Bildschirm-Pixeln (Ursprung oben links) als Vereinigung der sichtbaren
+-- Frames: Kante × GetEffectiveScale() = 768er-Raster, × (physische Höhe / 768) = Pixel;
+-- y von oben = physische Höhe − top. nil = nicht berechenbar (dann ganzes Bild).
+function Demo.CropOf(frames)
+    local k, _, sh = Demo.PixelScale()
+    if not k then return nil end
+    local l, r, t, b
+    for _, fr in ipairs(frames) do
+        if fr:IsVisible() then
+            local fl, frr, ft, fb, sc = fr:GetLeft(), fr:GetRight(), fr:GetTop(), fr:GetBottom(), fr:GetEffectiveScale()
+            for _, v in ipairs({ fl or false, frr or false, ft or false, fb or false, sc or false }) do
+                if type(v) ~= "number" or IsSecret(v) then return nil end
+            end
+            fl, frr, ft, fb = fl * sc, frr * sc, ft * sc, fb * sc
+            l = l and math.min(l, fl) or fl
+            r = r and math.max(r, frr) or frr
+            t = t and math.max(t, ft) or ft
+            b = b and math.min(b, fb) or fb
+        end
+    end
+    if not l then return nil end
+    local function px(v) return math.floor(v * k + 0.5) end
+    return { x = px(l), y = math.floor(sh - t * k + 0.5), w = px(r) - px(l), h = px(t) - px(b) }
+end
+
+-- Oberster Fenster-Frame über f (letzter Vorfahre vor UIParent bzw. ohne Parent), z. B.
+-- SettingsPanel für die Seite unter "Pardona's Addons", BuffReminderConfig ohne Settings-API
+function Demo.TopWindow(fr)
+    for _ = 1, 30 do
+        local p = fr:GetParent()
+        if not p or p == UIParent or p == WorldFrame then return fr end
+        fr = p
+    end
+    return fr
+end
+
+-- Frames, die ein Bild zeigt: Warnzeilen + offenes Menü bzw. das Einstellungsfenster
+function Demo.ShotFrames(s)
+    if s.settings then
+        return config and { Demo.TopWindow(config) } or {}
+    end
+    local list = {}
+    for _, r in ipairs(rows) do
+        if r:IsShown() then list[#list + 1] = r end
+    end
+    if menu:IsShown() then list[#list + 1] = menu end
+    if itemPanel:IsShown() then list[#list + 1] = itemPanel end
+    return list
+end
+
 function Demo.Capture(i)
     local run, s = Demo.run, Demo.SHOTS[i]
     if not run then return end
     run.result, run.waiting = nil, true
+    run.crop = Demo.CropOf(Demo.ShotFrames(s))   -- vor dem Bild, Stand wie auf dem Bild
     if run.manual then
         Print(L.DEMO_PRINT)
     elseif not (type(Screenshot) == "function" and pcall(Screenshot)) then
@@ -5302,7 +5365,7 @@ function Demo.Capture(i)
         run.waiting = false
         if run.result then
             local list = db.demoShots.shots
-            list[#list + 1] = { n = #list + 1, name = s.name, t = time() }
+            list[#list + 1] = { n = #list + 1, name = s.name, t = time(), crop = run.crop }
         else
             Print(L.DEMO_SHOT_FAIL:format(s.name))
         end
