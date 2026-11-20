@@ -5373,12 +5373,18 @@ function Demo.BeginRun()
     Demo.RunShot(1)
 end
 
--- Menü eines Motivs neben dessen Zeile öffnen (Koordinaten in Menü-Einheiten)
+-- Menü eines Motivs rechts neben der ganzen Anzeige öffnen (x = größtes GetRight aller sichtbaren
+-- Zeilen + 12, y = Oberkante der Motiv-Zeile; Koordinaten in Menü-Einheiten). So liegt es bei
+-- "Nur Icons" nicht über den folgenden Icons.
 function Demo.OpenMenu(which)
     for i, e in ipairs(Demo.entries or {}) do
         local r = rows[i]
         if e.demo.menu == which and r and r:IsShown() then
-            local right, top = r:GetRight(), r:GetTop()
+            local right, top = nil, r:GetTop()
+            for _, row in ipairs(rows) do
+                local rr = row:IsShown() and row:GetRight()
+                if type(rr) == "number" then right = math.max(right or rr, rr) end
+            end
             if right and top then
                 local k = r:GetEffectiveScale() / menu:GetEffectiveScale()
                 menu.x, menu.y = right * k + 12, top * k
