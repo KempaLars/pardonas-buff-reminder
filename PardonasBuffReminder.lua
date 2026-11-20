@@ -595,6 +595,7 @@ local DEFAULTS = {
     instanceOnly = true,
     groupCheck   = true,       -- Gruppen-Buffs bei Party-/Raid-Mitgliedern prüfen
     groupMode    = "always",   -- "always" | "instance" (Dungeon & Raid) | "raid"
+    cfgTab       = "general",  -- zuletzt gewählter Tab der Einstellungen (Cfg.TAB_ORDER)
     clickCast    = true,   -- Linksklick auf Erinnerung zaubert den Buff
     style        = "pardona",   -- Stil von Warnanzeige und Menü (STYLES)
     iconsOnly    = false,       -- nur bei Stil "compact": nur Icons zeigen
@@ -4091,7 +4092,7 @@ function RefreshConfig()
     config.instCB:SetChecked(db.instanceOnly)
     config.castCB:SetChecked(db.clickCast)
     local expGroup = ExpOn("expGroup")
-    config.expGroupCB:SetChecked(expGroup)
+    if config.expGroupCB then config.expGroupCB:SetChecked(expGroup) end
     config.expReagCB:SetChecked(expReag)
     if config.reagentHint then config.reagentHint:SetAlpha(expReag and 1 or 0.5) end
     if config.groupCB then
@@ -4161,8 +4162,8 @@ function Cfg.ShowEntryRow(w, show)
     end
 end
 
--- Klassenliste: Einträge mit hideUnknown (Verbrauchsgüter) erst zeigen, wenn erlernt; alles
--- darunter (config.below) rückt nach
+-- Klassenliste (Tab "Klassenbuffs"): Einträge mit hideUnknown (Verbrauchsgüter) erst zeigen,
+-- wenn erlernt; alles darunter (config.below) rückt nach
 function Cfg.LayoutClassRows()
     local y = Cfg.classTop
     for _, w in ipairs(Cfg.configRows) do
@@ -4176,9 +4177,9 @@ function Cfg.LayoutClassRows()
         end
     end
     config.below:ClearAllPoints()
-    config.below:SetPoint("TOPLEFT", config, "TOPLEFT", 0, y)
-    config.below:SetSize(440, Cfg.belowHeight)
-    config:SetSize(440, -y + Cfg.belowHeight)
+    config.below:SetPoint("TOPLEFT", Cfg.classContent, "TOPLEFT", 0, y)
+    config.below:SetSize(Cfg.WIDTH, Cfg.belowHeight)
+    Cfg.classContent:SetSize(Cfg.WIDTH, -y + Cfg.belowHeight)
 end
 
 function Cfg.MakeEntryRow(parent, e, y)
@@ -4314,12 +4315,49 @@ end
 
 -- Cfg.configCanvas: Seite unter "Pardona's Addons" in den Einstellungen (nil = eigenes Fenster)
 
--- Inhalt der Einstellungsseite in einem Scrollbereich (Höhe hängt von Klasse/Reagenzien ab)
-function Cfg.CreateCanvasContent()
-    local ok, scroll = pcall(CreateFrame, "ScrollFrame", "BuffReminderConfigScroll", Cfg.configCanvas, "UIPanelScrollFrameTemplate")
-    if not ok then
-        -- ohne Vorlage: Scrollen nur per Mausrad
-        scroll = CreateFrame("ScrollFrame", "BuffReminderConfigScroll", Cfg.configCanvas)
+---------------------------------------------------------------------------
+-- Einstellungsseite mit Tabs: Tab-Leiste oben, je Tab eine eigene Scrollfläche.
+--   Cfg.TAB_ORDER: { Key, Text-Schlüssel }; "group" nur bei Klassen mit Gruppenbuffs
+--   Cfg.tabs[key] = { key, button, scroll, content }; Cfg.tabList in Reihenfolge
+--   db.cfgTab: zuletzt gewählter Tab (beim Öffnen wieder gezeigt)
+-- Tab-Vorlage: erste, die der Client kennt (Cfg.TAB_TEMPLATES, per pcall); sonst normale Knöpfe
+-- (gewählter Tab = gesperrt). Funktion und Speicherung der Einstellungen sind unabhängig davon.
+---------------------------------------------------------------------------
+Cfg.TAB_ORDER = {
+    { "general", "TAB_GENERAL" }, { "class", "TAB_CLASS" }, { "buffs", "GENERAL" }, { "group", "TAB_GROUP" },
+}
+Cfg.TAB_TEMPLATES = { "PanelTopTabButtonTemplate", "TabButtonTemplate", "PanelTabButtonTemplate",
+    "CharacterFrameTabButtonTemplate" }
+Cfg.WIDTH = 440   -- Breite des Inhalts eines Tabs (Status rechtsbündig bei 424)
+Cfg.tabs, Cfg.tabList = {}, {}
+
+-- Text eines experimentellen Schalters: "<Text> (beta)"
+function Cfg.Beta(text) return text .. " " .. L.BETA_TAG end
+
+-- Fußzeile "(beta) = experimentell …" unten in Tabs mit Beta-Funktionen; Rückgabe: neues y
+function Cfg.AddFooter(p, y)
+    local fs = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    fs:SetPoint("TOPLEFT", 16, y - 10)
+    fs:SetWidth(Cfg.WIDTH - 32)
+    fs:SetJustifyH("LEFT")
+    fs:SetText(L.BETA_FOOTER)
+    return y - 40
+end
+
+-- Verschiebe-Modus an/aus (Knopf, /br move, /br lock, Rechtsklick-Menü); nicht im Kampf
+function Cfg.SetMoveMode(on)
+    if InCombatLockdown() then Print(L.COMBAT); return end
+    unlocked = on and true or false
+    if not unlocked then wipe(shownKeys); Display.ShowRows({}) end
+    Evaluate()
+    RefreshConfig()
+end
+
+-- Scrollfläche mit Inhaltsframe (Breite Cfg.WIDTH); ohne Vorlage Scrollen nur per Mausrad
+function Cfg.MakeScroll(parent, name)
+    local ok, scroll = pcall(CreateFrame, "ScrollFrame", name, parent, "UIPanelScrollFrameTemplate")
+    if not ok or not scroll then
+        scroll = CreateFrame("ScrollFrame", name, parent)
         scroll:EnableMouseWheel(true)
         scroll:SetScript("OnMouseWheel", function(self, delta)
             local v = self:GetVerticalScroll() - delta * 40
@@ -4327,80 +4365,104 @@ function Cfg.CreateCanvasContent()
             self:SetVerticalScroll(v)
         end)
     end
-    scroll:SetPoint("TOPLEFT", 0, -4)
-    scroll:SetPoint("BOTTOMRIGHT", -28, 4)
-    local content = CreateFrame("Frame", "BuffReminderConfig", scroll)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(Cfg.WIDTH, 10)
     scroll:SetScrollChild(content)
-    Cfg.scroll = scroll
-    return content
+    return scroll, content
 end
 
-local function BuildConfig()
-    if Cfg.configCanvas then
-        config = Cfg.CreateCanvasContent()
+-- Tab-Knopf aus der ersten verfügbaren Vorlage (Cfg.tabTemplate = genutzte Vorlage)
+function Cfg.MakeTabButton(parent, index, text)
+    local name = "BuffReminderConfigTab" .. index
+    local b
+    for _, tpl in ipairs(Cfg.TAB_TEMPLATES) do
+        if Cfg.tabTemplate == nil or Cfg.tabTemplate == tpl then
+            local ok, f = pcall(CreateFrame, "Button", name, parent, tpl)
+            if ok and f and f.GetFontString and f:GetFontString() then
+                b, Cfg.tabTemplate = f, tpl
+                break
+            elseif ok and f then
+                f:Hide()
+            end
+        end
+    end
+    if not b then
+        Cfg.tabTemplate = "UIPanelButtonTemplate"
+        b = CreateFrame("Button", name, parent, "UIPanelButtonTemplate")
+        b:SetSize(110, 22)
+    end
+    b:SetID(index)
+    b:SetText(text)
+    if Cfg.tabTemplate ~= "UIPanelButtonTemplate" and type(PanelTemplates_TabResize) == "function" then
+        pcall(PanelTemplates_TabResize, b, 0)
+    end
+    local w = b:GetWidth()
+    if type(w) ~= "number" or w < 40 then b:SetWidth(110) end
+    return b
+end
+
+-- neuen Tab anlegen; Rückgabe: Inhaltsframe
+function Cfg.NewTab(key, textKey)
+    local index = #Cfg.tabList + 1
+    local t = { key = key }
+    t.button = Cfg.MakeTabButton(config, index, L[textKey])
+    t.button:ClearAllPoints()
+    if index == 1 then
+        t.button:SetPoint("TOPLEFT", config, "TOPLEFT", 16, -44)
     else
-        -- Fallback ohne Settings-API: eigenständiges Fenster
-        config = CreateFrame("Frame", "BuffReminderConfig", UIParent, "BackdropTemplate")
-        config:SetFrameStrata("DIALOG")
-        config:SetPoint("CENTER")
-        config:SetClampedToScreen(true)
-        config:SetMovable(true)
-        config:EnableMouse(true)
-        config:RegisterForDrag("LeftButton")
-        config:SetScript("OnDragStart", config.StartMoving)
-        config:SetScript("OnDragStop", config.StopMovingOrSizing)
-        config:SetBackdrop({
-            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-            tile = true, tileSize = 32, edgeSize = 32,
-            insets = { left = 11, right = 12, top = 12, bottom = 11 },
-        })
-        tinsert(UISpecialFrames, "BuffReminderConfig")
-
-        local close = CreateFrame("Button", nil, config, "UIPanelCloseButton")
-        close:SetPoint("TOPRIGHT", -6, -6)
+        t.button:SetPoint("LEFT", Cfg.tabList[index - 1].button, "RIGHT", 2, 0)
     end
+    t.button:SetScript("OnClick", function() Cfg.SelectTab(key) end)
+    t.scroll, t.content = Cfg.MakeScroll(config, "BuffReminderConfigScroll" .. index)
+    t.scroll:SetPoint("TOPLEFT", config, "TOPLEFT", 4, -76)
+    t.scroll:SetPoint("BOTTOMRIGHT", config, "BOTTOMRIGHT", -28, 8)
+    Cfg.tabs[key] = t
+    Cfg.tabList[index] = t
+    return t.content
+end
 
-    local title = config:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -18)
-    title:SetText(L.TITLE)
-
-    local y = -48
-    local className = UnitClass("player")
-    Cfg.MakeHeader(config, L.CLASS_SECTION:format(className or "?"), y)
-    y = y - 22
-    if #classEntries == 0 then
-        local fs = config:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("TOPLEFT", 20, y)
-        fs:SetText(L.NO_CLASS)
-        y = y - 20
+-- Tab zeigen (unbekannter Key: erster Tab) und merken
+function Cfg.SelectTab(key)
+    if not Cfg.tabs[key] then key = Cfg.tabList[1] and Cfg.tabList[1].key end
+    if not key then return end
+    db.cfgTab = key
+    local real = Cfg.tabTemplate ~= "UIPanelButtonTemplate"
+    for _, t in ipairs(Cfg.tabList) do
+        local on = t.key == key
+        if on then t.scroll:Show() else t.scroll:Hide() end
+        local fn = on and PanelTemplates_SelectTab or PanelTemplates_DeselectTab
+        local ok = real and type(fn) == "function" and pcall(fn, t.button)
+        if not ok then
+            if on then t.button:Disable() else t.button:Enable() end
+        end
     end
-    Cfg.classTop = y
-    for _, e in ipairs(classEntries) do
-        Cfg.MakeEntryRow(config, e, y).classRow = true
-    end
+    RefreshConfig()
+end
 
-    -- Alles unterhalb der Klassenliste liegt in einem eigenen Frame (p), den
-    -- Cfg.LayoutClassRows unter die sichtbaren Klassenzeilen rückt
-    local p = CreateFrame("Frame", nil, config)
-    config.below = p
-    y = 0
-    y = y - 10
-    Cfg.MakeHeader(p, L.GENERAL, y)
-    y = y - 22
-    for _, e in ipairs(GENERAL_BUFFS) do
-        Cfg.MakeEntryRow(p, e, y)
-        y = y - 26
-    end
+-- Inhaltshöhe eines Tabs setzen
+function Cfg.FinishTab(p, y)
+    p:SetSize(Cfg.WIDTH, -y + 10)
+end
 
-    y = y - 12
+-- Tab "Allgemein": Knopfreihe, Grundeinstellungen, Stil, Ton, Taste, Warnung vor Ablauf (beta)
+function Cfg.BuildGeneralTab()
+    local p = Cfg.NewTab("general", "TAB_GENERAL")
+    local y = -8
+    config.moveBtn = Cfg.MakeButton(p, L.MOVE, 100)
+    config.moveBtn:SetPoint("TOPLEFT", 16, y)
+    config.moveBtn:SetScript("OnClick", function() Cfg.SetMoveMode(not unlocked) end)
+    local testBtn = Cfg.MakeButton(p, L.TEST, 80)
+    testBtn:SetPoint("LEFT", config.moveBtn, "RIGHT", 4, 0)
+    testBtn:SetScript("OnClick", StartTest)
+    local unmuteBtn = Cfg.MakeButton(p, L.UNMUTE, 140)
+    unmuteBtn:SetPoint("LEFT", testBtn, "RIGHT", 4, 0)
+    unmuteBtn:SetScript("OnClick", function()
+        wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
+    end)
+    y = y - 36
+
     config.enabledCB = Cfg.MakeCheck(p, L.ENABLED, 16, y, function(self)
         db.enabled = self:GetChecked() and true or false
-        NoteDeferred()
-        Evaluate()
-    end)
-    config.instCB = Cfg.MakeCheck(p, L.INSTANCE_ONLY, 160, y, function(self)
-        db.instanceOnly = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
     end)
@@ -4410,7 +4472,7 @@ local function BuildConfig()
         NoteDeferred()
         Evaluate()
     end)
-    y = y - 30
+    y = y - 32
 
     -- Stil von Warnanzeige und Rechtsklick-Menü; "Nur Icons" nur bei Compact
     config.styleBtn = Cfg.MakeButton(p, "", 160)
@@ -4444,6 +4506,17 @@ local function BuildConfig()
     end)
     y = y - 30
 
+    config.soundBtn = Cfg.MakeButton(p, "", 160)
+    config.soundBtn:SetPoint("TOPLEFT", 18, y)
+    config.soundBtn:SetScript("OnClick", function()
+        local idx = 1
+        for i, k in ipairs(SOUND_ORDER) do if k == db.sound then idx = i end end
+        db.sound = SOUND_ORDER[idx % #SOUND_ORDER + 1]
+        PlayAlertSound()
+        RefreshConfig()
+    end)
+    y = y - 32
+
     -- Tastenbelegung "Oberste Warnung auslösen": aktuelle Taste + wo sie belegt wird
     config.keyText = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     config.keyText:SetPoint("TOPLEFT", 20, y)
@@ -4453,101 +4526,10 @@ local function BuildConfig()
     keyWhere:SetPoint("TOPLEFT", 20, y)
     keyWhere:SetJustifyH("LEFT")
     keyWhere:SetText(L.KEY_WHERE)
-    y = y - 24
-
-    -- Experimentelle Funktionen: klar abgesetzter Abschnitt; Detail-Einstellungen direkt
-    -- unter dem jeweiligen Schalter, ausgegraut solange dieser aus ist
-    local sep = p:CreateTexture(nil, "ARTWORK")
-    sep:SetColorTexture(1, 0.5, 0, 0.6)
-    sep:SetHeight(1)
-    sep:SetPoint("TOPLEFT", 16, y)
-    sep:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y)
-    y = y - 8
-    local expHead = Cfg.MakeHeader(p, L.EXP_SECTION, y)
-    config.expHead = expHead
-    expHead:SetTextColor(1, 0.5, 0)
-    y = y - 16
-    local expNote = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    expNote:SetPoint("TOPLEFT", 16, y)
-    expNote:SetText(L.EXP_NOTE)
-    y = y - 20
-
-    -- Gruppen-Buffs
-    config.expGroupCB = Cfg.MakeCheck(p, L.EXP_GROUP, 16, y, function(self)
-        db.expGroup = self:GetChecked() and true or false
-        if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
     y = y - 26
-    -- Detail-Einstellungen nur für Klassen mit Gruppen-Buffs (Priester, Magier, Druide, Paladin)
-    local hasGroup, hasBlessings = false, false
-    for _, e in ipairs(classEntries) do
-        if e.groupIds or e.groupByVariant then hasGroup = true end
-        if e.groupByVariant then hasBlessings = true end
-    end
-    if hasGroup then
-        config.groupCB = Cfg.MakeCheck(p, L.GROUP_CHECK, 36, y, function(self)
-            db.groupCheck = self:GetChecked() and true or false
-            if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
-            NoteDeferred()
-            Evaluate()
-        end)
-        config.groupModeBtn = Cfg.MakeButton(p, "", 200)
-        config.groupModeBtn:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y)
-        config.groupModeBtn:SetScript("OnClick", function()
-            local idx = 1
-            for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
-            db.groupMode = GROUP_MODE_ORDER[idx % #GROUP_MODE_ORDER + 1]
-            Group.MarkGroupDirty()
-            NoteDeferred()
-            Evaluate()
-            RefreshConfig()
-        end)
-        y = y - 26
-    end
-    -- Segen des Paladins in den Gruppenbuffs (experimentell, nur Paladine; aus mit Pally Power)
-    if hasBlessings then
-        config.blessCB = Cfg.MakeCheck(p, L.EXP_BLESSINGS, 36, y, function(self)
-            db.expBlessings = self:GetChecked() and true or false
-            wipe(Group.groupState)
-            Group.MarkGroupDirty()
-            NoteDeferred()
-            Evaluate()
-            RefreshConfig()
-        end)
-        config.blessNote = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        config.blessNote:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y - 6)
-        config.blessNote:SetJustifyH("RIGHT")
-        y = y - 26
-    end
 
-    -- Reagenzien-Warnung
-    y = y - 4
-    config.expReagCB = Cfg.MakeCheck(p, L.EXP_REAGENTS, 16, y, function(self)
-        db.expReagents = self:GetChecked() and true or false
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 26
-    -- Schwellenwerte: nur die Reagenzien der eigenen Klasse
-    if #reagentEntries > 0 then
-        config.reagentHint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        config.reagentHint:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y - 2)
-        config.reagentHint:SetJustifyH("RIGHT")
-        config.reagentHint:SetText(L.REAGENT_HINT)
-        y = y - 18
-        for _, e in ipairs(reagentEntries) do
-            Cfg.MakeReagentRow(p, e, y)
-            y = y - 26
-        end
-    end
-
-    -- Warnung vor Ablauf + Detail-Regler (Schwelle, Transparenz)
-    y = y - 4
-    config.expExpiryCB = Cfg.MakeCheck(p, L.EXP_EXPIRY, 16, y, function(self)
+    -- Warnung vor Ablauf (beta) + Detail-Regler (Schwelle, Transparenz)
+    config.expExpiryCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_EXPIRY), 16, y, function(self)
         db.expExpiry = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4567,11 +4549,72 @@ local function BuildConfig()
         Evaluate()
         RefreshConfig()
     end)
-    y = y - 28
+    y = y - 24
+    Cfg.FinishTab(p, Cfg.AddFooter(p, y))
+end
+
+-- Tab "Klassenbuffs": Liste (mit Talent-Hinweisen) + Variantenmenü (beta). Alles unter der Liste
+-- liegt in config.below, das Cfg.LayoutClassRows unter die sichtbaren Klassenzeilen rückt.
+function Cfg.BuildClassTab()
+    local p = Cfg.NewTab("class", "TAB_CLASS")
+    Cfg.classContent = p
+    local y = -8
+    Cfg.MakeHeader(p, L.CLASS_SECTION:format(UnitClass("player") or "?"), y)
+    y = y - 22
+    if #classEntries == 0 then
+        local fs = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOPLEFT", 20, y)
+        fs:SetText(L.NO_CLASS)
+        y = y - 20
+    end
+    Cfg.classTop = y
+    for _, e in ipairs(classEntries) do
+        Cfg.MakeEntryRow(p, e, y).classRow = true
+    end
+    local b = CreateFrame("Frame", nil, p)
+    config.below = b
+    local by = -8
+    -- Variantenmenü per Rechtsklick (Aura, Siegel, Aspekt, Rüstung, Schild, Waffenverzauberung)
+    config.expVariantCB = Cfg.MakeCheck(b, Cfg.Beta(L.EXP_VARIANTMENU), 16, by, function(self)
+        db.expVariantMenu = self:GetChecked() and true or false
+        if menu:IsShown() then menu:Hide() end   -- nächstes Öffnen mit/ohne Varianten
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    by = by - 24
+    Cfg.belowHeight = -Cfg.AddFooter(b, by) + 10
+end
+
+-- Tab "Allgemeine Buffs": Liste + "Nur in Instanzen", Waffen-Items, Verbrauchsgüter,
+-- Reagenzien und Verfolgung (alle beta) mit ihren Detail-Einstellungen
+function Cfg.BuildBuffsTab()
+    local p = Cfg.NewTab("buffs", "GENERAL")
+    local y = -8
+    for _, e in ipairs(GENERAL_BUFFS) do
+        Cfg.MakeEntryRow(p, e, y)
+        y = y - 26
+    end
+    y = y - 4
+    config.instCB = Cfg.MakeCheck(p, L.INSTANCE_ONLY, 16, y, function(self)
+        db.instanceOnly = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+    end)
+    y = y - 32
+
+    -- Steine, Öle, Gifte per Klick
+    config.expWeaponCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_WEAPONITEMS), 16, y, function(self)
+        db.expWeaponItems = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
 
     -- Klassen-Verbrauchsgüter (Einträge stehen in der Klassenliste); Schwelle für gezaubertes
     -- Essen/Wasser nur bei Klassen mit solchen Einträgen (Magier)
-    config.expConsCB = Cfg.MakeCheck(p, L.EXP_CONSUMABLES, 16, y, function(self)
+    config.expConsCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_CONSUMABLES), 16, y, function(self)
         db.expConsumables = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4592,25 +4635,30 @@ local function BuildConfig()
         end)
         y = y - 28
     end
-    -- Steine, Öle, Gifte (Funktion folgt in einer späteren Version)
-    config.expWeaponCB = Cfg.MakeCheck(p, L.EXP_WEAPONITEMS, 16, y, function(self)
-        db.expWeaponItems = self:GetChecked() and true or false
+
+    -- Reagenzien-Warnung; Schwellenwerte nur für die Reagenzien der eigenen Klasse
+    config.expReagCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_REAGENTS), 16, y, function(self)
+        db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
     y = y - 26
-    -- Variantenmenü per Rechtsklick (Aura, Siegel, Aspekt, Rüstung, Schild, Waffenverzauberung)
-    config.expVariantCB = Cfg.MakeCheck(p, L.EXP_VARIANTMENU, 16, y, function(self)
-        db.expVariantMenu = self:GetChecked() and true or false
-        if menu:IsShown() then menu:Hide() end   -- nächstes Öffnen mit/ohne Varianten
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 26
+    if #reagentEntries > 0 then
+        config.reagentHint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        config.reagentHint:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y - 2)
+        config.reagentHint:SetJustifyH("RIGHT")
+        config.reagentHint:SetText(L.REAGENT_HINT)
+        y = y - 18
+        for _, e in ipairs(reagentEntries) do
+            Cfg.MakeReagentRow(p, e, y)
+            y = y - 26
+        end
+    end
+
     -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine")
-    config.expTrackCB = Cfg.MakeCheck(p, L.EXP_TRACKING, 16, y, function(self)
+    y = y - 4
+    config.expTrackCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_TRACKING), 16, y, function(self)
         db.expTracking = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -4626,41 +4674,107 @@ local function BuildConfig()
         Evaluate()
         RefreshConfig()
     end)
-    y = y - 28
-    y = y - 10
+    y = y - 26
+    Cfg.FinishTab(p, Cfg.AddFooter(p, y))
+end
 
-    config.soundBtn = Cfg.MakeButton(p, "", 100)
-    config.soundBtn:SetPoint("TOPLEFT", 18, y)
-    config.soundBtn:SetScript("OnClick", function()
-        local idx = 1
-        for i, k in ipairs(SOUND_ORDER) do if k == db.sound then idx = i end end
-        db.sound = SOUND_ORDER[idx % #SOUND_ORDER + 1]
-        PlayAlertSound()
+-- Tab "Gruppe" (nur Klassen mit Gruppen-Buffs: Priester, Magier, Druide, Paladin)
+function Cfg.BuildGroupTab(hasBlessings)
+    local p = Cfg.NewTab("group", "TAB_GROUP")
+    local y = -8
+    config.expGroupCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_GROUP), 16, y, function(self)
+        db.expGroup = self:GetChecked() and true or false
+        if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
+        NoteDeferred()
+        Evaluate()
         RefreshConfig()
     end)
-
-    config.moveBtn = Cfg.MakeButton(p, L.MOVE, 90)
-    config.moveBtn:SetPoint("LEFT", config.soundBtn, "RIGHT", 4, 0)
-    config.moveBtn:SetScript("OnClick", function()
-        if InCombatLockdown() then Print(L.COMBAT); return end
-        unlocked = not unlocked
-        if not unlocked then wipe(shownKeys); Display.ShowRows({}) end
+    y = y - 26
+    config.groupCB = Cfg.MakeCheck(p, L.GROUP_CHECK, 36, y, function(self)
+        db.groupCheck = self:GetChecked() and true or false
+        if not GroupFeatureOn() then wipe(Group.groupState) else Group.MarkGroupDirty() end
+        NoteDeferred()
         Evaluate()
     end)
-
-    local testBtn = Cfg.MakeButton(p, L.TEST, 60)
-    testBtn:SetPoint("LEFT", config.moveBtn, "RIGHT", 4, 0)
-    testBtn:SetScript("OnClick", StartTest)
-
-    local unmuteBtn = Cfg.MakeButton(p, L.UNMUTE, 110)
-    unmuteBtn:SetPoint("LEFT", testBtn, "RIGHT", 4, 0)
-    unmuteBtn:SetScript("OnClick", function()
-        wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate()
+    y = y - 30
+    config.groupModeBtn = Cfg.MakeButton(p, "", 220)
+    config.groupModeBtn:SetPoint("TOPLEFT", 40, y)
+    config.groupModeBtn:SetScript("OnClick", function()
+        local idx = 1
+        for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
+        db.groupMode = GROUP_MODE_ORDER[idx % #GROUP_MODE_ORDER + 1]
+        Group.MarkGroupDirty()
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
     end)
+    y = y - 30
+    -- Segen des Paladins in den Gruppenbuffs (nur Paladine; aus, solange Pally Power geladen ist)
+    if hasBlessings then
+        config.blessCB = Cfg.MakeCheck(p, Cfg.Beta(L.EXP_BLESSINGS), 36, y, function(self)
+            db.expBlessings = self:GetChecked() and true or false
+            wipe(Group.groupState)
+            Group.MarkGroupDirty()
+            NoteDeferred()
+            Evaluate()
+            RefreshConfig()
+        end)
+        y = y - 22
+        config.blessNote = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        config.blessNote:SetPoint("TOPLEFT", 64, y)
+        config.blessNote:SetJustifyH("LEFT")
+        y = y - 16
+    end
+    Cfg.FinishTab(p, Cfg.AddFooter(p, y))
+end
 
-    Cfg.belowHeight = -y + 44
+local function BuildConfig()
+    if Cfg.configCanvas then
+        config = CreateFrame("Frame", "BuffReminderConfig", Cfg.configCanvas)
+        config:SetPoint("TOPLEFT", 0, -4)
+        config:SetPoint("BOTTOMRIGHT", 0, 4)
+    else
+        -- Fallback ohne Settings-API: eigenständiges Fenster
+        config = CreateFrame("Frame", "BuffReminderConfig", UIParent, "BackdropTemplate")
+        config:SetSize(Cfg.WIDTH + 40, 560)
+        config:SetFrameStrata("DIALOG")
+        config:SetPoint("CENTER")
+        config:SetClampedToScreen(true)
+        config:SetMovable(true)
+        config:EnableMouse(true)
+        config:RegisterForDrag("LeftButton")
+        config:SetScript("OnDragStart", config.StartMoving)
+        config:SetScript("OnDragStop", config.StopMovingOrSizing)
+        config:SetBackdrop({
+            bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 },
+        })
+        tinsert(UISpecialFrames, "BuffReminderConfig")
+
+        local close = CreateFrame("Button", nil, config, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", -6, -6)
+    end
+
+    local title = config:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText(L.TITLE)
+
+    Cfg.BuildGeneralTab()
+    Cfg.BuildClassTab()
+    Cfg.BuildBuffsTab()
+    -- Tab "Gruppe" nur für Klassen mit Gruppen-Buffs
+    local hasGroup, hasBlessings = false, false
+    for _, e in ipairs(classEntries) do
+        if e.groupIds or e.groupByVariant then hasGroup = true end
+        if e.groupByVariant then hasBlessings = true end
+    end
+    if hasGroup then Cfg.BuildGroupTab(hasBlessings) end
+
     Cfg.LayoutClassRows()
     config:SetScript("OnShow", RefreshConfig)
+    Cfg.SelectTab(db.cfgTab)
     if not Cfg.configCanvas then config:Hide() end
 end
 
