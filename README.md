@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items, one-click weapon stones, oils and poisons, and a right-click menu to pick a buff variant. Missing buffs show up as a pulsing, movable list on screen (growing downwards or upwards) together with a chat message and an optional sound; a keybinding uses the top reminder.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items, one-click weapon stones, oils and poisons, a right-click menu to pick a buff variant, Paladin blessings in group buffs and a tracking reminder (herbs, minerals, fish). Missing buffs show up as a pulsing, movable list on screen (growing downwards or upwards) together with a chat message and an optional sound; a keybinding uses the top reminder.
 
 Available on CurseForge and Wago.
 
@@ -36,7 +36,7 @@ Built for **WoW Forever** (Interface `16001`).
   - Death Knight: Horn of Winter
   - Situational buffs (e.g. Thorns, Shadowform, Righteous Fury, shouts) are off by default.
 - **Weapon imbues and poisons** – Shaman main-hand/off-hand weapon imbues and Rogue main-hand/off-hand poisons. Off-hand checks only apply when an actual weapon is equipped there.
-- **General buffs** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag) (all off by default), plus **Find Minerals** (on by default when learned; applies everywhere, not restricted to instances, and left-click activates the minimap tracking).
+- **General buffs (optional, off by default)** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag). Gathering tracking (Find Herbs, Find Minerals, Find Fish) is an experimental feature, see [Tracking reminder](#experimental-features-opt-in).
 - **Use food and flasks by click** – for the Well Fed and Flask reminders:
   - **Left-click** uses the best matching item from your bags. The hint line shows which one ("Left-click: Smoked Desert Dumplings · Right-click: choose"), or "Not in bags · Right-click: mute" if you have none.
   - **Right-click** opens the reminder menu (see [Right-click menu](#right-click-menu-beta)) with all matching items in your bags.
@@ -45,7 +45,7 @@ Built for **WoW Forever** (Interface `16001`).
   - **Flasks** are any flask in your bags (detected by item type, with a fallback list of the Classic flasks). After favorites, the flask you used last (remembered per character) comes first, then higher item level. The addon also learns each flask's effect so that new flasks count as an active Flask buff.
   - Uses the "Left-click casts buff" option: when it is off, left-click does nothing and right-click only mutes.
 - **Eating countdown** – while you are eating (started from the reminder or directly from your bags; detected by the food's eating aura by spell ID or name, or by the generic "Food" or "Drink" aura) and are not yet Well Fed, the Well Fed reminder shows "Eating … 7 s", counting down the 10 seconds until the buff appears, then "Almost well fed …", with the hint "Stay seated". This does not trigger a chat message or sound. If you stand up before getting Well Fed, the normal reminder comes back (again without a new chat message or sound).
-- **Instance mode** – general buffs (except Find Minerals) can be limited to dungeons and raids ("General buffs only in instances", on by default).
+- **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
 - **Right-click to mute** – right-click a reminder and pick 5, 15 or 60 minutes or the rest of the session in the menu. Mutes can be cleared from the settings or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
   - Directly castable: Priest (Fortitude, Inner Fire, Divine Spirit, Shadow Protection, Vampiric Embrace, Shadowform), Mage (Arcane Intellect), Druid (Mark of the Wild, Thorns), Hunter (Trueshot Aura), Death Knight (Horn of Winter).
@@ -125,6 +125,11 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - A variant picked in the menu becomes the "last used" variant, so left-click on the reminder casts it from then on. Left-click is unchanged otherwise.
   - The mute buttons stay in the same menu. Needs "Left-click casts buff". Variant lines are secure buttons: they are only shown out of combat (in combat the menu shows the mute buttons only, as for items).
   - With the feature off, right-click works exactly as before.
+- **Tracking reminder (beta)** – warns when your gathering tracking on the minimap is off: Find Herbs, Find Minerals or Find Fish.
+  - One wanted tracking per character, chosen with the "Track: …" button below the "Tracking reminder" checkbox (greyed out while the checkbox is off). The button cycles through the trackings you have learned plus "none". Default (automatic): the first learned of Find Minerals, then Find Herbs; Find Fish only when you pick it.
+  - The line appears when the wanted tracking is learned but not active, e.g. "Find Minerals is not active" (Compact: "off"). Names and icons come from the game client. Detection: the minimap tracking list, matched by spell ID, then by the client's spell name or icon.
+  - Left-click turns the tracking on (out of combat only; in combat you get "Not possible in combat."). Right-click opens the usual menu to mute it. The "Use top warning" key works the same way.
+  - Applies everywhere ("General buffs only in instances" does not affect it), but not while dead, on a flight path or in a vehicle. No expiry warning.
 - **Low reagent warning** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
   - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
   - Mage: Arcane Powder (Arcane Brilliance), Rune of Teleportation, Rune of Portals, Light Feather (Slow Fall)
@@ -134,12 +139,14 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - Rogue: Flash Powder (Vanish), Blinding Powder (Blind)
   - Below the "Low reagent warning" checkbox, the settings list your class's reagents, each with a threshold field (0–50, 0 = no warning) and the current count in your bags. Defaults: Ankh and seeds 1, runes and Blinding Powder 5, everything else 10. Thresholds are saved per character.
   - Reagent warnings appear in the normal reminder list with the item's icon and name in your client language. Left-click does nothing; right-click mutes them like buff reminders.
-- **Group buffs** – in a party or raid, the addon also checks your group members (including yourself) for the buffs you can give: Power Word: Fortitude, Shadow Protection, Divine Spirit, Arcane Intellect, Mark of the Wild and Paladin Blessings (Might, Wisdom, Kings, Sanctuary). For Priest, Mage and Druid, a player counts as buffed with either the single-target or the group version from any caster. For Paladin Blessings, the addon checks specifically for your own blessing and, if the target already has a blessing from another Paladin, automatically suggests another learned blessing suited to that player's class (skipping players who already have every suitable blessing you know).
+- **Group buffs** – in a party or raid, the addon also checks your group members (including yourself) for the buffs you can give: Power Word: Fortitude, Shadow Protection, Divine Spirit, Arcane Intellect and Mark of the Wild, and (beta, own checkbox) Paladin blessings. A player counts as buffed with either the single-target or the group version (e.g. Prayer of Fortitude) from any caster.
+  - **Paladin blessings (beta)** – Might, Wisdom, Kings and Sanctuary. Only your own blessing counts. If a player already has a blessing from another Paladin (or a stronger Battle Shout / Mana Spring), the line suggests another blessing you know that suits the player's class (Kings, Might, Sanctuary for Warrior, Rogue and Death Knight; Kings, Wisdom, Sanctuary for Mage, Priest and Warlock; all four for the rest); players who already have every suitable blessing are skipped. A blessing the game rejects with "A more powerful spell is already active" is not suggested again for that player for 2 minutes or until their buffs change. Left-click casts the Greater Blessing (covers the player's class) or the single blessing; the line shows the suggested blessing's name and icon.
+  - Paladin blessings are experimental: they need the "Paladin blessings in group buffs" checkbox (below "Group buffs", greyed out while "Group buffs" is off) and are **completely off while Pally Power is loaded** (any addon whose folder name starts with "PallyPower"; checked once after login). The settings then say "Off while Pally Power is loaded". Your own blessing reminder (blessing on yourself) is not affected, and the variant menu stays off for blessings.
   - Only buffs whose single-target version you have learned are checked. Arcane Intellect and Divine Spirit are only checked on mana classes (Druid, Hunter, Mage, Paladin, Priest, Shaman, Warlock).
-  - Players who are dead, offline, not visible or out of range are skipped. Only checked out of combat.
+  - Players who are dead, offline, not visible or out of range are skipped. If the client hides the range (secret value), only visibility counts. Players sharing a short name (e.g. from different realms) are told apart and shown as Name-Realm. Only checked out of combat.
   - One line per buff replaces your own reminder for it, e.g. "Fortitude missing: 3". Below it are the names of the players without the buff (up to 5, then "+N"), then the click hints.
   - **Left-click** casts the group version on the first player without the buff, which covers that player's party or raid subgroup (or class for Greater Blessings, using your last-used blessing variant). If you have not learned the group version or are out of its reagent (see reagent warnings), the single-target version is cast instead. **Ctrl+Left-click** casts the single-target version on the next player without the buff. After each cast or buff change the target is chosen again. Hint: "Left-click: group · Ctrl+Left-click: single · Right-click: mute".
-  - Detail settings below the "Group buffs" checkbox (Priest, Mage, Druid and Paladin only): "Check group buffs" (on by default; both checkboxes must be on) and "Check in: Always / Dungeons & raids only / Raids only" (default Always). Each buff's own on/off checkbox still applies.
+  - Detail settings below the "Group buffs" checkbox (Priest, Mage, Druid and Paladin only): "Check group buffs" (on by default; both checkboxes must be on) and "Check in: Always / Dungeons & raids only / Raids only" (default Always); for Paladins also "Paladin blessings in group buffs". Each buff's own on/off checkbox still applies.
 
 ## Slash commands
 
@@ -178,6 +185,10 @@ On GitHub, the **Lint** workflow (`.github/workflows/lint.yml`) runs luacheck on
 **Development build notice:** when the addon runs straight from the repository (the `@project-version@` placeholder in the TOC is not replaced), it prints "Development build loaded" to chat on login.
 
 **Testing in game:** WoW only picks up new files (e.g. textures such as `Textures/Icon.tga`) after a full restart of the game client – `/reload` is not enough. Changes to existing Lua files are picked up by `/reload`.
+
+## Credits
+
+Thanks to zwrss for Paladin blessings in group buffs, the tracking reminder and group fixes (secret UnitInRange, players sharing a short name).
 
 ## Releasing
 
