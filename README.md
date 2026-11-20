@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items, one-click weapon stones, oils and poisons, a right-click menu to pick a buff variant, Paladin blessings in group buffs and a tracking reminder (herbs, minerals, fish). Missing buffs show up as a pulsing, movable list on screen (growing downwards or upwards) together with a chat message and an optional sound; a keybinding uses the top reminder.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) other buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items, one-click weapon stones, oils and poisons, a right-click menu to pick a buff variant, Paladin blessings in group buffs and a tracking reminder (herbs, minerals, fish). Missing buffs show up as a pulsing, movable list on screen (growing downwards or upwards) together with a chat message and an optional sound; a keybinding uses the top reminder.
 
 Available on CurseForge and Wago.
 
@@ -37,7 +37,7 @@ Built for **WoW Forever** (Interface `16001`).
   - Situational buffs (e.g. Thorns, Shadowform, Righteous Fury, shouts) are off by default.
   - Reminders that accept several variants are labeled with a base word and the variants the game client knows, e.g. "Armor (Frost/Ice/Mage)". Variants that do not exist in WoW Forever are left out of the label.
 - **Weapon imbues and poisons** – Shaman main-hand/off-hand weapon imbues and Rogue main-hand/off-hand poisons. Off-hand checks only apply when an actual weapon is equipped there.
-- **General buffs (optional, off by default)** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag). Gathering tracking (Find Herbs, Find Minerals, Find Fish) is an experimental feature, see [Tracking reminder](#experimental-features-opt-in).
+- **Other buffs (optional, off by default)** – Well Fed (including WoW Forever's "Well Fed XP Boost"), Flask, and Well-Rested (sleeping bag). Gathering tracking (Find Herbs, Find Minerals, Find Fish) is an experimental feature, see [Tracking reminder](#experimental-features-opt-in).
 - **Use food and flasks by click** – for the Well Fed and Flask reminders:
   - **Left-click** uses the best matching item from your bags. The hint line shows which one ("Left-click: Smoked Desert Dumplings · Right-click: choose"), or "Not in bags · Right-click: mute" if you have none.
   - **Right-click** opens the reminder menu (see [Right-click menu](#right-click-menu-beta)) with all matching items in your bags.
@@ -46,7 +46,7 @@ Built for **WoW Forever** (Interface `16001`).
   - **Flasks** are any flask in your bags (detected by item type, with a fallback list of the Classic flasks). After favorites, the flask you used last (remembered per character) comes first, then higher item level. The addon also learns each flask's effect so that new flasks count as an active Flask buff.
   - Uses the "Left-click casts buff" option: when it is off, left-click does nothing and right-click only mutes.
 - **Eating countdown** – while you are eating (started from the reminder or directly from your bags; detected by the food's eating aura by spell ID or name, or by the generic "Food" or "Drink" aura) and are not yet Well Fed, the Well Fed reminder shows "Eating … 7 s", counting down the 10 seconds until the buff appears, then "Almost well fed …", with the hint "Stay seated". This does not trigger a chat message or sound. If you stand up before getting Well Fed, the normal reminder comes back (again without a new chat message or sound).
-- **Instance mode** – general buffs can be limited to dungeons and raids ("General buffs only in instances", on by default).
+- **Instance mode** – other buffs can be limited to dungeons and raids ("Other buffs only in instances", on by default).
 - **Right-click to mute** – right-click a reminder and pick 5, 15 or 60 minutes or the rest of the session in the menu. Mutes can be cleared from the settings or with `/br unmute`.
 - **Left-click to cast** – left-click a reminder to cast the missing buff on yourself (highest rank you have learned; single-target version, never the group version such as Prayer of Fortitude or Gift of the Wild).
   - Directly castable: Priest (Fortitude, Inner Fire, Divine Spirit, Shadow Protection, Vampiric Embrace, Shadowform), Mage (Arcane Intellect), Druid (Mark of the Wild, Thorns), Hunter (Trueshot Aura), Death Knight (Horn of Winter).
@@ -57,7 +57,7 @@ Built for **WoW Forever** (Interface `16001`).
   In the Compact style these hints are shown in the tooltip only.
 - **Combat behaviour** – reminders are secure buttons, so the list (including click targets of group buff lines) cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
-- **Movable display** – click "Move" in the settings (General tab), "Move display" in the right-click menu of any reminder, or type `/br move`; drag the reminder to the desired position and click "Lock" or type `/br lock`. While moving, left-click does not cast. Not possible in combat.
+- **Movable display** – click "Move" in the settings (Display tab), "Move display" in the right-click menu of any reminder, or type `/br move`; drag the reminder to the desired position and click "Lock" or type `/br lock`. While moving, left-click does not cast. Not possible in combat.
 - **Growth direction (beta)** – "New warnings appear: below / above" in the settings (default: below). With "above", the first reminder sits at the saved position and further reminders stack upwards, in every style; Move mode and `/br test` behave the same. Switching does not move the first reminder. With Compact "Icons only", icons are placed left to right, 8 per row; further rows are added below or above. The right-click menu always stays on screen and opens upwards if there is not enough room below the mouse pointer. In combat the new order is applied when combat ends.
 - **Styles (beta)** – choose the look of the reminders and the right-click menu in the settings ("Style"). Switching applies immediately (in combat: when combat ends).
   - **Pardona** (default) – dark purple gradient, gold border with rounded corners, colored status stripe on the left (red = missing, orange = low reagent, green = eating), icon with gold frame, golden title, grey-purple hint line. Its colors, border and fonts come from the shared library LibPardona-1.0 (shared with all Pardona addons); if the library does not provide them, the addon uses its own built-in values.
@@ -70,14 +70,14 @@ Built for **WoW Forever** (Interface `16001`).
 
 ## Settings
 
-The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or `/br`) is split into tabs. `/br` opens the tab you used last.
+The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or `/br`) is split into tabs that sit on a dark inset panel; each tab scrolls on its own. `/br` opens the tab you used last.
 
-- **General** – buttons Move/Lock, Test and Unmute all; Addon enabled; Left-click casts buff; Style and Icons only; growth direction; sound; the keybinding (current key and where to set it); Expiry warning (beta) with its threshold and opacity sliders.
-- **Class buffs** – your class's buffs with on/off checkboxes (spells not learned yet are greyed out with the level or talent they need); Variant menu on right-click (beta).
-- **General buffs** – Well Fed, Flask, Well-Rested and the main-hand/off-hand weapon enhancements, plus "General buffs only in instances"; Stones, oils, poisons by click (beta); Class consumables (beta) with the food/water threshold; Low reagent warning (beta) with the reagent list and thresholds; Tracking reminder (beta) with the "Track: …" button.
+- **Display** – buttons Move/Lock, Test and Unmute all; Addon enabled; Left-click casts buff; Style and Icons only; growth direction; sound; the keybinding (current key and where to set it); Expiry warning (beta) with its threshold and opacity sliders.
+- **Class Buffs** – your class's buffs with on/off checkboxes (spells not learned yet are greyed out with the level or talent they need); Variant menu on right-click (beta).
+- **Other Buffs** – Well Fed, Flask, Well-Rested and the main-hand/off-hand weapon enhancements, plus "Other buffs only in instances"; Stones, oils, poisons by click (beta); Class consumables (beta) with the food/water threshold; Low reagent warning (beta) with the reagent list and thresholds; Tracking reminder (beta) with the "Track: …" button.
 - **Group** (only for classes with group buffs: Priest, Mage, Druid, Paladin) – Group buffs (beta), Check group buffs, Check in: …; for Paladins also Paladin blessings in group buffs (beta) with the Pally Power note.
 
-Experimental switches carry a "(beta)" suffix in their tab; their detail settings sit directly below and are greyed out while the switch is off. A footer in each tab with such switches explains: "(beta) = experimental: on in beta builds, off by default in releases".
+Experimental switches carry an orange "(beta)" tag in their tab (muted while a parent switch is off); their detail settings sit directly below and are greyed out while the switch is off. A footer in each tab with such switches explains: "(beta) = experimental: on in beta builds, off by default in releases".
 
 ## Right-click menu (beta)
 
@@ -96,7 +96,7 @@ Right-clicking a reminder opens one window in the selected style:
 Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warning** you can bind a key. All Pardona addons share the "Pardona's Addons" section. Pressing the key does the same as a left-click on the reminder at the very top of the screen: cast the buff, eat, drink a flask, imbue the weapon, or the group action of a group buff line. With "New warnings appear: above" that is the last reminder added (the highest one on screen); with Compact "Icons only" it is the leftmost icon of the top row. If no reminder is shown, the key does nothing.
 
 - The key follows the list out of combat. In combat it keeps the action it had when combat started and is updated when combat ends.
-- The settings (General tab) show the current key (or "not bound") and where to set it.
+- The settings (Display tab) show the current key (or "not bound") and where to set it.
 - Macro alternative: `/click PardonasBuffReminderKeyButton`. If your client casts on key down ("Cast action keybinds on key down" on) and this macro does nothing, use `/click PardonasBuffReminderKeyButton LeftButton 1` instead.
 
 ## Pardona's Addons (beta)
@@ -110,24 +110,24 @@ All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one 
 
 ## Experimental features (opt-in)
 
-These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings. Each switch sits in the tab it belongs to (see [Settings](#settings)) and is marked "(beta)": Expiry warning on the General tab, Variant menu on the Class buffs tab, Stones/oils/poisons, Class consumables, Low reagent warning and Tracking reminder on the General buffs tab, Group buffs and Paladin blessings on the Group tab. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
+These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings. Each switch sits in the tab it belongs to (see [Settings](#settings)) and is marked "(beta)": Expiry warning on the Display tab, Variant menu on the Class Buffs tab, Stones/oils/poisons, Class consumables, Low reagent warning and Tracking reminder on the Other Buffs tab, Group buffs and Paladin blessings on the Group tab. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
 
 While a feature is off, it does nothing at all: no group lines, no group scans, no reagent lines and no reagent count checks; your own reminders work as usual. The detail settings below each checkbox are greyed out while it is off. Changes take effect immediately (in combat: when combat ends).
 
 - **Expiry warning (beta)** – warns shortly before one of your active buffs runs out, so you can refresh it in time. Covers your enabled class buffs, Well Fed, flasks and temporary weapon imbues/poisons (main and off hand); not Well-Rested, group buff lines or reagents.
   - A buff counts as expiring when its remaining time is at or below the threshold (default 10 % of its full duration). If the client does not reveal a buff's duration (secret values), has no duration or reports a duration of 0, that buff gets no expiry warning. Weapon imbues only report their remaining time, so the full duration is the highest remaining time seen since the imbue appeared (reset when it disappears or is reapplied).
   - Expiring buffs appear as their own line in the reminder list, after the missing buffs: same style, but semi-transparent (default 50 %), with an amber status stripe and a live countdown, e.g. "Arcane Intellect expires · 2:31". No sound, no chat message, no pulsing.
-  - Left-click works like on the missing-buff line (cast the buff, eat, drink a flask, imbue the weapon); right-click opens the same menu and mutes the same reminder. In combat the line is only updated, never changed; a line that would appear in combat shows up when combat ends. "General buffs only in instances" also applies to food and flasks here.
+  - Left-click works like on the missing-buff line (cast the buff, eat, drink a flask, imbue the weapon); right-click opens the same menu and mutes the same reminder. In combat the line is only updated, never changed; a line that would appear in combat shows up when combat ends. "Other buffs only in instances" also applies to food and flasks here.
   - Detail settings below the "Expiry warning" checkbox: "Threshold" slider (5–50 %, default 10 %) and "Opacity" slider (20–100 %, default 50 %).
 - **Class consumables (beta)** – reminds mages and warlocks to conjure their consumables. Each one is its own entry in the class list of the settings (own checkbox, on by default) and only appears there once you have learned the matching spell.
   - Mage: **conjured water** and **conjured food** – warns when the total of all ranks in your bags drops below the threshold, e.g. "Conjured Crystal Water: 5" (at 0: "… missing"). **Mana gem** – warns when you carry no mana gem of any rank.
   - Warlock: **Healthstone** – warns when you carry no healthstone of any rank (including the improved talent versions). **Soulstone** – warns when you carry no soulstone.
   - Item names come from the game client in your language; the line shows the item of the highest rank you know. Only your bags are counted (not the bank).
-  - Left-click casts the highest rank you have learned; right-click opens the normal menu to mute the reminder (no item list). These reminders apply everywhere ("General buffs only in instances" does not affect them) and get no expiry warning.
+  - Left-click casts the highest rank you have learned; right-click opens the normal menu to mute the reminder (no item list). These reminders apply everywhere ("Other buffs only in instances" does not affect them) and get no expiry warning.
   - Detail setting below the "Class consumables" checkbox (mages only): "Food/water below" slider (0–60, default 20; 0 turns the food/water warning off).
 - **Weapon enhancements: stones, oils, poisons (beta)** – apply sharpening stones, weightstones, wizard oils, mana oils or rogue poisons with one click.
   - Two new general entries, "Main hand: weapon enhancement" and "Off hand: weapon enhancement" (own checkboxes, on by default). Not available for shamans, who use their own imbues. For rogues they only apply while the matching poison entry (main/off-hand poison) is turned off.
-  - A line appears only if a weapon is equipped in that slot, it has no temporary enhancement and you carry at least one matching item. "General buffs only in instances" applies like for food and flasks.
+  - A line appears only if a weapon is equipped in that slot, it has no temporary enhancement and you carry at least one matching item. "Other buffs only in instances" applies like for food and flasks.
   - Matching items: sharpening stones only for edged weapons (axes, polearms, swords, daggers), weightstones only for blunt weapons (maces, staves); Elemental and Consecrated Sharpening Stone work on both. Wizard and mana oils fit every weapon. Fist weapons and unknown weapon types only get oils. Items above your level are skipped.
   - Left-click applies the best item to the slot: favorites first (the same favorites as for food and flasks, per character), then by class: Warrior, Rogue, Hunter, Death Knight: stones before oils; Mage, Warlock: wizard oil, mana oil, stones; Priest, Druid, Paladin: mana oil, wizard oil, stones. Within a group the highest rank comes first; the undead-only Consecrated Sharpening Stone and Blessed Wizard Oil come last. Right-click opens the item menu (icon, name, count, favorite star, "best choice").
   - Rogue poisons: with this feature on, the existing main-hand/off-hand poison reminders work the same way – left-click applies the best poison (or a favorite) from your bags, right-click opens the poison menu. Order: Instant, Deadly, Wound, Crippling, Mind-numbing, highest rank first. Anesthetic Poison is not included.
@@ -142,7 +142,7 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - One wanted tracking per character, chosen with the "Track: …" button below the "Tracking reminder" checkbox (greyed out while the checkbox is off). The button cycles through the trackings you have learned plus "none". Default (automatic): the first learned of Find Minerals, then Find Herbs; Find Fish only when you pick it.
   - The line appears when the wanted tracking is learned but not active, e.g. "Find Minerals is not active" (Compact: "off"). Names and icons come from the game client. Detection: the minimap tracking list, matched by spell ID, then by the client's spell name or icon.
   - Left-click turns the tracking on (out of combat only; in combat you get "Not possible in combat."). Right-click opens the usual menu to mute it. The "Use top warning" key works the same way.
-  - Applies everywhere ("General buffs only in instances" does not affect it), but not while dead, on a flight path or in a vehicle. No expiry warning.
+  - Applies everywhere ("Other buffs only in instances" does not affect it), but not while dead, on a flight path or in a vehicle. No expiry warning.
 - **Low reagent warning** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
   - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
   - Mage: Arcane Powder (Arcane Brilliance), Rune of Teleportation, Rune of Portals, Light Feather (Slow Fall)
