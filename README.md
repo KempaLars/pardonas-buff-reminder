@@ -155,7 +155,13 @@ The addon's texts are translated on CurseForge: https://legacy.curseforge.com/wo
 
 - **English** is the base language; every text exists in English.
 - **German** is complete.
-- **French, Spanish (Spain and Mexico), Russian, Brazilian Portuguese and Italian** start with a first translation from the next beta on. Texts that are not translated yet appear in English.
+- **Initial translation, corrections welcome** (from the next beta on):
+  - French (frFR)
+  - Spanish (esES; Mexican Spanish, esMX, uses the Spanish texts)
+  - Russian (ruRU)
+  - Brazilian Portuguese (ptBR)
+  - Italian (itIT)
+- Texts that are not translated yet appear in English.
 - Help with translations is welcome – log in on CurseForge and edit the phrases on the localization page.
 
 Spell, item and tracking names as well as standard game texts come from the game client and are always in the client's language.
@@ -205,7 +211,7 @@ When you add or change a text:
 
 1. Edit `Locales/enUS.lua` (new keys get a new line; keep existing keys).
 2. Run `.\tools\export-locale-import.ps1`. It regenerates `tools/locale-import/enUS.txt` and checks the other files in `tools/locale-import` (e.g. `deDE.txt`): keys that are not in enUS are reported as warnings, missing keys are listed.
-3. Import `tools/locale-import/enUS.txt` on the CurseForge localization page (format: Lua additive table). Update `deDE.txt` and import it for German as well.
+3. Import `tools/locale-import/enUS.txt` on the CurseForge localization page (format: Lua additive table). Update `deDE.txt` (and the other language files where possible) and import them for their languages as well.
 
 Visible texts for the Latin-script languages use only characters from Windows-1252.
 
@@ -253,7 +259,8 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 ├── tools/
 │   ├── locale-import/
 │   │   ├── enUS.txt                # English phrases for the CurseForge import (generated from Locales/enUS.lua)
-│   │   └── deDE.txt                # German phrases for the CurseForge import
+│   │   ├── deDE.txt                # German phrases for the CurseForge import
+│   │   └── frFR.txt, esES.txt, …       # Initial translations (frFR, esES, ruRU, ptBR, itIT) for the import
 │   ├── export-locale-import.ps1    # Regenerates enUS.txt and checks the other import files
 │   └── fetch-libs.ps1              # Fetches LibPardona-1.0 into Libs/ for local testing
 ├── .gitignore                      # Also ignores Libs/ (fetched by the packager or tools/fetch-libs.ps1)
