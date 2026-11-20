@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items and one-click weapon stones, oils and poisons. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items, one-click weapon stones, oils and poisons, and a right-click menu to pick a buff variant. Missing buffs show up as a pulsing, movable list on screen (growing downwards or upwards) together with a chat message and an optional sound; a keybinding uses the top reminder.
 
 Available on CurseForge and Wago.
 
@@ -52,17 +52,17 @@ Built for **WoW Forever** (Interface `16001`).
   - **"Any" reminders** (Paladin aura/seal/blessing, Hunter aspect, Mage and Warlock armor, Shaman shield and weapon imbues, Warrior shout): the addon remembers per character which variant you used last – either from a spell you cast or from a matching aura you applied yourself – and left-click casts that variant (Greater Blessings are remembered as the matching single-target blessing). Until a variant has been remembered, left-click does nothing.
   - Not castable: Rogue poisons and Well-Rested. Well Fed and Flask use an item instead (see above).
   - Can be turned off in the settings ("Left-click casts buff", on by default).
-- **Hint line** – in the Pardona and Classic styles, every reminder shows a small second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, "Left-click: <item> · Right-click: choose" for food and flasks, otherwise "Right-click: mute".
+- **Hint line** – in the Pardona and Classic styles, every reminder shows a small second line telling you what a click does: "Left-click: cast · Right-click: mute" when click-to-cast is available, "Left-click: <item> · Right-click: choose" for food and flasks, otherwise "Right-click: mute". With the variant menu (beta) on, reminders with variants show "Left-click: cast · Right-click: choose" (or "Right-click: choose variant / mute" until a variant has been remembered).
   In the Compact style these hints are shown in the tooltip only.
 - **Combat behaviour** – reminders are secure buttons, so the list (including click targets of group buff lines) cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
 - **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock". While moving, left-click does not cast.
-- **Growth direction** – "New warnings appear: below / above" in the settings (default: below). With "above", the first reminder sits at the saved position and further reminders stack upwards, in every style; Move mode and `/br test` behave the same. Switching does not move the first reminder. With Compact "Icons only", icons are placed left to right, 8 per row; further rows are added below or above. The right-click menu always stays on screen and opens upwards if there is not enough room below the mouse pointer. In combat the new order is applied when combat ends.
+- **Growth direction (beta)** – "New warnings appear: below / above" in the settings (default: below). With "above", the first reminder sits at the saved position and further reminders stack upwards, in every style; Move mode and `/br test` behave the same. Switching does not move the first reminder. With Compact "Icons only", icons are placed left to right, 8 per row; further rows are added below or above. The right-click menu always stays on screen and opens upwards if there is not enough room below the mouse pointer. In combat the new order is applied when combat ends.
 - **Styles (beta)** – choose the look of the reminders and the right-click menu in the settings ("Style"). Switching applies immediately (in combat: when combat ends).
   - **Pardona** (default) – dark purple gradient, gold border with rounded corners, colored status stripe on the left (red = missing, orange = low reagent, green = eating), icon with gold frame, golden title, grey-purple hint line.
   - **Classic** – stone/brown background, square gold frame, title in WoW yellow, beige hint line.
   - **Compact** – slim dark bars with a status stripe on the left and "missing" on the right; hints only in the tooltip. The extra option **Icons only** (only available with Compact) shows just the icons side by side; name and hints are in the tooltip.
-- **Keybinding** – one key for the top reminder, see [Keybinding](#keybinding).
+- **Keybinding (beta)** – one key for the top reminder, see [Keybinding](#keybinding-beta).
 - **Pardona's Addons entry point (beta)** – see [below](#pardonas-addons-beta).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – German and English, picked automatically from the game client language.
@@ -73,11 +73,12 @@ Right-clicking a reminder opens one window in the selected style:
 
 - **Header** – the reminder's icon and title with a short line below (e.g. "Use an item or mute", the players missing a group buff, or the reagent count).
 - **Food in your bags / Flasks** (Well Fed and Flask reminders only, with "Left-click casts buff" on) – one line per matching item: item icon, name, an **XP** badge if the food gives an experience bonus (not shown at max level or with experience gain turned off), the food's category (e.g. Spirit), and the count on the right. The line that left-click on the reminder would use is marked "best choice". Click a line to use the item; hovering shows the highlight and the item tooltip. The star on the right of each line marks or unmarks the item as a favorite – it never uses the item. If nothing matching is in your bags, the section says so.
+- **Cast a variant** (variant menu (beta) only: Paladin aura and seal, Hunter aspect, Mage and Warlock armor, Shaman shield and weapon imbues) – one line per learned variant with icon and name; a click casts its highest learned rank and makes it the "last used" variant for left-click. The current one is marked "last used". See [Experimental features](#experimental-features-opt-in).
 - **Mute** – four buttons side by side: 5 min, 15 min, 60 min, Session.
 - **Close (Esc)** – the footer closes the window; Esc closes it as well, and it closes on its own when the mouse has left it for 2 seconds.
-- **In combat** only the header and the mute buttons are shown (the item lines are secure buttons and cannot be created or changed in combat). An open window with items closes when combat starts.
+- **In combat** only the header and the mute buttons are shown (the item and variant lines are secure buttons and cannot be created or changed in combat). An open window with items or variants closes when combat starts.
 
-## Keybinding
+## Keybinding (beta)
 
 Under Options → Keybindings → AddOns → **Pardona's Buff Reminder** you can bind a key to **"Use top warning"**. Pressing it does the same as a left-click on the reminder at the very top of the screen: cast the buff, eat, drink a flask, imbue the weapon, or the group action of a group buff line. With "New warnings appear: above" that is the last reminder added (the highest one on screen); with Compact "Icons only" it is the leftmost icon of the top row. If no reminder is shown, the key does nothing.
 
