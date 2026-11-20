@@ -3331,6 +3331,13 @@ for i, opt in ipairs(Menu.MUTE_OPTIONS) do
     end)
 end
 
+-- "Anzeige verschieben" (volle Breite unter den Stumm-Knöpfen; nicht im Kampf)
+menu.moveBtn = Menu.MenuButton("", function()
+    local demo = menu.entry and menu.entry.demo
+    menu:Hide()
+    if not demo then Cfg.SetMoveMode(true) end
+end)
+
 menu.close = CreateFrame("Button", nil, menu)
 menu.close:SetHighlightTexture(Style.HIGHLIGHT, "ADD")
 menu.close.label = menu.close:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3341,6 +3348,7 @@ menu.close:SetScript("OnClick", function() menu:Hide() end)
 function Menu.SetTexts()
     for i, opt in ipairs(Menu.MUTE_OPTIONS) do menu.muteButtons[i].label:SetText(L[opt[1]]) end
     menu.close.label:SetText(L.CLOSE_ESC)
+    menu.moveBtn.label:SetText(L.MENU_MOVE)
 end
 Menu.SetTexts()
 
@@ -3515,6 +3523,17 @@ end
 
 -- Menü für Eintrag e aufbauen und an menu.x/menu.y (UIParent-Koordinaten) anzeigen.
 -- Im Kampf nur Kopf + Stummschalten; die Secure-Item-Zeilen werden dann nicht angefasst.
+-- Rahmen/Hintergrund/Text einer Menü-Schaltfläche im aktuellen Stil
+function Menu.StyleButton(b, ms)
+    b:SetBackdrop({ edgeFile = Style.WHITE, edgeSize = 1 })
+    Style.SetColor(b, "SetBackdropBorderColor", ms.buttonBorder)
+    b.bg:ClearAllPoints()
+    b.bg:SetPoint("TOPLEFT", 1, -1)
+    b.bg:SetPoint("BOTTOMRIGHT", -1, 1)
+    Style.SetColor(b.bg, "SetColorTexture", ms.buttonBg)
+    Style.SetColor(b.label, "SetTextColor", ms.textColor)
+end
+
 function Menu.LayoutMenu(e)
     if not e then return end
     local st = Style.CurrentStyle()
@@ -3723,15 +3742,20 @@ function Menu.LayoutMenu(e)
         b:SetSize(bw, 20)
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", pad + (i - 1) * (bw + 4), y)
-        b:SetBackdrop({ edgeFile = Style.WHITE, edgeSize = 1 })
-        Style.SetColor(b, "SetBackdropBorderColor", ms.buttonBorder)
-        b.bg:ClearAllPoints()
-        b.bg:SetPoint("TOPLEFT", 1, -1)
-        b.bg:SetPoint("BOTTOMRIGHT", -1, 1)
-        Style.SetColor(b.bg, "SetColorTexture", ms.buttonBg)
-        Style.SetColor(b.label, "SetTextColor", ms.textColor)
+        Menu.StyleButton(b, ms)
     end
     y = y - 20 - ms.gap
+    -- darunter: "Anzeige verschieben" (volle Breite; im Kampf nicht gezeigt)
+    if combat then
+        menu.moveBtn:Hide()
+    else
+        menu.moveBtn:SetSize(inner, 20)
+        menu.moveBtn:ClearAllPoints()
+        menu.moveBtn:SetPoint("TOPLEFT", pad, y)
+        Menu.StyleButton(menu.moveBtn, ms)
+        menu.moveBtn:Show()
+        y = y - 20 - ms.gap
+    end
 
     -- Fußzeile
     Separator()
@@ -5700,6 +5724,10 @@ SlashCmdList.BUFFREMINDER = function(msg)
         ToggleConfig()
     elseif cmd == "test" then
         StartTest()
+    elseif cmd == "move" then
+        Cfg.SetMoveMode(true)
+    elseif cmd == "lock" then
+        Cfg.SetMoveMode(false)
     elseif cmd == "minimap" then
         TogglePardonaMinimap()
     elseif cmd == "unmute" then
@@ -5764,7 +5792,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         wipe(cdb.reagents)
         ApplyLayout(); Display.ApplyStyle(); Print(L.RESET); Evaluate()
     else
-        for _, k in ipairs({ "HELP_OPEN", "HELP_TEST", "HELP_MINIMAP", "HELP_UNMUTE", "HELP_AURAS", "HELP_RESET" }) do
+        for _, k in ipairs({ "HELP_OPEN", "HELP_TEST", "HELP_MOVE", "HELP_LOCK", "HELP_MINIMAP", "HELP_UNMUTE", "HELP_AURAS", "HELP_RESET" }) do
             Print(L[k])
         end
     end
