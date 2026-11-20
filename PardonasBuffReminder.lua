@@ -4903,6 +4903,9 @@ Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
     { "compact", false, "compact" }, { "compact", true, "compact-icons" },
 }
 Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" } }
+Demo.SETTINGS_TABS = {      -- { Tab-Key (Cfg.TAB_ORDER), Name im Dateinamen }
+    { "general", "general" }, { "class", "class-buffs" }, { "buffs", "general-buffs" }, { "group", "group" },
+}
 
 function Demo.BuildShots()
     local list = {}
@@ -4911,8 +4914,10 @@ function Demo.BuildShots()
             list[#list + 1] = { name = s[3] .. "-" .. m[1], style = s[1], icons = s[2], menu = m[2] }
         end
     end
-    list[#list + 1] = { name = "settings-top", settings = "top", ui = true }
-    list[#list + 1] = { name = "settings-experimental", settings = "experimental", ui = true }
+    -- je Tab der Einstellungen ein Bild (settings-group nur, wenn der Tab existiert)
+    for _, t in ipairs(Demo.SETTINGS_TABS) do
+        list[#list + 1] = { name = "settings-" .. t[2], settings = t[1], ui = true }
+    end
     return list
 end
 Demo.SHOTS = Demo.BuildShots()
@@ -5153,6 +5158,8 @@ function Demo.Restore()
     end
     for name, v in pairs(sv.cvars) do Demo.SetCVar(name, v) end
     db.style, db.iconsOnly = sv.style, sv.iconsOnly
+    db.cfgTab = sv.cfgTab                    -- gemerkten Tab der Einstellungen wiederherstellen
+    if config then Cfg.SelectTab(sv.cfgTab) end
     ApplyLayout()
     Display.ApplyStyle()
     if sv.uiShown and not UIParent:IsShown() then
@@ -5206,7 +5213,8 @@ end
 -- Zustand merken, Screenshot-CVars setzen, Anzeige und Menü an WorldFrame hängen, loslegen
 function Demo.BeginRun()
     Demo.run = { manual = false }
-    local sv = { frames = {}, cvars = {}, style = db.style, iconsOnly = db.iconsOnly, uiShown = UIParent:IsShown() }
+    local sv = { frames = {}, cvars = {}, style = db.style, iconsOnly = db.iconsOnly, uiShown = UIParent:IsShown(),
+        cfgTab = db.cfgTab }
     Demo.saved = sv
     sv.cvars.screenshotFormat = Demo.GetCVar("screenshotFormat")
     sv.cvars.screenshotQuality = Demo.GetCVar("screenshotQuality")
@@ -5246,19 +5254,12 @@ function Demo.OpenMenu(which)
     end
 end
 
--- Einstellungsseite oben bzw. beim Bereich Experimental; false = nicht scrollbar (Bild entfällt)
-function Demo.ScrollSettings(where)
-    local sc = Cfg.scroll
-    if where == "top" then
-        if sc then sc:SetVerticalScroll(0) end
-        return true
-    end
-    if not (sc and config and config.expHead) then return false end
-    local range = sc:GetVerticalScrollRange() or 0
-    if range <= 0 then return false end
-    local top, head = config:GetTop(), config.expHead:GetTop()
-    local off = (top and head) and (top - head - 10) or range
-    sc:SetVerticalScroll(math.max(0, math.min(range, off)))
+-- Tab der Einstellungen zeigen und nach oben scrollen; false = Tab gibt es nicht (Bild entfällt)
+function Demo.ShowTab(key)
+    local t = Cfg.tabs[key]
+    if not t then return false end
+    Cfg.SelectTab(key)
+    t.scroll:SetVerticalScroll(0)
     return true
 end
 
@@ -5282,7 +5283,7 @@ function Demo.RunShot(i)
         end
         if not (config and config:IsVisible()) then ToggleConfig() end
         Demo.After(0.5, function()
-            if not Demo.ScrollSettings(s.settings) then Demo.RunShot(i + 1); return end
+            if not Demo.ShowTab(s.settings) then Demo.RunShot(i + 1); return end
             Demo.After(Demo.SHOT_DELAY, function() Demo.Capture(i) end)
         end)
         return
