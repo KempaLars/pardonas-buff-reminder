@@ -6,6 +6,8 @@
 
 A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) general buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items and one-click weapon stones, oils and poisons. Missing buffs show up as a pulsing, movable list on screen together with a chat message and an optional sound.
 
+Available on CurseForge and Wago.
+
 **CurseForge:** https://www.curseforge.com/wow/addons/pardonas-buff-reminder
 
 ## Compatibility
@@ -15,6 +17,7 @@ Built for **WoW Forever** (Interface `16001`).
 ## Installation
 
 - **CurseForge app:** search for "Pardona's Buff Reminder" and install it.
+- **Wago app:** search for "Pardona's Buff Reminder" and install it.
 - **Manual:** download the latest release and extract it so that the files end up in
   `World of Warcraft\_forever_\Interface\AddOns\PardonasBuffReminder\`
   (the folder must contain `PardonasBuffReminder.toc` and `PardonasBuffReminder.lua`).
@@ -168,11 +171,11 @@ git tag 1.0.1
 git push origin 1.0.1
 ```
 
-The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck and, if it passes, uses the BigWigs packager to build the addon zip, upload it to CurseForge and create a GitHub release. The changelog is generated from the commit messages.
+The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck and, if it passes, uses the BigWigs packager to build the addon zip, upload it to CurseForge and Wago and create a GitHub release. The changelog is generated from the commit messages.
 
-- The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge is just the version number (e.g. **1.0.3**). The packager replaces spaces, apostrophes and other special characters in the label with `_`, so a label like "Pardona's Buff Reminder 1.0.3" would turn into `Pardona_s_Buff_Reminder_1.0.3`.
+- The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge and Wago is just the version number (e.g. **1.0.3**). The packager replaces spaces, apostrophes and other special characters in the label with `_`, so a label like "Pardona's Buff Reminder 1.0.3" would turn into `Pardona_s_Buff_Reminder_1.0.3`.
 
-- **Requirement:** the repository secret `CF_API_KEY` must contain a CurseForge API token.
+- **Requirements:** the repository secret `CF_API_KEY` must contain a CurseForge API token, and the repository secret `WAGO_API_TOKEN` must contain a Wago API token (the packager uploads to Wago in addition to CurseForge; the Wago project ID is set via `## X-Wago-ID` in the TOC).
 - Tags containing `beta` or `alpha` (e.g. `1.1.0-beta1`) are published as beta or alpha releases. Beta and alpha versions print a short "Pardona's Buff Reminder: Version 1.1.0-beta1 loaded" line to chat on login; release versions print nothing.
 
 ## Repository layout

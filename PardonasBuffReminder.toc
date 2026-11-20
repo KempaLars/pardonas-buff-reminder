@@ -5,6 +5,7 @@
 ## Author: L. Kempa
 ## Version: @project-version@
 ## X-Curse-Project-ID: 1806185
+## X-Wago-ID: aN0ab36j
 ## SavedVariables: BuffReminderDB
 ## SavedVariablesPerCharacter: BuffReminderCharDB
 ## IconTexture: Interface\AddOns\PardonasBuffReminder\Textures\Icon
