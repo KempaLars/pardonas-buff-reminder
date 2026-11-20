@@ -93,5 +93,7 @@ read_globals = {
     "UnitName",
     "time",
     "UnitOnTaxi",
+    "WorldFrame",
+    "Screenshot",
     "wipe",
 }

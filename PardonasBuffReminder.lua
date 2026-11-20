@@ -21,6 +21,7 @@ local Conjure = {}   -- Klassen-Verbrauchsgüter: Magier-Essen/-Wasser/Manastein
 local Keybind = {}   -- Tastenbelegung "Oberste Warnung auslösen" (unsichtbarer Secure Button)
 local Variant = {}   -- Variantenmenü per Rechtsklick (experimentell)
 local Tracking = {}  -- Minimap-Tracking (z. B. Mineraliensuche)
+local Demo = {}      -- versteckter Demo-Modus mit Screenshot-Lauf (nur mit BuffReminderDB.demo)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -116,6 +117,15 @@ if GetLocale() == "deDE" then
         EXP_VARIANTMENU = "Variantenmenü per Rechtsklick",
         EXP_BLESSINGS = "Segen des Paladins in Gruppenbuffs",
         BLESS_PALLYPOWER = "Aus, solange Pally Power geladen ist",
+        -- Demo-Modus (versteckt)
+        DEMO_ON       = "Demo-Modus an (/br demo off beendet ihn).",
+        DEMO_OFF      = "Demo-Modus aus.",
+        DEMO_ABORT    = "Demo-Modus wegen Kampf beendet.",
+        DEMO_ALTZ     = "Bitte Alt+Z drücken.",
+        DEMO_PRINT    = "Bitte Druck-Taste drücken.",
+        DEMO_SHOT_FAIL = "Bild %s fehlgeschlagen.",
+        DEMO_TIMEOUT  = "Keine Reaktion – Screenshot-Lauf abgebrochen.",
+        DEMO_DONE     = "Screenshot-Lauf fertig: %d Bilder. Nach /reload umbenennen mit tools\\rename-demo-shots.ps1.",
         EXP_TRACKING  = "Verfolgungs-Erinnerung",
         TRACK         = "Verfolgen: %s",
         TRACK_NONE    = "keine",
@@ -281,6 +291,14 @@ else
         EXP_VARIANTMENU = "Variant menu on right-click",
         EXP_BLESSINGS = "Paladin blessings in group buffs",
         BLESS_PALLYPOWER = "Off while Pally Power is loaded",
+        DEMO_ON       = "Demo mode on (/br demo off ends it).",
+        DEMO_OFF      = "Demo mode off.",
+        DEMO_ABORT    = "Demo mode ended because of combat.",
+        DEMO_ALTZ     = "Please press Alt+Z.",
+        DEMO_PRINT    = "Please press Print Screen.",
+        DEMO_SHOT_FAIL = "Screenshot %s failed.",
+        DEMO_TIMEOUT  = "No response – screenshot run aborted.",
+        DEMO_DONE     = "Screenshot run finished: %d images. After /reload, rename them with tools\\rename-demo-shots.ps1.",
         EXP_TRACKING  = "Tracking reminder",
         TRACK         = "Track: %s",
         TRACK_NONE    = "none",
@@ -1509,6 +1527,7 @@ function Tracking.Find(key)
 end
 
 local function EntryLabel(e)
+    if e.demoLabel then return e.demoLabel end   -- Demo-Modus: Name aus dem Client (Demo.Entry)
     if e.kind == "reagent" then return ItemName(e.item) end
     if e.kind == "tracking" then return Tracking.Label(e.trackType) end
     if e.label then return L[e.label] end
@@ -1517,6 +1536,7 @@ local function EntryLabel(e)
 end
 
 local function EntryIcon(e)
+    if e.demoIcon then return e.demoIcon end     -- Demo-Modus
     if e.kind == "reagent" then return ItemIcon(e.item) or FALLBACK_ICON end
     if e.kind == "tracking" then
         local t = Tracking.TYPES[e.trackType or ""]
@@ -3161,6 +3181,9 @@ function Display.ShowRows(list, dragMode, expFrom)
             Display.SetRowStatus(r, "neutral")
             r.text:SetText(L.DRAG)
             Display.SetRowHint(r, nil)
+        elseif e.demo then
+            r.entry = e
+            Demo.FillRow(r, e, st)
         elseif e.groupActive then
             -- Gruppen-Zeile: Anzahl, Namen, Gruppen-/Einzel-Klick auf den ersten Spieler ohne Buff
             r.entry = e
@@ -3442,7 +3465,7 @@ Menu.MUTE_OPTIONS = {
 menu.muteButtons = {}
 for i, opt in ipairs(Menu.MUTE_OPTIONS) do
     menu.muteButtons[i] = Menu.MenuButton(opt[1], function()
-        if menu.entry then
+        if menu.entry and not menu.entry.demo then
             muted[menu.entry.key] = (opt[2] == math.huge) and math.huge or (GetTime() + opt[2])
             NoteDeferred()
             Evaluate()
@@ -3507,6 +3530,7 @@ function Menu.GetItemButton(i)
     b:SetScript("PostClick", function(self, _, down)
         if not Display.IsActionPhase(down) then return end
         local e, vkey = menu.entry, self.variantKey
+        if e and e.demo then menu:Hide(); return end   -- Demo: keine Aktion, nichts merken
         if e and e.itemKind == "flask" and self.itemID then cdb.lastFlask = self.itemID end
         -- Variantenmenü: gewählte Variante wird zur zuletzt genutzten (Linksklick der Warnung)
         if e and vkey then cdb.lastVariant[e.key] = vkey end
@@ -3534,7 +3558,7 @@ function Menu.GetStar(i)
     s.text = s:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     s.text:SetPoint("CENTER")
     s:SetScript("OnClick", function(self)
-        if not self.itemID or not cdb then return end
+        if not self.itemID or not cdb or (menu.entry and menu.entry.demo) then return end
         cdb.favorites[self.itemID] = (not cdb.favorites[self.itemID]) or nil
         if not InCombatLockdown() then
             Menu.LayoutMenu(menu.entry)   -- Reihenfolge und Markierung neu
@@ -3606,6 +3630,11 @@ function Menu.SetItemButtonAction(b, id, e, kind)
 end
 
 -- Secure-Aktion einer Varianten-Zeile: Zauber (höchster erlernter Rang) auf sich selbst
+-- Zeile ohne secure Aktion (Demo-Modus)
+function Menu.ClearButtonAction(b)
+    for _, k in ipairs({ "type", "item", "spell", "macrotext", "unit" }) do b:SetAttribute(k, nil) end
+end
+
 function Menu.SetSpellButtonAction(b, spell)
     b:SetAttribute("type", "spell")
     b:SetAttribute("spell", spell)
@@ -3658,9 +3687,11 @@ function Menu.LayoutMenu(e)
     menu.sub:SetWidth(textWidth)
 
     local kind = Items.KindOf(e)
-    local withItems = kind and db.clickCast and not combat
+    local withItems = kind and (db.clickCast or e.demo) and not combat
     -- Variantenmenü (experimentell): erlernte Varianten statt Items; nie im Kampf
     local variants = not combat and not withItems and Variant.MenuOn(e) and Variant.Choices(e) or nil
+    -- Demo-Modus: Beispiel-Varianten (Magier-Rüstungen, unabhängig davon, ob gelernt)
+    if e.demo and e.demoVariants and not combat then variants = Demo.VariantChoices() end
     local sub
     if combat then
         sub = L.SUB_COMBAT
@@ -3710,7 +3741,7 @@ function Menu.LayoutMenu(e)
     if withItems or variants then
         Separator()
         Head(menu.itemHead, variants and L.MENU_VARIANT or Menu.ItemHeadText(kind))
-        local choices = variants or Items.ItemChoices(e)
+        local choices = variants or (e.demo and Demo.FoodChoices()) or Items.ItemChoices(e)
         n = math.min(#choices, Menu.MAX_ITEM_CHOICES)
         itemTop = y
         if n == 0 then
@@ -3724,7 +3755,12 @@ function Menu.LayoutMenu(e)
         end
         for i = 1, n do
             local c, b = choices[i], Menu.GetItemButton(i)
-            if variants then
+            if e.demo then
+                -- Demo: Zeile ohne secure Aktion (Tooltip über itemID bzw. spellID)
+                b.itemID, b.variantKey = (not variants) and c.id or nil, nil
+                b.spellID = variants and c.spell or nil
+                Menu.ClearButtonAction(b)
+            elseif variants then
                 b.itemID, b.variantKey = nil, c.vkey
                 b.spellID = type(c.spell) == "number" and c.spell or nil
                 Menu.SetSpellButtonAction(b, c.spell)
@@ -3791,7 +3827,7 @@ function Menu.LayoutMenu(e)
             if not variants then
                 local s = Menu.GetStar(i)
                 s.itemID = c.id
-                Menu.SetStar(s, cdb.favorites[c.id] == true, st)
+                Menu.SetStar(s, c.fav == true, st)
                 s:ClearAllPoints()
                 s:SetPoint("TOPLEFT", pad + rowsWidth + 4, itemTop - (i - 1) * (h + 1) - (h - Menu.STAR_SIZE - 4) / 2)
                 s:Show()
@@ -3848,17 +3884,19 @@ function Menu.LayoutMenu(e)
 
     -- Position: am Mauszeiger, innerhalb des Bildschirms. Reicht der Platz unter dem
     -- Mauszeiger nicht, klappt das Fenster nach oben auf (Unterkante knapp unter dem Zeiger).
-    local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
+    local base = menu:GetParent() or UIParent
+    local conv = base:GetEffectiveScale() / menu:GetEffectiveScale()
+    local sw, sh = base:GetWidth() * conv, base:GetHeight() * conv
     local x = math.max(0, math.min(menu.x or 0, sw - width))
     local top = menu.y or sh
     if top - height < 0 then top = top - 20 + height end
     top = math.min(sh, math.max(top, height))
     menu:ClearAllPoints()
-    menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, top)
+    menu:SetPoint("TOPLEFT", base, "BOTTOMLEFT", x, top)
 
     if (withItems or variants) and n > 0 then
         itemPanel:ClearAllPoints()
-        itemPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x + pad, top + itemTop)
+        itemPanel:SetPoint("TOPLEFT", base, "BOTTOMLEFT", x + pad, top + itemTop)
         itemPanel:SetSize(rowsWidth, n * (h + 1))
         itemPanel:SetFrameLevel(menu:GetFrameLevel() + 10)
         itemPanel:Show()
@@ -3876,7 +3914,7 @@ end)
 
 -- Schließt sich, wenn die Maus das Fenster 2 Sek. lang verlassen hat
 menu:SetScript("OnUpdate", function(self, el)
-    if self:IsMouseOver() or (itemPanel:IsShown() and itemPanel:IsMouseOver()) then self.away = 0 else
+    if Demo.run or self:IsMouseOver() or (itemPanel:IsShown() and itemPanel:IsMouseOver()) then self.away = 0 else
         self.away = (self.away or 0) + el
         if self.away > 2 then self:Hide() end
     end
@@ -3894,6 +3932,7 @@ end
 
 -- Taschen geändert: offene Item-Auswahl neu aufbauen
 function Menu.RefreshItemPanel()
+    if Demo.active then return end   -- Demo-Menü nicht mit echten Taschen neu aufbauen
     if not menu:IsShown() or not itemPanel:IsShown() or InCombatLockdown() then return end
     Menu.LayoutMenu(menu.entry)
 end
@@ -3929,6 +3968,7 @@ end
 ---------------------------------------------------------------------------
 function Evaluate()
     if not db or not ready then return end
+    if Demo.active then return end   -- Demo-Modus: Anzeige gehört der Demo; Ende wertet neu aus
     -- Im Kampf wird nur der Zustand aktualisiert; die Warnliste (Secure Buttons)
     -- bleibt unverändert und wird bei PLAYER_REGEN_ENABLED neu aufgebaut.
     local combat = InCombatLockdown()
@@ -4429,6 +4469,7 @@ function Cfg.CreateCanvasContent()
     scroll:SetPoint("BOTTOMRIGHT", -28, 4)
     local content = CreateFrame("Frame", "BuffReminderConfig", scroll)
     scroll:SetScrollChild(content)
+    Cfg.scroll = scroll
     return content
 end
 
@@ -4561,6 +4602,7 @@ local function BuildConfig()
     sep:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y)
     y = y - 8
     local expHead = Cfg.MakeHeader(p, L.EXP_SECTION, y)
+    config.expHead = expHead
     expHead:SetTextColor(1, 0.5, 0)
     y = y - 16
     local expNote = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -4825,6 +4867,437 @@ local function TogglePardonaMinimap()
 end
 
 ---------------------------------------------------------------------------
+-- Demo-Modus (versteckt): nur mit BuffReminderDB.demo == true gibt es /br demo und /br demo shot.
+-- Beispielzeilen für Bilder (CurseForge/Wago), unabhängig von Klasse, Stufe und Taschen. Sie
+-- laufen über den normalen Anzeigeweg (ShowRows -> Demo.FillRow), aber ohne secure Aktion;
+-- Evaluate überschreibt die Anzeige nicht, solange Demo.active gilt. Kein Eintrag in Hilfe,
+-- README oder Einstellungen; /br reset lässt db.demo stehen.
+--   Demo.ROWS : Motive; spell/item liefern Name und Icon (immer aus dem Client),
+--               label = L-Schlüssel wie beim echten Eintrag (z. B. MAGE_ARMOR)
+--   Demo.FOOD : Beispiel-Items des Essens-Menüs (aus Items.FOOD)
+--   Demo.SHOTS: Motive des Screenshot-Laufs (Demo.BuildShots)
+---------------------------------------------------------------------------
+Demo.GROUP_NAMES = "Thrall, Jaina, Uther"   -- Beispielnamen der Gruppen-Zeile
+Demo.ROWS = {
+    { key = "class",    spell = 1459, hint = "HINT_CAST" },                                    -- Arkane Intelligenz
+    { key = "armor",    spell = 7302, label = "MAGE_ARMOR", hint = "HINT_CAST_CHOOSE", menu = "variant" },
+    { key = "food",     spell = 19705, hintItem = 13931, menu = "food" },                      -- Well Fed
+    { key = "flask",    item = 13510, label = "FLASK", hintItem = 13510 },                      -- Fläschchen der Titanen
+    { key = "weapon",   item = 20749, label = "WEAPON_MH", plain = true, hintItem = 20749 },    -- Brillantes Zauberöl
+    { key = "group",    spell = 1243, group = 3, hint = "HINT_GROUP" },                         -- Machtwort: Seelenstärke
+    { key = "reagent",  item = 17028, count = 3, hint = "HINT_MUTE" },                          -- Heilige Kerze
+    { key = "tracking", spell = 2580, track = true, hint = "HINT_TRACK" },                      -- Mineraliensuche
+    { key = "expiry",   spell = 1126, expiry = "1:45", hint = "HINT_CAST" },                    -- Mal der Wildnis
+}
+Demo.FOOD = {
+    { id = 13931, count = 12, cat = "SpellDamage", xp = true, fav = true },
+    { id = 18254, count = 4,  cat = "Intellect" },
+    { id = 12216, count = 6,  cat = "Intellect" },
+    { id = 3729,  count = 9,  cat = "Stamina" },
+}
+Demo.VARIANT_LAST = "ice"   -- im Variantenmenü als "zuletzt genutzt" markiert
+Demo.LOAD_WAIT = 3          -- höchstens so lange auf Item-/Spell-Daten warten (Sek.)
+Demo.SHOT_DELAY = 1.5       -- Wartezeit vor jedem Bild (Sek.)
+Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
+    { "pardona", false, "pardona" }, { "classic", false, "classic" },
+    { "compact", false, "compact" }, { "compact", true, "compact-icons" },
+}
+Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" } }
+
+function Demo.BuildShots()
+    local list = {}
+    for _, s in ipairs(Demo.SHOT_STYLES) do
+        for _, m in ipairs(Demo.SHOT_MENUS) do
+            list[#list + 1] = { name = s[3] .. "-" .. m[1], style = s[1], icons = s[2], menu = m[2] }
+        end
+    end
+    list[#list + 1] = { name = "settings-top", settings = "top", ui = true }
+    list[#list + 1] = { name = "settings-experimental", settings = "experimental", ui = true }
+    return list
+end
+Demo.SHOTS = Demo.BuildShots()
+
+-- Eintrag für ein Motiv (Name/Icon aus dem Client, Rückfall-Icon falls nicht geladen)
+function Demo.Entry(d)
+    local label = (d.label and L[d.label]) or (d.spell and SpellName(d.spell)) or (d.item and ItemName(d.item)) or "?"
+    local icon = (d.spell and SpellIcon(d.spell)) or (d.item and ItemIcon(d.item)) or FALLBACK_ICON
+    return { key = "demo_" .. d.key, demo = d, demoLabel = label, demoIcon = icon,
+        itemKind = d.menu == "food" and "food" or nil, demoVariants = d.menu == "variant" }
+end
+
+-- Zeile wie die echte Warnung gestalten (aus ShowRows; nur außerhalb des Kampfes)
+function Demo.FillRow(r, e, st)
+    local d, label = e.demo, e.demoLabel
+    Display.SetRowAction(r, nil)
+    Display.SetRowLines(r, d.group ~= nil)
+    local status, text, right = "missing", L.MISSING:format(label), L.SHORT_MISSING
+    if d.group then
+        text, right = L.GROUP_MISSING:format(label, d.group), ""
+        r.names:SetText(Demo.GROUP_NAMES)
+    elseif d.count then
+        status, text, right = "low", L.REAGENT_LOW:format(label, d.count), ""
+    elseif d.track then
+        text, right = L.TRACK_OFF:format(label), L.SHORT_OFF
+    elseif d.expiry then
+        status, text, right = "expiring", L.EXPIRES:format(label, d.expiry), ""
+    elseif d.plain then
+        text = label
+    end
+    if st.rightText and right ~= "" then
+        text = label
+        r.right:SetText(right)
+    end
+    Display.SetRowStatus(r, status)
+    r.text:SetText(text)
+    Display.SetRowHint(r, d.hintItem and L.HINT_ITEM:format(ItemName(d.hintItem)) or L[d.hint])
+end
+
+-- Essens-Menü: Beispiel-Items (erstes = beste Wahl mit XP-Abzeichen und Stern)
+function Demo.FoodChoices()
+    local list = {}
+    for _, c in ipairs(Demo.FOOD) do
+        list[#list + 1] = { id = c.id, count = c.count, cat = c.cat, xp = c.xp == true, fav = c.fav == true }
+    end
+    return list
+end
+
+-- Variantenmenü: Magier-Rüstungen aus CAST_DATA, unabhängig davon, ob gelernt
+function Demo.VariantChoices()
+    local list = {}
+    for _, v in ipairs(CAST_DATA.MAGE.armor.variants) do
+        local id = v.castIds[1]
+        list[#list + 1] = { spell = id, vkey = v.key, name = SpellName(id) or v.key,
+            icon = SpellIcon(id) or FALLBACK_ICON, last = v.key == Demo.VARIANT_LAST }
+    end
+    return list
+end
+
+function Demo.Ids()
+    local spells, items = {}, {}
+    for _, d in ipairs(Demo.ROWS) do
+        if d.spell then spells[#spells + 1] = d.spell end
+        if d.item then items[#items + 1] = d.item end
+        if d.hintItem then items[#items + 1] = d.hintItem end
+    end
+    for _, c in ipairs(Demo.FOOD) do items[#items + 1] = c.id end
+    for _, v in ipairs(CAST_DATA.MAGE.armor.variants) do spells[#spells + 1] = v.castIds[1] end
+    return spells, items
+end
+
+function Demo.DataReady(spells, items)
+    for _, id in ipairs(spells) do
+        if not SpellName(id) or not SpellIcon(id) then return false end
+    end
+    for _, id in ipairs(items) do
+        if not Items.ItemLevels(id) or not ItemIcon(id) then return false end
+    end
+    return true
+end
+
+-- Item-/Spell-Daten anfordern; done() sobald alles da ist, spätestens nach LOAD_WAIT Sek.
+function Demo.Preload(done)
+    local spells, items = Demo.Ids()
+    for _, id in ipairs(items) do
+        if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+    end
+    for _, id in ipairs(spells) do
+        if C_Spell and C_Spell.RequestLoadSpellData then pcall(C_Spell.RequestLoadSpellData, id) end
+    end
+    local t0 = GetTime()
+    local function poll()
+        if not Demo.active then return end
+        if Demo.DataReady(spells, items) or GetTime() - t0 >= Demo.LOAD_WAIT then done(); return end
+        C_Timer.After(0.2, poll)
+    end
+    poll()
+end
+
+-- Beispielzeilen zeigen (Ablaufzeilen zuletzt, wie bei echten Warnungen)
+function Demo.Show()
+    if not Demo.active or InCombatLockdown() then return end
+    local list, exp = {}, {}
+    for _, d in ipairs(Demo.ROWS) do
+        local e = Demo.Entry(d)
+        if d.expiry then exp[#exp + 1] = e else list[#list + 1] = e end
+    end
+    local from = #list + 1
+    for _, e in ipairs(exp) do list[#list + 1] = e end
+    Demo.entries = list
+    Display.ShowRows(list, false, from)
+    if Demo.run then Demo.StillRows() end
+end
+
+-- Screenshot-Lauf: Pulsieren anhalten (volle Deckkraft bzw. Ablauf-Transparenz)
+function Demo.StillRows()
+    for _, r in ipairs(rows) do
+        r.pulse:Stop()
+        r:SetAlpha(r.baseAlpha or 1)
+    end
+end
+
+function Demo.Start(after)
+    if InCombatLockdown() then Print(L.COMBAT); return end
+    if Demo.active then
+        if after then after() end
+        return
+    end
+    Demo.active = true
+    if menu:IsShown() then menu:Hide() end
+    Print(L.DEMO_ON)
+    Demo.Preload(function()
+        Demo.Show()
+        if after then after() end
+    end)
+end
+
+-- Demo (und Screenshot-Lauf) beenden, alles zurücksetzen und normal neu auswerten
+function Demo.Stop(quiet)
+    if not Demo.active and not Demo.run then return end
+    Demo.run = nil      -- laufende Timer verfallen
+    Demo.active = false
+    Demo.Restore()
+    if not InCombatLockdown() then
+        if menu:IsShown() then menu:Hide() end
+        Display.ShowRows({})   -- Beispielzeilen weg, auch falls Evaluate (noch) nichts zeigt
+        Evaluate()
+    end
+    if not quiet then Print(L.DEMO_OFF) end
+end
+
+-- Kampfbeginn (PLAYER_REGEN_DISABLED): sofort beenden
+function Demo.Abort()
+    if not Demo.active and not Demo.run then return end
+    Print(L.DEMO_ABORT)
+    Demo.Stop(true)
+end
+
+function Demo.Command(sub)
+    if sub == "off" then
+        Demo.Stop()
+    elseif sub == "shot" then
+        Demo.StartShot()
+    elseif Demo.active then
+        Demo.Stop()
+    else
+        Demo.Start()
+    end
+end
+
+function Demo.GetCVar(name)
+    if not (C_CVar and C_CVar.GetCVar) then return nil end
+    local ok, v = pcall(C_CVar.GetCVar, name)
+    if ok and type(v) == "string" and not IsSecret(v) then return v end
+    return nil
+end
+
+function Demo.SetCVar(name, v)
+    if C_CVar and C_CVar.SetCVar then pcall(C_CVar.SetCVar, name, v) end
+end
+
+-- Frame an WorldFrame hängen (sichtbar bei ausgeblendetem Interface); Skalierung so, dass die
+-- effektive Größe gleich bleibt. keepPos: Bildschirmposition übernehmen (sonst setzt der
+-- Aufrufer die Punkte neu, z. B. LayoutMenu relativ zum Parent).
+function Demo.ToWorld(f, keepPos)
+    local sv = Demo.saved
+    if sv.frames[f] then return end
+    local eff = f:GetEffectiveScale()
+    local l, t = f:GetLeft(), f:GetTop()
+    local strata = f:GetFrameStrata()
+    sv.frames[f] = { parent = f:GetParent(), scale = f:GetScale(), strata = strata }
+    f:SetParent(WorldFrame)
+    f:SetScale(eff / WorldFrame:GetEffectiveScale())
+    f:SetFrameStrata(strata)
+    if keepPos and l and t then
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", WorldFrame, "BOTTOMLEFT", l, t)
+    end
+end
+
+-- Gemerkten Zustand wiederherstellen (im Kampf erst nach PLAYER_REGEN_ENABLED)
+function Demo.Restore()
+    local sv = Demo.saved
+    if not sv then return end
+    if InCombatLockdown() then Demo.restorePending = true; return end
+    Demo.saved, Demo.restorePending = nil, false
+    if menu:IsShown() then menu:Hide() end
+    Menu.HideItemPanel()
+    for f, info in pairs(sv.frames) do
+        f:SetParent(info.parent)
+        f:SetScale(info.scale)
+        f:SetFrameStrata(info.strata)
+    end
+    for name, v in pairs(sv.cvars) do Demo.SetCVar(name, v) end
+    db.style, db.iconsOnly = sv.style, sv.iconsOnly
+    ApplyLayout()
+    Display.ApplyStyle()
+    if sv.uiShown and not UIParent:IsShown() then
+        pcall(UIParent.Show, UIParent)
+        if not UIParent:IsShown() then Print(L.DEMO_ALTZ) end
+    end
+end
+
+-- f() nach t Sek., nur solange derselbe Lauf aktiv ist
+function Demo.After(t, f)
+    local run = Demo.run
+    C_Timer.After(t, function()
+        if Demo.run == run then f() end
+    end)
+end
+
+-- Warten, bis cond() gilt (Polling); done() bzw. nach timeout Sek. onTimeout()
+function Demo.WaitFor(cond, timeout, done, onTimeout)
+    local run, t0 = Demo.run, GetTime()
+    local function poll()
+        if Demo.run ~= run then return end
+        if cond() then done(); return end
+        if GetTime() - t0 >= timeout then onTimeout(); return end
+        C_Timer.After(0.25, poll)
+    end
+    poll()
+end
+
+function Demo.StopTimeout()
+    Print(L.DEMO_TIMEOUT)
+    Demo.Stop(true)
+end
+
+-- Interface ein-/ausblenden: zuerst selbst (UIParent:Show/Hide per pcall), sonst Hinweis Alt+Z
+-- und warten (Abbruch nach 60 Sek.)
+function Demo.SetUI(show, cont)
+    if show then pcall(UIParent.Show, UIParent) else pcall(UIParent.Hide, UIParent) end
+    if UIParent:IsShown() == show then cont(); return end
+    Print(L.DEMO_ALTZ)
+    Demo.WaitFor(function() return UIParent:IsShown() == show end, 60, cont, Demo.StopTimeout)
+end
+
+function Demo.StartShot()
+    if InCombatLockdown() then Print(L.COMBAT); return end
+    if Demo.run then return end
+    Demo.Start(function()
+        if Demo.active and not Demo.run then Demo.BeginRun() end
+    end)
+end
+
+-- Zustand merken, Screenshot-CVars setzen, Anzeige und Menü an WorldFrame hängen, loslegen
+function Demo.BeginRun()
+    Demo.run = { manual = false }
+    local sv = { frames = {}, cvars = {}, style = db.style, iconsOnly = db.iconsOnly, uiShown = UIParent:IsShown() }
+    Demo.saved = sv
+    sv.cvars.screenshotFormat = Demo.GetCVar("screenshotFormat")
+    sv.cvars.screenshotQuality = Demo.GetCVar("screenshotQuality")
+    if sv.cvars.screenshotFormat then Demo.SetCVar("screenshotFormat", "png") end
+    if sv.cvars.screenshotQuality then Demo.SetCVar("screenshotQuality", "10") end
+    db.demoShots = { started = time(), shots = {} }
+    if menu:IsShown() then menu:Hide() end
+    Demo.ToWorld(anchor, true)
+    Demo.ToWorld(menu)
+    Demo.ToWorld(itemPanel)
+    Demo.RunShot(1)
+end
+
+-- Menü eines Motivs neben dessen Zeile öffnen (Koordinaten in Menü-Einheiten)
+function Demo.OpenMenu(which)
+    for i, e in ipairs(Demo.entries or {}) do
+        local r = rows[i]
+        if e.demo.menu == which and r and r:IsShown() then
+            local right, top = r:GetRight(), r:GetTop()
+            if right and top then
+                local k = r:GetEffectiveScale() / menu:GetEffectiveScale()
+                menu.x, menu.y = right * k + 12, top * k
+            end
+            Menu.LayoutMenu(e)
+            menu.away = 0
+            menu:Show()
+            return
+        end
+    end
+end
+
+-- Einstellungsseite oben bzw. beim Bereich Experimental; false = nicht scrollbar (Bild entfällt)
+function Demo.ScrollSettings(where)
+    local sc = Cfg.scroll
+    if where == "top" then
+        if sc then sc:SetVerticalScroll(0) end
+        return true
+    end
+    if not (sc and config and config.expHead) then return false end
+    local range = sc:GetVerticalScrollRange() or 0
+    if range <= 0 then return false end
+    local top, head = config:GetTop(), config.expHead:GetTop()
+    local off = (top and head) and (top - head - 10) or range
+    sc:SetVerticalScroll(math.max(0, math.min(range, off)))
+    return true
+end
+
+function Demo.RunShot(i)
+    if not Demo.run then return end
+    local s = Demo.SHOTS[i]
+    if not s then Demo.FinishRun(); return end
+    local wantUI = s.ui == true
+    if UIParent:IsShown() ~= wantUI then
+        Demo.SetUI(wantUI, function() Demo.RunShot(i) end)
+        return
+    end
+    if s.settings then
+        -- Einstellungsbilder mit sichtbarem Interface, ohne Beispielzeilen
+        if menu:IsShown() then menu:Hide() end
+        Display.ShowRows({})
+        if not (config and config:IsVisible()) then ToggleConfig() end
+        Demo.After(0.5, function()
+            if not Demo.ScrollSettings(s.settings) then Demo.RunShot(i + 1); return end
+            Demo.After(Demo.SHOT_DELAY, function() Demo.Capture(i) end)
+        end)
+        return
+    end
+    db.style, db.iconsOnly = s.style, s.icons
+    Display.ApplyStyle()   -- schließt auch ein offenes Menü
+    Demo.Show()
+    if s.menu then Demo.OpenMenu(s.menu) end
+    Demo.After(Demo.SHOT_DELAY, function() Demo.Capture(i) end)
+end
+
+-- Bild auslösen und auf SCREENSHOT_SUCCEEDED/FAILED warten (5 Sek.). Kommt kein Ereignis,
+-- gilt Screenshot() als blockiert: Hinweis "Druck-Taste" und warten (60 Sek.).
+function Demo.Capture(i)
+    local run, s = Demo.run, Demo.SHOTS[i]
+    if not run then return end
+    run.result, run.waiting = nil, true
+    if run.manual then
+        Print(L.DEMO_PRINT)
+    elseif not (type(Screenshot) == "function" and pcall(Screenshot)) then
+        run.manual = true
+        Print(L.DEMO_PRINT)
+    end
+    Demo.WaitFor(function() return run.result ~= nil end, run.manual and 60 or 5, function()
+        run.waiting = false
+        if run.result then
+            local list = db.demoShots.shots
+            list[#list + 1] = { n = #list + 1, name = s.name, t = time() }
+        else
+            Print(L.DEMO_SHOT_FAIL:format(s.name))
+        end
+        Demo.RunShot(i + 1)
+    end, function()
+        run.waiting = false
+        if run.manual then Demo.StopTimeout(); return end
+        run.manual = true
+        Demo.Capture(i)
+    end)
+end
+
+-- SCREENSHOT_SUCCEEDED / SCREENSHOT_FAILED
+function Demo.OnScreenshot(ok)
+    local run = Demo.run
+    if run and run.waiting and run.result == nil then run.result = ok end
+end
+
+function Demo.FinishRun()
+    local n = db.demoShots and #db.demoShots.shots or 0
+    Demo.Stop(true)
+    Print(L.DEMO_DONE:format(n))
+end
+
+---------------------------------------------------------------------------
 -- Events
 ---------------------------------------------------------------------------
 local function ApplyDefaults(t, defaults)
@@ -4863,6 +5336,8 @@ SafeRegisterEvent(ev, "GET_ITEM_INFO_RECEIVED")
 SafeRegisterEvent(ev, "ENABLE_XP_GAIN")
 SafeRegisterEvent(ev, "DISABLE_XP_GAIN")
 SafeRegisterEvent(ev, "UPDATE_BINDINGS")   -- Tasten-Hinweis in den Einstellungen
+SafeRegisterEvent(ev, "SCREENSHOT_SUCCEEDED")   -- Demo-Screenshot-Lauf
+SafeRegisterEvent(ev, "SCREENSHOT_FAILED")
 -- Ladebildschirm-Events gibt es nicht in jedem Client (IsEventValid filtert sie dann aus)
 SafeRegisterEvent(ev, "LOADING_SCREEN_ENABLED")
 SafeRegisterEvent(ev, "LOADING_SCREEN_DISABLED")
@@ -4885,6 +5360,10 @@ local function StartGrace()
 end
 
 ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
+    if event == "SCREENSHOT_SUCCEEDED" or event == "SCREENSHOT_FAILED" then
+        Demo.OnScreenshot(event == "SCREENSHOT_SUCCEEDED")
+        return
+    end
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then return end
         BuffReminderDB = BuffReminderDB or {}
@@ -5010,6 +5489,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     if event == "PLAYER_REGEN_DISABLED" then
         Menu.CloseItemPanelForCombat()
+        Demo.Abort()   -- Demo/Screenshot-Lauf sofort beenden (Zurücksetzen ggf. nach dem Kampf)
         RefreshPardonaStatus()   -- im Kampf kein Kurzstatus
         return
     end
@@ -5070,6 +5550,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     if event == "PLAYER_REGEN_ENABLED" then
         -- nach dem Kampf: Gruppe sofort neu prüfen, Zeilen/Attribute nachziehen
+        if Demo.restorePending then Demo.Restore() end
         if GroupFeatureOn() then Group.groupDirty = true end
         Evaluate()
         RefreshPardonaStatus()
@@ -5184,6 +5665,8 @@ SlashCmdList.BUFFREMINDER = function(msg)
                 Print(("  %s – %s"):format(name, tostring(id)))
             end
         end
+    elseif cmd == "demo" and db.demo == true then
+        Demo.Command((msg or ""):lower():match("^%s*%S+%s+(%S+)"))
     elseif cmd == "reset" then
         if InCombatLockdown() then Print(L.COMBAT); return end
         for k in pairs(DEFAULTS) do db[k] = nil end
