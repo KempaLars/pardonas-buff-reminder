@@ -116,6 +116,12 @@ if GetLocale() == "deDE" then
         EXP_VARIANTMENU = "Variantenmenü per Rechtsklick",
         EXP_BLESSINGS = "Segen des Paladins in Gruppenbuffs",
         BLESS_PALLYPOWER = "Aus, solange Pally Power geladen ist",
+        EXP_TRACKING  = "Verfolgungs-Erinnerung",
+        TRACK         = "Verfolgen: %s",
+        TRACK_NONE    = "keine",
+        TRACK_AUTO    = "%s (automatisch)",
+        TRACK_OFF     = "%s ist nicht aktiv",
+        SHORT_OFF     = "aus",
         -- Variantenmenü
         MENU_VARIANT  = "Variante zaubern",
         SUB_VARIANT   = "Variante zaubern oder stummschalten",
@@ -275,6 +281,12 @@ else
         EXP_VARIANTMENU = "Variant menu on right-click",
         EXP_BLESSINGS = "Paladin blessings in group buffs",
         BLESS_PALLYPOWER = "Off while Pally Power is loaded",
+        EXP_TRACKING  = "Tracking reminder",
+        TRACK         = "Track: %s",
+        TRACK_NONE    = "none",
+        TRACK_AUTO    = "%s (automatic)",
+        TRACK_OFF     = "%s is not active",
+        SHORT_OFF     = "off",
         MENU_VARIANT  = "Cast a variant",
         SUB_VARIANT   = "Cast a variant or mute",
         LAST_USED     = "last used",
@@ -506,13 +518,6 @@ local GENERAL_BUFFS = {
     { key = "gen_wellrested", general = true, defaultOff = true, label = "WELLRESTED",
       ids = { 429959 }, nameIds = { 429959 }, matchNames = { "Well-Rested", "Well Rested" },
       excludeIds = { 1225478 } },
-    -- Mineraliensuche (Find Minerals, Spell-ID 2580): nur wenn erlernt, gilt überall
-    -- (auch außerhalb von Instanzen); Linksklick aktiviert das Minimap-Tracking.
-    { key = "gen_findminerals", general = true, kind = "tracking", everywhere = true,
-      ids = { 2580 }, knownIds = { 2580 }, level = 1,
-      matchNames = { "Find Minerals", "Mineraliensuche", "Minerals", "Erze", "Track Minerals" },
-      matchTextures = { 136025, "spell_nature_earthquake" },
-      icon = "Interface\\Icons\\Spell_Nature_Earthquake" },
     -- Waffen-Items (experimentell, expWeaponItems): Steine/Öle per Klick; fehlt nur, wenn eine Waffe
     -- im Slot steckt, keine temporäre Verzauberung aktiv ist und ein passendes Item in den Taschen
     -- liegt. Nicht für Schamanen (entfernt beim Login); bei Schurken nur, wenn der Gift-Eintrag
@@ -1416,8 +1421,22 @@ function Items.WeaponMacro(id, slot)
 end
 
 ---------------------------------------------------------------------------
--- Minimap-Tracking (z. B. Mineraliensuche / Find Minerals)
+-- Verfolgungs-Erinnerung (experimentell, Schalter expTracking): Kräuter-, Mineralien- und
+-- Fischsuche über die Minimap-Verfolgung. Erkennung zur Laufzeit über die Verfolgungsliste
+-- (C_Minimap bzw. Legacy-API), Zuordnung über Spell-ID, Zaubernamen aus dem Client oder Icon.
+-- Namen und Icons kommen immer aus dem Client (SpellName/SpellIcon bzw. Verfolgungsliste).
+--   spell    : Spell-ID der Verfolgung
+--   textures : zusätzliche bekannte Icons (File-ID oder Pfadteil), falls die Liste keine ID liefert
+-- Laufzeit je Typ: index (Platz in der Verfolgungsliste), name, tex (aus der Liste)
 ---------------------------------------------------------------------------
+Tracking.TYPES = {
+    minerals = { spell = 2580, textures = { 136025, "spell_nature_earthquake" } },   -- Mineraliensuche
+    herbs    = { spell = 2383 },                                                     -- Kräutersuche
+    fish     = { spell = 43308 },                                                    -- Fischsuche
+}
+Tracking.ORDER = { "minerals", "herbs", "fish" }   -- Reihenfolge im Umschalt-Knopf
+Tracking.AUTO  = { "minerals", "herbs" }           -- automatische Wahl (Fische nur ausdrücklich)
+
 function Tracking.NumTypesFn()
     return (C_Minimap and C_Minimap.GetNumTrackingTypes) or GetNumTrackingTypes
 end
@@ -1430,24 +1449,20 @@ function Tracking.SetFn()
     return (C_Minimap and C_Minimap.SetTracking) or SetTracking
 end
 
-function Tracking.NameMatch(e, name)
-    if type(name) ~= "string" then return false end
-    for _, n in ipairs(e.names or {}) do
-        if name == n then return true end
+-- Passt ein Eintrag der Verfolgungsliste (name, tex, spellID) zum Typ t?
+function Tracking.Matches(t, name, tex, spellID)
+    if spellID ~= nil and spellID == t.spell then return true end
+    local sname = SpellName(t.spell)
+    if sname and type(name) == "string" and (name == sname or NormName(name) == NormName(sname)) then
+        return true
     end
-    return e.normNames ~= nil and next(e.normNames) ~= nil and e.normNames[NormName(name)] == true
-end
-
-function Tracking.TexMatch(e, tex)
     if tex == nil then return false end
     local lowerTex = type(tex) == "string" and tex:lower() or nil
-    for _, t in ipairs(e.matchTextures or {}) do
-        if tex == t or (lowerTex and type(t) == "string" and lowerTex:find(t:lower(), 1, true)) then
-            return true
-        end
+    for _, x in ipairs(t.textures or {}) do
+        if tex == x or (lowerTex and type(x) == "string" and lowerTex:find(x, 1, true)) then return true end
     end
-    local want = e.ids and e.ids[1] and SpellIcon(e.ids[1])
-    return want ~= nil and tex == want
+    local own = SpellIcon(t.spell)
+    return own ~= nil and tex == own
 end
 
 -- Liefert name, tex, active (boolean), spellID; nil bei Fehler oder Secret-Wert
@@ -1468,42 +1483,45 @@ function Tracking.ReadInfo(i)
     return a, (not IsSecret(b)) and b or nil, c and true or false, f
 end
 
--- Sucht Eintrag e in den Minimap-Trackings; liefert idx, active, unavailable
--- und aktualisiert trackIndex/trackName/iconCache am Eintrag.
-function Tracking.Find(e)
+-- Typ key in der Verfolgungsliste suchen; liefert idx, active, unavailable
+-- (unavailable = Liste nicht lesbar). Merkt index/name/tex am Typ.
+function Tracking.Find(key)
+    local t = Tracking.TYPES[key]
+    if not t then return nil, nil, false end
     local numFn = Tracking.NumTypesFn()
-    if not (numFn and Tracking.InfoFn()) then
-        return nil, nil, false
-    end
+    if not (numFn and Tracking.InfoFn()) then return nil, nil, false end
     local okN, num = pcall(numFn)
-    if not okN or type(num) ~= "number" or IsSecret(num) or num <= 0 then
-        return nil, nil, true
-    end
+    if not okN or type(num) ~= "number" or IsSecret(num) or num <= 0 then return nil, nil, true end
     local hadSecret = false
     for i = 1, num do
         local name, tex, active, spellID = Tracking.ReadInfo(i)
         if active == nil then
             hadSecret = true
-        elseif (spellID and e.idSet and e.idSet[spellID]) or Tracking.NameMatch(e, name) or Tracking.TexMatch(e, tex) then
-            e.trackIndex = i
-            if name then e.trackName = name end
-            if tex and db and db.iconCache then db.iconCache[e.key] = tex end
+        elseif Tracking.Matches(t, name, tex, spellID) then
+            t.index = i
+            if type(name) == "string" then t.name = name end
+            if tex then t.tex = tex end
             return i, active, false
         end
     end
-    if not hadSecret then e.trackIndex = nil end
+    if not hadSecret then t.index = nil end
     return nil, nil, hadSecret
 end
 
 local function EntryLabel(e)
     if e.kind == "reagent" then return ItemName(e.item) end
+    if e.kind == "tracking" then return Tracking.Label(e.trackType) end
     if e.label then return L[e.label] end
     local first = (e.ids or e.knownIds or {})[1]
-    return (first and SpellName(first)) or (e.kind == "tracking" and e.trackName) or e.key
+    return (first and SpellName(first)) or e.key
 end
 
 local function EntryIcon(e)
     if e.kind == "reagent" then return ItemIcon(e.item) or FALLBACK_ICON end
+    if e.kind == "tracking" then
+        local t = Tracking.TYPES[e.trackType or ""]
+        return (t and (SpellIcon(t.spell) or t.tex)) or FALLBACK_ICON
+    end
     if e.kind == "conjure" then
         return ItemIcon(Conjure.RankItem(e)) or SpellIcon(e.knownIds[1]) or FALLBACK_ICON
     end
@@ -1568,13 +1586,112 @@ local function SpellKnown(id)
     return false
 end
 
+-- Name einer Verfolgung aus dem Client (Zaubername, sonst Name aus der Verfolgungsliste)
+function Tracking.Label(key)
+    local t = Tracking.TYPES[key or ""]
+    if not t then return L.TRACK_NONE end
+    return SpellName(t.spell) or t.name or key
+end
+
+-- Verfolgung gelernt? (Zauber bekannt oder in der Verfolgungsliste vorhanden)
+function Tracking.Learned(key)
+    local t = Tracking.TYPES[key]
+    if not t then return false end
+    if SpellKnown(t.spell) then return true end
+    return (Tracking.Find(key)) ~= nil
+end
+
+-- Gewünschte Verfolgung (pro Charakter, cdb.trackWanted): "none" = keine, gesetzt = diese,
+-- nil = automatisch die erste gelernte aus Tracking.AUTO (Mineralien, dann Kräuter)
+function Tracking.Wanted()
+    local w = cdb and cdb.trackWanted
+    if w == "none" then return nil end
+    if w and Tracking.TYPES[w] then return w end
+    for _, k in ipairs(Tracking.AUTO) do
+        if Tracking.Learned(k) then return k end
+    end
+    return nil
+end
+
+-- Eintrag auf die gewünschte Verfolgung einstellen (ids/Namen für die Aura-Fallbacks)
+function Tracking.Apply(e)
+    local key = Tracking.Wanted()
+    if e.trackType == key and e.idSet then return end
+    e.trackType = key
+    local t = Tracking.TYPES[key or ""]
+    e.ids = t and { t.spell } or {}
+    PrepareEntry(e)
+end
+
+-- true = gewünschte Verfolgung gelernt, aber nicht aktiv; false = aktiv / keine gewünscht;
+-- nil = nicht lesbar
+function Tracking.Missing(e, scan)
+    local key = e.trackType
+    local t = Tracking.TYPES[key or ""]
+    if not t then return false end
+    local idx, active, unavailable = Tracking.Find(key)
+    if idx then return not active end
+    if unavailable then return nil end
+    -- ohne Verfolgungsliste: Aura bzw. aktuelle Verfolgungs-Textur (Legacy-Clients)
+    if scan then
+        if scan.ids[t.spell] then return false end
+        for _, n in ipairs(e.names) do
+            if scan.names[n] then return false end
+        end
+    end
+    if GetTrackingTexture then
+        local ok, curTex = pcall(GetTrackingTexture)
+        if ok and curTex and not IsSecret(curTex) and Tracking.Matches(t, nil, curTex, nil) then return false end
+    end
+    if scan and scan.unreliable then return nil end
+    return SpellKnown(t.spell)
+end
+
+-- Auswahl im Einstellungs-Knopf: gelernte Verfolgungen + "none"
+function Tracking.Choices()
+    local list = {}
+    for _, k in ipairs(Tracking.ORDER) do
+        if Tracking.Learned(k) then list[#list + 1] = k end
+    end
+    list[#list + 1] = "none"
+    return list
+end
+
+function Tracking.Cycle()
+    local list, cur = Tracking.Choices(), Tracking.Wanted() or "none"
+    local idx = 0
+    for i, k in ipairs(list) do
+        if k == cur then idx = i end
+    end
+    cdb.trackWanted = list[idx % #list + 1]
+end
+
+function Tracking.ButtonText()
+    local key = Tracking.Wanted()
+    local name = Tracking.Label(key)
+    if key and cdb.trackWanted == nil then name = L.TRACK_AUTO:format(name) end
+    return L.TRACK:format(name)
+end
+
+-- Linksklick bzw. Taste auf einer Verfolgungs-Zeile: Verfolgung einschalten (nur außerhalb des
+-- Kampfes; der Button hat dafür keine secure Aktion). true = Klick behandelt.
+function Tracking.Activate(btn)
+    local a = btn.action
+    if not (a and a.trackIndex) then return false end
+    if InCombatLockdown() then Print(L.COMBAT); return true end
+    local setFn = Tracking.SetFn()
+    if setFn then
+        pcall(setFn, a.trackIndex, true)
+        Evaluate()
+    end
+    return true
+end
+
 local function ComputeKnown(e)
     if e.kind == "tracking" then
-        if Tracking.Find(e) then return true end
-        for _, id in ipairs(e.knownIds or e.ids or {}) do
-            if SpellKnown(id) then return true end
-        end
-        return false
+        -- gewünschte Verfolgung neu bestimmen; "erlernt" = gewünschte Verfolgung gelernt
+        Tracking.Apply(e)
+        return e.trackType ~= nil and Tracking.Learned(e.trackType)
     end
     if e.general then return true end
     local lvl = UnitLevel("player") or 1
@@ -1610,6 +1727,8 @@ local function IsEnabled(e)
     if e.kind == "reagent" then return ExpOn("expReagents") and ReagentThreshold(e.item) > 0 end
     -- Klassen-Verbrauchsgüter: nur mit aktivem Experimental-Schalter
     if e.kind == "conjure" and not ExpOn("expConsumables") then return false end
+    -- Verfolgungs-Erinnerung: nur mit Experimental-Schalter und gewünschter Verfolgung
+    if e.kind == "tracking" then return ExpOn("expTracking") and e.trackType ~= nil end
     -- Waffen-Items: nur mit Experimental-Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return false end
@@ -1947,28 +2066,7 @@ local function CheckMissing(e, scan)
         return n < ReagentThreshold(e.item)
     end
     if e.kind == "conjure" then return Conjure.Missing(e) end
-    if e.kind == "tracking" then
-        local idx, active, unavailable = Tracking.Find(e)
-        if idx then return not active end
-        if unavailable then return nil end
-        if scan then
-            for id in pairs(e.idSet) do
-                if scan.ids[id] then return false end
-            end
-            for _, n in ipairs(e.names) do
-                if scan.names[n] then return false end
-            end
-        end
-        if GetTrackingTexture then
-            local ok, curTex = pcall(GetTrackingTexture)
-            if ok and curTex and not IsSecret(curTex) and Tracking.TexMatch(e, curTex) then
-                return false
-            end
-        end
-        if scan and scan.unreliable then return nil end
-        if SpellKnown(e.ids[1]) then return true end
-        return false
-    end
+    if e.kind == "tracking" then return Tracking.Missing(e, scan) end
     if e.kind == "weapon_mh" or e.kind == "weapon_oh" then
         local slot = (e.kind == "weapon_mh") and 16 or 17
         if not HasWeaponIn(slot) then return false end
@@ -2965,13 +3063,8 @@ function Display.GetRow(i)
     r:SetScript("PostClick", function(self, button, down)
         if not Display.IsActionPhase(down) then return end
         if button == "LeftButton" then
-            if self.entry and self.entry.kind == "tracking" and self.action and self.action.trackIndex
-                and not unlocked and db.clickCast then
-                local setFn = Tracking.SetFn()
-                if setFn then
-                    pcall(setFn, self.action.trackIndex, true)
-                    Evaluate()
-                end
+            -- Verfolgungs-Zeile: Verfolgung einschalten (nur außerhalb des Kampfes)
+            if self.entry and self.entry.kind == "tracking" and not unlocked and Tracking.Activate(self) then
                 return
             end
             -- per Linksklick benutztes Fläschchen als "zuletzt benutzt" merken
@@ -3096,10 +3189,13 @@ function Display.ShowRows(list, dragMode, expFrom)
             local item, noItem, macro
             local kind = Items.KindOf(e)
             if e.kind == "tracking" and db.clickCast then
-                if e.trackIndex and Tracking.SetFn() then
-                    trackIndex = e.trackIndex
-                elseif e.ids and e.ids[1] and SpellKnown(e.ids[1]) then
-                    spell = e.ids[1]
+                -- Platz in der Verfolgungsliste (SetTracking im PostClick); ohne Liste: Zauber
+                -- der Verfolgung als secure Aktion, falls bekannt
+                local t = Tracking.TYPES[e.trackType or ""]
+                if t and t.index and Tracking.SetFn() then
+                    trackIndex = t.index
+                elseif t and SpellKnown(t.spell) then
+                    spell = t.spell
                 end
             elseif not spell and kind and db.clickCast then
                 local choices = Items.ItemChoices(e)
@@ -3135,7 +3231,9 @@ function Display.ShowRows(list, dragMode, expFrom)
                 Display.SetRowStatus(r, "missing")
                 if st.rightText then
                     r.text:SetText(EntryLabel(e))
-                    r.right:SetText(L.SHORT_MISSING)
+                    r.right:SetText(e.kind == "tracking" and L.SHORT_OFF or L.SHORT_MISSING)
+                elseif e.kind == "tracking" then
+                    r.text:SetText(L.TRACK_OFF:format(EntryLabel(e)))   -- "Mineraliensuche ist nicht aktiv"
                 elseif e.weaponItems then
                     r.text:SetText(EntryLabel(e))   -- "Waffe (Haupthand): Stein/Öl"
                 else
@@ -3231,6 +3329,8 @@ Keybind.button:SetScript("PostClick", function(self, button, down)
     if button ~= "LeftButton" or not Display.IsActionPhase(down) then return end
     -- per Taste benutztes Fläschchen als "zuletzt benutzt" merken (wie beim Linksklick)
     if self.useItem and self.entry and self.entry.itemKind == "flask" and cdb then cdb.lastFlask = self.useItem end
+    -- Verfolgungs-Zeile oben: Verfolgung einschalten wie beim Linksklick
+    if self.entry and self.entry.kind == "tracking" then Tracking.Activate(self) end
 end)
 
 -- Index der Zeile, die am Bildschirm ganz oben steht (n = Anzahl angezeigter Zeilen):
@@ -4011,9 +4111,6 @@ function RefreshConfig()
     local expCons = ExpOn("expConsumables")
     for _, w in ipairs(Cfg.configRows) do
         local e = w.entry
-        if e.kind == "tracking" and not knownCache[e.key] then
-            knownCache[e.key] = ComputeKnown(e)
-        end
         local known = knownCache[e.key]
         -- Verbrauchsgüter/Waffen-Items: eigenes Häkchen (Standard an), ausgegraut solange der
         -- Schalter aus ist (Schurke: auch solange der Gift-Eintrag des Slots aktiv ist)
@@ -4118,6 +4215,10 @@ function RefreshConfig()
     end
     config.expWeaponCB:SetChecked(ExpOn("expWeaponItems"))
     config.expVariantCB:SetChecked(ExpOn("expVariantMenu"))
+    local expTrack = ExpOn("expTracking")
+    config.expTrackCB:SetChecked(expTrack)
+    config.trackBtn:SetText(Tracking.ButtonText())
+    if expTrack then config.trackBtn:Enable() else config.trackBtn:Disable() end
     config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
     config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
     config.iconsCB:SetChecked(db.iconsOnly)
@@ -4604,6 +4705,24 @@ local function BuildConfig()
         RefreshConfig()
     end)
     y = y - 26
+    -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine")
+    config.expTrackCB = Cfg.MakeCheck(p, L.EXP_TRACKING, 16, y, function(self)
+        db.expTracking = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 28
+    config.trackBtn = Cfg.MakeButton(p, "", 240)
+    config.trackBtn:SetPoint("TOPLEFT", 40, y)
+    config.trackBtn:SetScript("OnClick", function()
+        Tracking.Cycle()
+        RefreshKnown()
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 28
     y = y - 10
 
     config.soundBtn = Cfg.MakeButton(p, "", 100)
@@ -4811,6 +4930,11 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             end
         end
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
+        -- Verfolgungs-Erinnerung (experimentell): eigener Eintrag ohne Zeile in der Buff-Liste der
+        -- Einstellungen; gilt überall (nicht nur in Instanzen); Verfolgung wird in RefreshKnown bestimmt
+        Tracking.entry = { key = "gen_tracking", general = true, kind = "tracking", everywhere = true, ids = {} }
+        PrepareEntry(Tracking.entry)
+        entries[#entries + 1] = Tracking.entry
         -- Essen & Fläschchen: Kategorie-Gewichte der Klasse, gelernte Fläschchen-Spells, Taschen
         for _, e in ipairs(GENERAL_BUFFS) do
             if e.itemKind == "flask" then flaskEntry = e end
@@ -4995,6 +5119,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
     if event == "MINIMAP_UPDATE_TRACKING" then
         RefreshKnown()
         Evaluate()
+        RefreshConfig()   -- Umschalt-Knopf "Verfolgen" (nur bei sichtbaren Einstellungen)
         return
     end
 
@@ -5064,7 +5189,9 @@ SlashCmdList.BUFFREMINDER = function(msg)
         for k in pairs(DEFAULTS) do db[k] = nil end
         -- Experimental-Schalter: wieder Build-abhängig
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
-        db.expVariantMenu, db.expBlessings = nil, nil
+        db.expVariantMenu, db.expBlessings, db.expTracking = nil, nil, nil
+        cdb.trackWanted = nil                     -- Verfolgung wieder automatisch
+        RefreshKnown()
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
