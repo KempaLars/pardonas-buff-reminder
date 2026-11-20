@@ -1,0 +1,3 @@
+local _, ns = ...
+local L = ns.Locales.New("ptBR")
+--@localization(locale="ptBR", format="lua_additive_table", handle-unlocalized="ignore", table-name="L")@

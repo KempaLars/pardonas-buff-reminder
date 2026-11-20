@@ -99,3 +99,6 @@ read_globals = {
     "Screenshot",
     "wipe",
 }
+
+-- Locale files: "L" stays unused until the CurseForge packager inserts the phrases
+files["Locales/*.lua"] = { ignore = { "211/L" } }

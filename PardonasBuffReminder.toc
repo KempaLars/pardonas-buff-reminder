@@ -10,5 +10,14 @@
 ## SavedVariablesPerCharacter: BuffReminderCharDB
 ## IconTexture: Interface\AddOns\PardonasBuffReminder\Textures\Icon
 
+Locales\Locales.lua
+Locales\enUS.lua
+Locales\deDE.lua
+Locales\frFR.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\ruRU.lua
+Locales\ptBR.lua
+Locales\itIT.lua
 Libs\lib-pardona\lib-pardona.xml
 PardonasBuffReminder.lua

@@ -5,7 +5,7 @@
 -- Linksklick auf Erinnerung = Buff auf sich selbst zaubern (abschaltbar);
 -- bei Essen/Fläschchen = bestes Item aus den Taschen benutzen, Rechtsklick = Auswahl.
 
-local ADDON_NAME = ...
+local ADDON_NAME, ns = ...
 
 -- Lua 5.1 erlaubt max. 200 lokale Variablen im Hauptchunk und 60 Upvalues pro Funktion.
 -- Zusammengehörige Funktionen/Daten liegen deshalb in diesen Tabellen statt in eigenen locals.
@@ -26,353 +26,13 @@ local Demo = {}      -- versteckter Demo-Modus mit Screenshot-Lauf (nur mit Buff
 ---------------------------------------------------------------------------
 -- Texte
 ---------------------------------------------------------------------------
-local L
-if GetLocale() == "deDE" then
-    L = {
-        TITLE         = "Pardona's Buff Reminder",
-        MISSING       = "%s fehlt",
-        CHAT          = "|cffffb000%s fehlt – bitte nachbuffen!|r",
-        CLASS_SECTION = "Klassenbuffs – %s",
-        GENERAL       = "Allgemeine Buffs",
-        FROM_LEVEL    = "ab Stufe %d",
-        TALENT        = "Talent (ab Stufe %d)",
-        NOT_LEARNED   = "nicht erlernt",
-        MUTED         = "stumm %s",
-        SESSION       = "Sitzung",
-        RIGHTCLICK    = "Rechtsklick: stummschalten",
-        ENABLED       = "Addon aktiv",
-        INSTANCE_ONLY = "Allgemeine Buffs nur in Instanzen",
-        INSTANCE_HINT = "nur in Instanzen",
-        SOUND         = "Ton: %s",
-        MOVE          = "Verschieben",
-        LOCK          = "Fixieren",
-        TEST          = "Test",
-        UNMUTE        = "Stumm aufheben",
-        UNMUTED       = "Alle Stummschaltungen aufgehoben.",
-        DRAG          = "Ziehen zum Verschieben",
-        STATUS_ONE    = "1 Buff fehlt",
-        STATUS_MANY   = "%d Buffs fehlen",
-        STATUS_OK     = "Alles aktiv",
-        NO_CLASS      = "Keine Klassenbuffs für diese Klasse hinterlegt.",
-        RESET         = "Einstellungen zurückgesetzt.",
-        SOUNDS        = { ping = "Ping", glocke = "Glocke", alarm = "Alarm", aus = "Aus" },
-        HELP          = {
-            "/br – Einstellungen öffnen",
-            "/br test – Erinnerung testen",
-            "/br minimap – gemeinsamen Pardona-Minimap-Button ein/aus",
-            "/br unmute – alle Stummschaltungen aufheben",
-            "/br auras – aktive Buffs mit Namen und Spell-ID auflisten",
-            "/br reset – Position und Einstellungen zurücksetzen",
-        },
-        AURAS_HEAD    = "Aktive Buffs (Name – Spell-ID):",
-        -- Sammelbezeichnungen
-        ANY_BLESSING  = "Segen (beliebig)",
-        ANY_AURA      = "Aura (beliebig)",
-        ANY_SEAL      = "Siegel (beliebig)",
-        ANY_ASPECT    = "Aspekt (beliebig)",
-        MAGE_ARMOR    = "Rüstung (Frost/Eis/Magie/Glühend)",
-        LOCK_ARMOR    = "Dämonenhaut / Dämonen- / Teufelsrüstung",
-        SHAMAN_SHIELD = "Blitz- / Wasser- / Erdschild",
-        MH_ENCHANT    = "Waffenverzauberung Haupthand",
-        OH_ENCHANT    = "Waffenverzauberung Nebenhand",
-        MH_POISON     = "Gift Haupthand",
-        OH_POISON     = "Gift Nebenhand",
-        SHOUT         = "Schlachtruf / Befehlsruf",
-        FLASK         = "Fläschchen",
-        WELLRESTED    = "Well-Rested (Schlafsack)",
-        -- Klick-Zaubern
-        HINT_CAST     = "Linksklick: zaubern · Rechtsklick: stumm",
-        HINT_TRACK    = "Linksklick: aktivieren · Rechtsklick: stumm",
-        HINT_MUTE     = "Rechtsklick: stumm",
-        LEFTCLICK     = "Linksklick: zaubern",
-        LEFTCLICK_TRACK = "Linksklick: aktivieren",
-        CLICKCAST     = "Linksklick zaubert Buff",
-        COMBAT        = "Im Kampf nicht möglich.",
-        AFTER_COMBAT  = "Änderung wird nach dem Kampf angezeigt.",
-        -- Reagenzien
-        REAGENT_HINT  = "Warnen unter (0 = aus)",
-        REAGENT_LOW   = "%s: %d übrig",
-        REAGENT_CHAT  = "|cffffb000Reagenz knapp: %s – nur noch %d!|r",
-        IN_BAGS       = "%d in Taschen",
-        -- Ess-Countdown
-        EATING        = "Isst … %d s",
-        EATING_DONE   = "Gleich satt …",
-        HINT_EATING   = "Sitzen bleiben",
-        -- Versionshinweis beim Login (Beta/Alpha/Entwicklerversion)
-        VERSION_LOADED = "Version %s geladen",
-        DEV_BUILD      = "Entwicklerversion geladen",
-        -- Essen & Fläschchen
-        HINT_ITEM     = "Linksklick: %s · Rechtsklick: Auswahl",
-        HINT_NOITEM   = "Nicht in der Tasche · Rechtsklick: stumm",
-        LEFTCLICK_USE = "Linksklick: %s benutzen",
-        RIGHTCLICK_CHOOSE = "Rechtsklick: Auswahl / stummschalten",
-        -- Experimentelle Funktionen
-        EXP_SECTION   = "Experimentell (Beta) – Nutzung auf eigene Gefahr",
-        EXP_NOTE      = "Diese Funktionen sind noch nicht vollständig getestet.",
-        EXP_GROUP     = "Gruppen-Buffs",
-        EXP_REAGENTS  = "Reagenzien-Warnung",
-        EXP_EXPIRY    = "Warnung vor Ablauf",
-        EXP_CONSUMABLES = "Klassen-Verbrauchsgüter",
-        EXP_WEAPONITEMS = "Steine, Öle, Gifte per Klick",
-        EXP_VARIANTMENU = "Variantenmenü per Rechtsklick",
-        EXP_BLESSINGS = "Segen des Paladins in Gruppenbuffs",
-        BLESS_PALLYPOWER = "Aus, solange Pally Power geladen ist",
-        -- Demo-Modus (versteckt)
-        DEMO_ON       = "Demo-Modus an (/br demo off beendet ihn).",
-        DEMO_OFF      = "Demo-Modus aus.",
-        DEMO_ABORT    = "Demo-Modus wegen Kampf beendet.",
-        DEMO_ALTZ     = "Bitte Alt+Z drücken.",
-        DEMO_PRINT    = "Bitte Druck-Taste drücken.",
-        DEMO_SHOT_FAIL = "Bild %s fehlgeschlagen.",
-        DEMO_TIMEOUT  = "Keine Reaktion – Screenshot-Lauf abgebrochen.",
-        DEMO_DONE     = "Screenshot-Lauf fertig: %d Bilder. Nach /reload umbenennen mit tools\\rename-demo-shots.ps1.",
-        EXP_TRACKING  = "Verfolgungs-Erinnerung",
-        TRACK         = "Verfolgen: %s",
-        TRACK_NONE    = "keine",
-        TRACK_AUTO    = "%s (automatisch)",
-        TRACK_OFF     = "%s ist nicht aktiv",
-        SHORT_OFF     = "aus",
-        -- Variantenmenü
-        MENU_VARIANT  = "Variante zaubern",
-        SUB_VARIANT   = "Variante zaubern oder stummschalten",
-        LAST_USED     = "zuletzt genutzt",
-        NO_VARIANT    = "Keine Variante erlernt",
-        HINT_CAST_CHOOSE = "Linksklick: zaubern · Rechtsklick: Auswahl",
-        HINT_CHOOSE   = "Rechtsklick: Variante wählen / stumm",
-        -- Warnung vor Ablauf
-        EXPIRES       = "%s läuft ab · %s",
-        EXPIRY_PCT    = "Schwelle: %d %%",
-        EXPIRY_ALPHA  = "Transparenz: %d %%",
-        -- Klassen-Verbrauchsgüter
-        CONJURE_COUNT = "%s: %d",
-        CONJURE_CHAT  = "|cffffb000%s – bitte nachzaubern!|r",
-        CONJURE_THRESHOLD = "Essen/Wasser unter: %d",
-        CONJURE_OFF   = "Essen/Wasser-Warnung: aus",
-        -- Waffen-Items
-        WEAPON_MH     = "Waffe (Haupthand): Stein/Öl",
-        WEAPON_OH     = "Waffe (Nebenhand): Stein/Öl",
-        WEAPON_BY_POISON = "Gift-Eintrag aktiv",
-        MENU_WEAPON   = "Steine & Öle in den Taschen",
-        MENU_POISON   = "Gifte in den Taschen",
-        WEAPON_CATS   = {
-            sharpen = "Wetzstein", weight = "Gewichtsstein", wizard = "Zauberöl", mana = "Manaöl",
-            instant = "Sofort wirkendes Gift", deadly = "Tödliches Gift", wound = "Wundgift",
-            crippling = "Verkrüppelndes Gift", mind = "Gedankenbenebelndes Gift",
-        },
-        -- Gruppen-Buffs
-        GROUP_CHECK   = "Gruppen-Buffs prüfen",
-        GROUP_MODE    = "Prüfen in: %s",
-        GROUP_MODES   = { always = "Immer", instance = "Nur Dungeon & Raid", raid = "Nur Raid" },
-        GROUP_MISSING = "%s fehlt: %d",
-        GROUP_CHAT    = "|cffffb000%s fehlt bei %d Spieler(n) – bitte nachbuffen!|r",
-        HINT_GROUP    = "Linksklick: Gruppe · Strg+Linksklick: einzeln · Rechtsklick: stumm",
-        HINT_SINGLE   = "Linksklick: einzeln · Rechtsklick: stumm",
-        LEFTCLICK_GROUP = "Linksklick: Gruppenversion auf %s",
-        LEFTCLICK_SINGLE = "Linksklick: Einzelversion auf %s",
-        CTRLCLICK_SINGLE = "Strg+Linksklick: Einzelversion auf %s",
-        -- Stile
-        STYLE         = "Stil: %s",
-        STYLE_NAMES   = { pardona = "Pardona", classic = "Classic", compact = "Compact" },
-        ICONS_ONLY    = "Nur Icons",
-        SHORT_MISSING = "fehlt",
-        -- Wachstumsrichtung der Liste
-        GROW          = "Neue Warnungen erscheinen: %s",
-        GROW_DOWN     = "unterhalb",
-        GROW_UP       = "oberhalb",
-        -- Tastenbelegung
-        KEY_HEADER    = "Buff Reminder",   -- Kopfzeile unter "Pardona's Addons" (wie enUS)
-        KEY_NAME      = "Oberste Warnung auslösen",
-        KEY_LINE      = "Taste „%s“: %s",
-        KEY_NONE      = "nicht belegt",
-        KEY_WHERE     = "Belegen unter Optionen > Tastaturbelegung > Pardona's Addons",
-        -- Rechtsklick-Menü
-        MENU_FOOD     = "Essen in den Taschen",
-        MENU_FLASK    = "Fläschchen",
-        MENU_MUTE     = "Stummschalten",
-        MUTE_5        = "5 Min",
-        MUTE_15       = "15 Min",
-        MUTE_60       = "60 Min",
-        MUTE_SESSION  = "Sitzung",
-        CLOSE_ESC     = "Schließen (Esc)",
-        BEST          = "beste Wahl",
-        NONE_IN_BAGS  = "Nichts in den Taschen",
-        SUB_ITEMS     = "Item benutzen oder stummschalten",
-        SUB_MUTE      = "Erinnerung stummschalten",
-        SUB_COMBAT    = "Im Kampf: nur Stummschalten",
-        FAV_ADD       = "Als Favorit markieren",
-        FAV_REMOVE    = "Favorit entfernen",
-        FOOD_CATS     = {
-            MeleeAP = "Nahkampf-Angriffskraft", SpellDamage = "Zauberschaden", Healing = "Heilung",
-            Stamina = "Ausdauer", Strength = "Stärke", Agility = "Beweglichkeit", Intellect = "Intelligenz",
-            Spirit = "Willenskraft", Crit = "Kritische Treffer", Armor = "Rüstung", Movement = "Bewegung",
-            Profession = "Beruf",
-        },
-    }
-else
-    L = {
-        TITLE         = "Pardona's Buff Reminder",
-        MISSING       = "%s missing",
-        CHAT          = "|cffffb000%s is missing – rebuff!|r",
-        CLASS_SECTION = "Class buffs – %s",
-        GENERAL       = "General buffs",
-        FROM_LEVEL    = "from level %d",
-        TALENT        = "Talent (level %d+)",
-        NOT_LEARNED   = "not learned",
-        MUTED         = "muted %s",
-        SESSION       = "session",
-        RIGHTCLICK    = "Right-click: mute",
-        ENABLED       = "Addon enabled",
-        INSTANCE_ONLY = "General buffs only in instances",
-        INSTANCE_HINT = "instances only",
-        SOUND         = "Sound: %s",
-        MOVE          = "Move",
-        LOCK          = "Lock",
-        TEST          = "Test",
-        UNMUTE        = "Unmute all",
-        UNMUTED       = "All mutes cleared.",
-        DRAG          = "Drag to move",
-        STATUS_ONE    = "1 buff missing",
-        STATUS_MANY   = "%d buffs missing",
-        STATUS_OK     = "All active",
-        NO_CLASS      = "No class buffs defined for this class.",
-        RESET         = "Settings reset.",
-        SOUNDS        = { ping = "Ping", glocke = "Bell", alarm = "Alarm", aus = "Off" },
-        HELP          = {
-            "/br – open settings",
-            "/br test – test the reminder",
-            "/br minimap – toggle the shared Pardona minimap button",
-            "/br unmute – clear all mutes",
-            "/br auras – list active buffs with name and spell ID",
-            "/br reset – reset position and settings",
-        },
-        AURAS_HEAD    = "Active buffs (name – spell ID):",
-        ANY_BLESSING  = "Blessing (any)",
-        ANY_AURA      = "Aura (any)",
-        ANY_SEAL      = "Seal (any)",
-        ANY_ASPECT    = "Aspect (any)",
-        MAGE_ARMOR    = "Armor (Frost/Ice/Mage/Molten)",
-        LOCK_ARMOR    = "Demon Skin / Demon / Fel Armor",
-        SHAMAN_SHIELD = "Lightning / Water / Earth Shield",
-        MH_ENCHANT    = "Main-hand weapon imbue",
-        OH_ENCHANT    = "Off-hand weapon imbue",
-        MH_POISON     = "Main-hand poison",
-        OH_POISON     = "Off-hand poison",
-        SHOUT         = "Battle / Commanding Shout",
-        FLASK         = "Flask",
-        WELLRESTED    = "Well-Rested (sleeping bag)",
-        HINT_CAST     = "Left-click: cast · Right-click: mute",
-        HINT_TRACK    = "Left-click: activate · Right-click: mute",
-        HINT_MUTE     = "Right-click: mute",
-        LEFTCLICK     = "Left-click: cast",
-        LEFTCLICK_TRACK = "Left-click: activate",
-        CLICKCAST     = "Left-click casts buff",
-        COMBAT        = "Not possible in combat.",
-        AFTER_COMBAT  = "Change will be shown after combat.",
-        REAGENT_HINT  = "Warn below (0 = off)",
-        REAGENT_LOW   = "%s: %d left",
-        REAGENT_CHAT  = "|cffffb000Reagent running low: %s – only %d left!|r",
-        IN_BAGS       = "%d in bags",
-        EATING        = "Eating … %d s",
-        EATING_DONE   = "Almost well fed …",
-        HINT_EATING   = "Stay seated",
-        VERSION_LOADED = "Version %s loaded",
-        DEV_BUILD      = "Development build loaded",
-        HINT_ITEM     = "Left-click: %s · Right-click: choose",
-        HINT_NOITEM   = "Not in bags · Right-click: mute",
-        LEFTCLICK_USE = "Left-click: use %s",
-        RIGHTCLICK_CHOOSE = "Right-click: choose / mute",
-        EXP_SECTION   = "Experimental (beta) – use at your own risk",
-        EXP_NOTE      = "These features are not fully tested yet.",
-        EXP_GROUP     = "Group buffs",
-        EXP_REAGENTS  = "Low reagent warning",
-        EXP_EXPIRY    = "Expiry warning",
-        EXP_CONSUMABLES = "Class consumables",
-        EXP_WEAPONITEMS = "Stones, oils, poisons by click",
-        EXP_VARIANTMENU = "Variant menu on right-click",
-        EXP_BLESSINGS = "Paladin blessings in group buffs",
-        BLESS_PALLYPOWER = "Off while Pally Power is loaded",
-        DEMO_ON       = "Demo mode on (/br demo off ends it).",
-        DEMO_OFF      = "Demo mode off.",
-        DEMO_ABORT    = "Demo mode ended because of combat.",
-        DEMO_ALTZ     = "Please press Alt+Z.",
-        DEMO_PRINT    = "Please press Print Screen.",
-        DEMO_SHOT_FAIL = "Screenshot %s failed.",
-        DEMO_TIMEOUT  = "No response – screenshot run aborted.",
-        DEMO_DONE     = "Screenshot run finished: %d images. After /reload, rename them with tools\\rename-demo-shots.ps1.",
-        EXP_TRACKING  = "Tracking reminder",
-        TRACK         = "Track: %s",
-        TRACK_NONE    = "none",
-        TRACK_AUTO    = "%s (automatic)",
-        TRACK_OFF     = "%s is not active",
-        SHORT_OFF     = "off",
-        MENU_VARIANT  = "Cast a variant",
-        SUB_VARIANT   = "Cast a variant or mute",
-        LAST_USED     = "last used",
-        NO_VARIANT    = "No variant learned",
-        HINT_CAST_CHOOSE = "Left-click: cast · Right-click: choose",
-        HINT_CHOOSE   = "Right-click: choose variant / mute",
-        EXPIRES       = "%s expires · %s",
-        EXPIRY_PCT    = "Threshold: %d %%",
-        EXPIRY_ALPHA  = "Opacity: %d %%",
-        CONJURE_COUNT = "%s: %d",
-        CONJURE_CHAT  = "|cffffb000%s – conjure more!|r",
-        CONJURE_THRESHOLD = "Food/water below: %d",
-        CONJURE_OFF   = "Food/water warning: off",
-        WEAPON_MH     = "Main hand: weapon enhancement",
-        WEAPON_OH     = "Off hand: weapon enhancement",
-        WEAPON_BY_POISON = "poison entry active",
-        MENU_WEAPON   = "Stones & oils in your bags",
-        MENU_POISON   = "Poisons in your bags",
-        WEAPON_CATS   = {
-            sharpen = "Sharpening stone", weight = "Weightstone", wizard = "Wizard oil", mana = "Mana oil",
-            instant = "Instant poison", deadly = "Deadly poison", wound = "Wound poison",
-            crippling = "Crippling poison", mind = "Mind-numbing poison",
-        },
-        GROUP_CHECK   = "Check group buffs",
-        GROUP_MODE    = "Check in: %s",
-        GROUP_MODES   = { always = "Always", instance = "Dungeons & raids only", raid = "Raids only" },
-        GROUP_MISSING = "%s missing: %d",
-        GROUP_CHAT    = "|cffffb000%s is missing on %d player(s) – rebuff!|r",
-        HINT_GROUP    = "Left-click: group · Ctrl+Left-click: single · Right-click: mute",
-        HINT_SINGLE   = "Left-click: single · Right-click: mute",
-        LEFTCLICK_GROUP = "Left-click: group version on %s",
-        LEFTCLICK_SINGLE = "Left-click: single version on %s",
-        CTRLCLICK_SINGLE = "Ctrl+Left-click: single version on %s",
-        STYLE         = "Style: %s",
-        STYLE_NAMES   = { pardona = "Pardona", classic = "Classic", compact = "Compact" },
-        ICONS_ONLY    = "Icons only",
-        SHORT_MISSING = "missing",
-        GROW          = "New warnings appear: %s",
-        GROW_DOWN     = "below",
-        GROW_UP       = "above",
-        KEY_HEADER    = "Buff Reminder",
-        KEY_NAME      = "Use top warning",
-        KEY_LINE      = "Key \"%s\": %s",
-        KEY_NONE      = "not bound",
-        KEY_WHERE     = "Set it under Options > Keybindings > Pardona's Addons",
-        MENU_FOOD     = "Food in your bags",
-        MENU_FLASK    = "Flasks",
-        MENU_MUTE     = "Mute",
-        MUTE_5        = "5 min",
-        MUTE_15       = "15 min",
-        MUTE_60       = "60 min",
-        MUTE_SESSION  = "Session",
-        CLOSE_ESC     = "Close (Esc)",
-        BEST          = "best choice",
-        NONE_IN_BAGS  = "None in your bags",
-        SUB_ITEMS     = "Use an item or mute",
-        SUB_MUTE      = "Mute this reminder",
-        SUB_COMBAT    = "In combat: mute only",
-        FAV_ADD       = "Mark as favorite",
-        FAV_REMOVE    = "Remove favorite",
-        FOOD_CATS     = {
-            MeleeAP = "Melee attack power", SpellDamage = "Spell damage", Healing = "Healing",
-            Stamina = "Stamina", Strength = "Strength", Agility = "Agility", Intellect = "Intellect",
-            Spirit = "Spirit", Crit = "Critical strike", Armor = "Armor", Movement = "Movement",
-            Profession = "Profession",
-        },
-    }
-end
+-- Die Texte stehen in Locales/*.lua (Schlüssel und englische Texte: Locales/enUS.lua; weitere
+-- Sprachen setzt der CurseForge-Packager ein). ns.L[key] = aktive Sprache, sonst enUS, sonst key.
+-- Aktiv ist zunächst die Client-Sprache; bei ADDON_LOADED gilt der versteckte Schalter
+-- BuffReminderDB.locale (nur gültige Codes mit Texten). Texte daher erst bei Bedarf lesen;
+-- was beim Laden gesetzt wird (Tastenbelegung), setzt ADDON_LOADED neu.
+local L = ns.L
+ns.Locales.Activate(ns.Locales.Client())   -- jetzt sind alle Sprachdateien geladen
 
 ---------------------------------------------------------------------------
 -- Buff-Datenbank
@@ -969,6 +629,12 @@ local LP = LibStub and LibStub("LibPardona-1.0", true)
 local PARDONA_ID = "BuffReminder"
 
 local function Print(msg) print("|cff66ccff" .. L.TITLE .. ":|r " .. msg) end
+
+-- Anzeigename eines Einstellungswerts (z. B. "SOUND_" + "glocke" -> L.SOUND_GLOCKE), sonst der Wert
+function Cfg.ValueText(prefix, value)
+    local v = tostring(value)
+    return ns.Locales.Text(prefix .. v:upper(), v)
+end
 
 -- Im Kampf: Hinweis, dass die Änderung erst danach sichtbar wird
 local function NoteDeferred()
@@ -2675,7 +2341,7 @@ end
 ---------------------------------------------------------------------------
 -- Stile (Warnanzeige + Rechtsklick-Menü)
 -- Alle Farben, Größen und Abstände stehen hier; ein neuer Stil = neuer Eintrag in
--- STYLES + Name in STYLE_ORDER + L.STYLE_NAMES. Farben: { r, g, b [, a] }.
+-- STYLES + Name in STYLE_ORDER + Text STYLE_NAME_<KEY> in Locales/enUS.lua. Farben: { r, g, b [, a] }.
 -- Texturen: nur Standard-UI-Elemente (Backdrop-Kanten, WHITE8X8, Highlight).
 ---------------------------------------------------------------------------
 Style.WHITE = "Interface\\Buttons\\WHITE8X8"
@@ -3488,11 +3154,15 @@ end
 Keybind.BINDING = "CLICK PardonasBuffReminderKeyButton:LeftButton"
 -- Kategorie "Pardona's Addons" steht wörtlich in Bindings.xml (category); darin die Kopfzeile
 -- BINDING_HEADER_<header-Token> = "Buff Reminder"
-_G.BINDING_HEADER_PARDONASBUFFREMINDER = L.KEY_HEADER
 -- Rückfall: Manche Clients zeigen die Kopfzeile (wie unter "Other") als eigenen Eintrag
 -- "HEADER_<Token>" an und suchen dessen Text unter BINDING_NAME_HEADER_<Token>
-_G["BINDING_NAME_HEADER_PARDONASBUFFREMINDER"] = L.KEY_HEADER
-_G["BINDING_NAME_" .. Keybind.BINDING] = L.KEY_NAME
+-- Beim Laden und nach dem Sprachwechsel (ADDON_LOADED) gesetzt.
+function Keybind.SetNames()
+    _G.BINDING_HEADER_PARDONASBUFFREMINDER = L.KEY_HEADER
+    _G["BINDING_NAME_HEADER_PARDONASBUFFREMINDER"] = L.KEY_HEADER
+    _G["BINDING_NAME_" .. Keybind.BINDING] = L.KEY_NAME
+end
+Keybind.SetNames()
 
 Keybind.button = CreateFrame("Button", "PardonasBuffReminderKeyButton", nil, "SecureActionButtonTemplate")
 Keybind.button:SetSize(1, 1)
@@ -3610,12 +3280,13 @@ function Menu.MenuButton(text, onClick)
     return b
 end
 
+-- { Text-Schlüssel, Dauer }; Beschriftung per Menu.SetTexts (nach dem Sprachwechsel neu)
 Menu.MUTE_OPTIONS = {
-    { L.MUTE_5, 300 }, { L.MUTE_15, 900 }, { L.MUTE_60, 3600 }, { L.MUTE_SESSION, math.huge },
+    { "MUTE_5", 300 }, { "MUTE_15", 900 }, { "MUTE_60", 3600 }, { "MUTE_SESSION", math.huge },
 }
 menu.muteButtons = {}
 for i, opt in ipairs(Menu.MUTE_OPTIONS) do
-    menu.muteButtons[i] = Menu.MenuButton(opt[1], function()
+    menu.muteButtons[i] = Menu.MenuButton("", function()
         if menu.entry and not menu.entry.demo then
             muted[menu.entry.key] = (opt[2] == math.huge) and math.huge or (GetTime() + opt[2])
             NoteDeferred()
@@ -3629,8 +3300,14 @@ menu.close = CreateFrame("Button", nil, menu)
 menu.close:SetHighlightTexture(Style.HIGHLIGHT, "ADD")
 menu.close.label = menu.close:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 menu.close.label:SetPoint("CENTER")
-menu.close.label:SetText(L.CLOSE_ESC)
 menu.close:SetScript("OnClick", function() menu:Hide() end)
+
+-- feste Beschriftungen des Menüs (beim Laden und nach dem Sprachwechsel bei ADDON_LOADED)
+function Menu.SetTexts()
+    for i, opt in ipairs(Menu.MUTE_OPTIONS) do menu.muteButtons[i].label:SetText(L[opt[1]]) end
+    menu.close.label:SetText(L.CLOSE_ESC)
+end
+Menu.SetTexts()
 
 -- Item-Zeilen (Secure Buttons: type "item")
 local itemPanel = CreateFrame("Frame", "BuffReminderItemMenu", UIParent)
@@ -3666,7 +3343,7 @@ function Menu.GetItemButton(i)
     b.name:SetWordWrap(false)
     b.xpBg = b:CreateTexture(nil, "ARTWORK")
     b.xp = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    b.xp:SetText("XP")
+    b.xp:SetText(L.XP_BADGE)
     b.xpBg:SetPoint("TOPLEFT", b.xp, "TOPLEFT", -3, 2)
     b.xpBg:SetPoint("BOTTOMRIGHT", b.xp, "BOTTOMRIGHT", 3, -2)
     b.info = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3760,8 +3437,8 @@ end
 
 -- Kategorie (Essen) bzw. leer (Fläschchen) für die Info-Zeile
 function Menu.ItemInfoText(c)
-    if c.cat then return L.FOOD_CATS[c.cat] or c.cat end
-    if c.wcat then return L.WEAPON_CATS[c.wcat] or c.wcat end
+    if c.cat then return ns.Locales.Text("FOOD_CAT_" .. c.cat:upper(), c.cat) end
+    if c.wcat then return ns.Locales.Text("WEAPON_CAT_" .. c.wcat:upper(), c.wcat) end
     return ""
 end
 
@@ -4391,7 +4068,7 @@ function RefreshConfig()
             Cfg.SetCheckEnabled(config.blessCB, expGroup and not Group.pallyPower)
             config.blessNote:SetText(Group.pallyPower and L.BLESS_PALLYPOWER or "")
         end
-        config.groupModeBtn:SetText(L.GROUP_MODE:format(L.GROUP_MODES[db.groupMode] or db.groupMode))
+        config.groupModeBtn:SetText(L.GROUP_MODE:format(Cfg.ValueText("GROUP_MODE_", db.groupMode)))
         if expGroup then config.groupModeBtn:Enable() else config.groupModeBtn:Disable() end
     end
     local expExpiry = ExpOn("expExpiry")
@@ -4410,8 +4087,8 @@ function RefreshConfig()
     config.expTrackCB:SetChecked(expTrack)
     config.trackBtn:SetText(Tracking.ButtonText())
     if expTrack then config.trackBtn:Enable() else config.trackBtn:Disable() end
-    config.soundBtn:SetText(L.SOUND:format(L.SOUNDS[db.sound] or db.sound))
-    config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
+    config.soundBtn:SetText(L.SOUND:format(Cfg.ValueText("SOUND_", db.sound)))
+    config.styleBtn:SetText(L.STYLE:format(Cfg.ValueText("STYLE_NAME_", db.style)))
     config.iconsCB:SetChecked(db.iconsOnly)
     Cfg.SetCheckEnabled(config.iconsCB, Style.STYLES[db.style] ~= nil and Style.STYLES[db.style].iconsOnly)
     config.growBtn:SetText(L.GROW:format(db.growUp and L.GROW_UP or L.GROW_DOWN))
@@ -5003,7 +4680,7 @@ local function RegisterPardonaSettings()
     if not LP or config then return end
     local canvas = CreateFrame("Frame", "BuffReminderSettingsCanvas")
     canvas:Hide()
-    local category = LP:RegisterSettingsCanvas(PARDONA_ID, canvas, "Buff Reminder")
+    local category = LP:RegisterSettingsCanvas(PARDONA_ID, canvas, L.SETTINGS_NAME)
     if not category then return end
     Cfg.configCanvas = canvas
     canvas:SetScript("OnShow", function()
@@ -5628,6 +5305,10 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
         db.flaskSpells = db.flaskSpells or {}     -- gelernte Spell-IDs von Fläschchen-Effekten
+        -- versteckter Sprach-Schalter (nicht in Hilfe/README/Einstellungen; /br reset lässt ihn stehen):
+        -- /run BuffReminderDB.locale = "frFR" + /reload; nil = Client-Sprache
+        ns.Locales.Activate(db.locale)
+        Keybind.SetNames(); Menu.SetTexts()       -- beim Laden gesetzte Texte in der aktiven Sprache
         RegisterPardona()                         -- erst jetzt: SavedVariables sind geladen
         self:UnregisterEvent("ADDON_LOADED")
         return
@@ -5897,6 +5578,8 @@ SlashCmdList.BUFFREMINDER = function(msg)
         if numFn then okN, numTrack = pcall(numFn) end
         dprint(("trackingTypes=%s"):format(okN and tostring(numTrack) or "err"))
         dprint(Style.DebugLine())
+        dprint(("locale: %s (client %s, override %s)"):format(ns.Locales.active, ns.Locales.Client(),
+            tostring(db.locale)))
         db.lastDebug = log
     elseif cmd == "auras" then
         Print(L.AURAS_HEAD)
@@ -5932,6 +5615,8 @@ SlashCmdList.BUFFREMINDER = function(msg)
         wipe(cdb.reagents)
         ApplyLayout(); Display.ApplyStyle(); Print(L.RESET); Evaluate()
     else
-        for _, line in ipairs(L.HELP) do Print(line) end
+        for _, k in ipairs({ "HELP_OPEN", "HELP_TEST", "HELP_MINIMAP", "HELP_UNMUTE", "HELP_AURAS", "HELP_RESET" }) do
+            Print(L[k])
+        end
     end
 end
