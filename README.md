@@ -57,7 +57,7 @@ Built for **WoW Forever** (Interface `16001`).
   In the Compact style these hints are shown in the tooltip only.
 - **Combat behaviour** – reminders are secure buttons, so the list (including click targets of group buff lines) cannot change during combat: reminders already shown can still be clicked (cast or mute), but new, removed or muted reminders and option changes are applied when combat ends. Test, Move/Lock and `/br reset` are refused in combat with a short chat message.
 - **Sound** – choose Ping, Bell, Alarm or Off. The sound only plays when a buff newly goes missing, not repeatedly.
-- **Movable display** – click "Move" in the settings, drag the reminder to the desired position and click "Lock". While moving, left-click does not cast.
+- **Movable display** – click "Move" in the settings (General tab), "Move display" in the right-click menu of any reminder, or type `/br move`; drag the reminder to the desired position and click "Lock" or type `/br lock`. While moving, left-click does not cast. Not possible in combat.
 - **Growth direction (beta)** – "New warnings appear: below / above" in the settings (default: below). With "above", the first reminder sits at the saved position and further reminders stack upwards, in every style; Move mode and `/br test` behave the same. Switching does not move the first reminder. With Compact "Icons only", icons are placed left to right, 8 per row; further rows are added below or above. The right-click menu always stays on screen and opens upwards if there is not enough room below the mouse pointer. In combat the new order is applied when combat ends.
 - **Styles (beta)** – choose the look of the reminders and the right-click menu in the settings ("Style"). Switching applies immediately (in combat: when combat ends).
   - **Pardona** (default) – dark purple gradient, gold border with rounded corners, colored status stripe on the left (red = missing, orange = low reagent, green = eating), icon with gold frame, golden title, grey-purple hint line. Its colors, border and fonts come from the shared library LibPardona-1.0 (shared with all Pardona addons); if the library does not provide them, the addon uses its own built-in values.
@@ -68,6 +68,17 @@ Built for **WoW Forever** (Interface `16001`).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – English and German, picked automatically from the game client language; more languages through CurseForge, see [Localization](#localization).
 
+## Settings
+
+The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or `/br`) is split into tabs. `/br` opens the tab you used last.
+
+- **General** – buttons Move/Lock, Test and Unmute all; Addon enabled; Left-click casts buff; Style and Icons only; growth direction; sound; the keybinding (current key and where to set it); Expiry warning (beta) with its threshold and opacity sliders.
+- **Class buffs** – your class's buffs with on/off checkboxes (spells not learned yet are greyed out with the level or talent they need); Variant menu on right-click (beta).
+- **General buffs** – Well Fed, Flask, Well-Rested and the main-hand/off-hand weapon enhancements, plus "General buffs only in instances"; Stones, oils, poisons by click (beta); Class consumables (beta) with the food/water threshold; Low reagent warning (beta) with the reagent list and thresholds; Tracking reminder (beta) with the "Track: …" button.
+- **Group** (only for classes with group buffs: Priest, Mage, Druid, Paladin) – Group buffs (beta), Check group buffs, Check in: …; for Paladins also Paladin blessings in group buffs (beta) with the Pally Power note.
+
+Experimental switches carry a "(beta)" suffix in their tab; their detail settings sit directly below and are greyed out while the switch is off. A footer in each tab with such switches explains: "(beta) = experimental: on in beta builds, off by default in releases".
+
 ## Right-click menu (beta)
 
 Right-clicking a reminder opens one window in the selected style:
@@ -76,15 +87,16 @@ Right-clicking a reminder opens one window in the selected style:
 - **Food in your bags / Flasks** (Well Fed and Flask reminders only, with "Left-click casts buff" on) – one line per matching item: item icon, name, an **XP** badge if the food gives an experience bonus (not shown at max level or with experience gain turned off), the food's category (e.g. Spirit), and the count on the right. The line that left-click on the reminder would use is marked "best choice". Click a line to use the item; hovering shows the highlight and the item tooltip. The star on the right of each line marks or unmarks the item as a favorite – it never uses the item. If nothing matching is in your bags, the section says so.
 - **Cast a variant** (variant menu (beta) only: Paladin aura and seal, Hunter aspect, Mage and Warlock armor, Shaman shield and weapon imbues) – one line per learned variant with icon and name; a click casts its highest learned rank and makes it the "last used" variant for left-click. The current one is marked "last used". See [Experimental features](#experimental-features-opt-in).
 - **Mute** – four buttons side by side: 5 min, 15 min, 60 min, Session.
+- **Move display** – a full-width button below the mute buttons: closes the menu and turns on move mode (same as "Move" in the settings or `/br move`). Not shown in combat.
 - **Close (Esc)** – the footer closes the window; Esc closes it as well, and it closes on its own when the mouse has left it for 2 seconds.
-- **In combat** only the header and the mute buttons are shown (the item and variant lines are secure buttons and cannot be created or changed in combat). An open window with items or variants closes when combat starts.
+- **In combat** only the header and the mute buttons are shown (no "Move display" either) (the item and variant lines are secure buttons and cannot be created or changed in combat). An open window with items or variants closes when combat starts.
 
 ## Keybinding (beta)
 
 Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warning** you can bind a key. All Pardona addons share the "Pardona's Addons" section. Pressing the key does the same as a left-click on the reminder at the very top of the screen: cast the buff, eat, drink a flask, imbue the weapon, or the group action of a group buff line. With "New warnings appear: above" that is the last reminder added (the highest one on screen); with Compact "Icons only" it is the leftmost icon of the top row. If no reminder is shown, the key does nothing.
 
 - The key follows the list out of combat. In combat it keeps the action it had when combat started and is updated when combat ends.
-- The settings show the current key (or "not bound") below the growth direction option.
+- The settings (General tab) show the current key (or "not bound") and where to set it.
 - Macro alternative: `/click PardonasBuffReminderKeyButton`. If your client casts on key down ("Cast action keybinds on key down" on) and this macro does nothing, use `/click PardonasBuffReminderKeyButton LeftButton 1` instead.
 
 ## Pardona's Addons (beta)
@@ -98,7 +110,7 @@ All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one 
 
 ## Experimental features (opt-in)
 
-These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings, in the section **"Experimental (beta) – use at your own risk"** below the general options. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
+These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings. Each switch sits in the tab it belongs to (see [Settings](#settings)) and is marked "(beta)": Expiry warning on the General tab, Variant menu on the Class buffs tab, Stones/oils/poisons, Class consumables, Low reagent warning and Tracking reminder on the General buffs tab, Group buffs and Paladin blessings on the Group tab. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
 
 While a feature is off, it does nothing at all: no group lines, no group scans, no reagent lines and no reagent count checks; your own reminders work as usual. The detail settings below each checkbox are greyed out while it is off. Changes take effect immediately (in combat: when combat ends).
 
@@ -174,6 +186,8 @@ Spell, item and tracking names as well as standard game texts come from the game
 | -------------- | --------------------------------------------- |
 | `/br`          | Open the settings (Pardona's Addons → Buff Reminder) |
 | `/br test`     | Show a test reminder for 5 seconds (not in combat) |
+| `/br move`     | Unlock the display to move it (not in combat) |
+| `/br lock`     | Lock the display again (not in combat)        |
 | `/br minimap`  | Show or hide the shared Pardona minimap button (all Pardona addons) |
 | `/br unmute`   | Clear all mutes                               |
 | `/br auras`    | List your active buffs with name and spell ID |
