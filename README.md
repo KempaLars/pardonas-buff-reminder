@@ -80,7 +80,7 @@ Right-clicking a reminder opens one window in the selected style:
 
 ## Keybinding (beta)
 
-Under Options → Keybindings → AddOns → **Pardona's Buff Reminder** you can bind a key to **"Use top warning"**. Pressing it does the same as a left-click on the reminder at the very top of the screen: cast the buff, eat, drink a flask, imbue the weapon, or the group action of a group buff line. With "New warnings appear: above" that is the last reminder added (the highest one on screen); with Compact "Icons only" it is the leftmost icon of the top row. If no reminder is shown, the key does nothing.
+Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warning** you can bind a key. All Pardona addons share the "Pardona's Addons" section. Pressing the key does the same as a left-click on the reminder at the very top of the screen: cast the buff, eat, drink a flask, imbue the weapon, or the group action of a group buff line. With "New warnings appear: above" that is the last reminder added (the highest one on screen); with Compact "Icons only" it is the leftmost icon of the top row. If no reminder is shown, the key does nothing.
 
 - The key follows the list out of combat. In combat it keeps the action it had when combat started and is updated when combat ends.
 - The settings show the current key (or "not bound") below the growth direction option.
@@ -213,7 +213,7 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 ├── .gitignore                      # Also ignores Libs/ (fetched by the packager or tools/fetch-libs.ps1)
 ├── .luacheckrc                     # luacheck configuration
 ├── .pkgmeta                        # Packager configuration
-├── Bindings.xml                    # Keybinding "Use top warning" (loaded automatically, not listed in the TOC)
+├── Bindings.xml                    # Keybinding "Use top warning" in the "Pardona's Addons" section (loaded automatically, not listed in the TOC)
 ├── PardonasBuffReminder.lua        # Addon code
 ├── PardonasBuffReminder.toc        # Addon metadata
 └── README.md

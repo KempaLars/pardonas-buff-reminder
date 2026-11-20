@@ -1,6 +1,10 @@
 <Bindings>
 	<!-- Use top warning: clicks the hidden secure button PardonasBuffReminderKeyButton, which mirrors
-	     the left-click action of the top reminder on screen. Header and name are set in Lua (deDE/enUS).
+	     the left-click action of the top reminder on screen.
+	     category is the literal section title "Pardona's Addons", shared by all Pardona addons: they have
+	     no common Lua place for a global category string, so every Pardona addon uses this same text.
+	     The header token PARDONASBUFFREMINDER is resolved in Lua via BINDING_HEADER_PARDONASBUFFREMINDER
+	     ("Buff Reminder"); the binding name via BINDING_NAME_CLICK PardonasBuffReminderKeyButton:LeftButton.
 	     Mainline loads Bindings.xml from the addon folder automatically (not listed in the TOC). -->
-	<Binding name="CLICK PardonasBuffReminderKeyButton:LeftButton" header="PARDONASBUFFREMINDER"></Binding>
+	<Binding name="CLICK PardonasBuffReminderKeyButton:LeftButton" category="Pardona's Addons" header="PARDONASBUFFREMINDER"></Binding>
 </Bindings>

@@ -159,10 +159,11 @@ if GetLocale() == "deDE" then
         GROW_DOWN     = "unterhalb",
         GROW_UP       = "oberhalb",
         -- Tastenbelegung
+        KEY_HEADER    = "Buff Reminder",   -- Kopfzeile unter "Pardona's Addons" (wie enUS)
         KEY_NAME      = "Oberste Warnung auslösen",
         KEY_LINE      = "Taste „%s“: %s",
         KEY_NONE      = "nicht belegt",
-        KEY_WHERE     = "Belegen unter Optionen → Tastaturbelegung → AddOns → Pardona's Buff Reminder",
+        KEY_WHERE     = "Belegen unter Optionen > Tastaturbelegung > Pardona's Addons",
         -- Rechtsklick-Menü
         MENU_FOOD     = "Essen in den Taschen",
         MENU_FLASK    = "Fläschchen",
@@ -305,10 +306,11 @@ else
         GROW          = "New warnings appear: %s",
         GROW_DOWN     = "below",
         GROW_UP       = "above",
+        KEY_HEADER    = "Buff Reminder",
         KEY_NAME      = "Use top warning",
         KEY_LINE      = "Key \"%s\": %s",
         KEY_NONE      = "not bound",
-        KEY_WHERE     = "Set it under Options → Keybindings → AddOns → Pardona's Buff Reminder",
+        KEY_WHERE     = "Set it under Options > Keybindings > Pardona's Addons",
         MENU_FOOD     = "Food in your bags",
         MENU_FLASK    = "Flasks",
         MENU_MUTE     = "Mute",
@@ -2765,7 +2767,12 @@ end
 -- zieht Evaluate (PLAYER_REGEN_ENABLED) sie nach. Auch per Makro: /click PardonasBuffReminderKeyButton
 ---------------------------------------------------------------------------
 Keybind.BINDING = "CLICK PardonasBuffReminderKeyButton:LeftButton"
-_G.BINDING_HEADER_PARDONASBUFFREMINDER = L.TITLE
+-- Kategorie "Pardona's Addons" steht wörtlich in Bindings.xml (category); darin die Kopfzeile
+-- BINDING_HEADER_<header-Token> = "Buff Reminder"
+_G.BINDING_HEADER_PARDONASBUFFREMINDER = L.KEY_HEADER
+-- Rückfall: Manche Clients zeigen die Kopfzeile (wie unter "Other") als eigenen Eintrag
+-- "HEADER_<Token>" an und suchen dessen Text unter BINDING_NAME_HEADER_<Token>
+_G["BINDING_NAME_HEADER_PARDONASBUFFREMINDER"] = L.KEY_HEADER
 _G["BINDING_NAME_" .. Keybind.BINDING] = L.KEY_NAME
 
 Keybind.button = CreateFrame("Button", "PardonasBuffReminderKeyButton", nil, "SecureActionButtonTemplate")
