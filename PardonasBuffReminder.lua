@@ -144,6 +144,10 @@ if GetLocale() == "deDE" then
         STYLE_NAMES   = { pardona = "Pardona", classic = "Classic", compact = "Compact" },
         ICONS_ONLY    = "Nur Icons",
         SHORT_MISSING = "fehlt",
+        -- Wachstumsrichtung der Liste
+        GROW          = "Neue Warnungen erscheinen: %s",
+        GROW_DOWN     = "unterhalb",
+        GROW_UP       = "oberhalb",
         -- Rechtsklick-Menü
         MENU_FOOD     = "Essen in den Taschen",
         MENU_FLASK    = "Fläschchen",
@@ -276,6 +280,9 @@ else
         STYLE_NAMES   = { pardona = "Pardona", classic = "Classic", compact = "Compact" },
         ICONS_ONLY    = "Icons only",
         SHORT_MISSING = "missing",
+        GROW          = "New warnings appear: %s",
+        GROW_DOWN     = "below",
+        GROW_UP       = "above",
         MENU_FOOD     = "Food in your bags",
         MENU_FLASK    = "Flasks",
         MENU_MUTE     = "Mute",
@@ -855,6 +862,7 @@ local DEFAULTS = {
     clickCast    = true,   -- Linksklick auf Erinnerung zaubert den Buff
     style        = "pardona",   -- Stil von Warnanzeige und Menü (STYLES)
     iconsOnly    = false,       -- nur bei Stil "compact": nur Icons zeigen
+    growUp       = false,       -- Liste wächst vom Anker nach oben (false: nach unten)
     expiryPct    = 10,          -- Warnung vor Ablauf: Restdauer <= x % der Gesamtdauer (5-50)
     expiryAlpha  = 0.5,         -- Warnung vor Ablauf: Zeilen-Transparenz (0.2-1)
     conjureThreshold = 20,      -- Magier: Warnung, wenn gezaubertes Essen/Wasser < x (0 = aus, max. 60)
@@ -2399,17 +2407,41 @@ function Display.LayoutRow(r)
     end
 end
 
--- Zeile i anordnen: untereinander, bei "Nur Icons" nebeneinander
+-- "Nur Icons": so viele Icons je Reihe (≈ Breite einer Compact-Zeile), dann Umbruch
+Display.ICONS_PER_LINE = 8
+
+function Display.GrowUp()
+    return db ~= nil and db.growUp == true
+end
+
+-- Zeile i anordnen (nur außerhalb des Kampfes). Die erste Zeile füllt den Anker aus
+-- (Anker = Größe einer Zeile), daher springt die Liste beim Umschalten der Richtung nicht.
+--   nach unten: Zeile 1 oben am Anker, weitere darunter
+--   nach oben : Zeile 1 unten am Anker, weitere darüber
+--   "Nur Icons": Raster mit ICONS_PER_LINE Icons je Reihe von links nach rechts;
+--                weitere Reihen darunter bzw. darüber
 function Display.PositionRow(i)
     local r = rows[i]
     local st = Style.CurrentStyle()
+    local gap, up = st.row.gap, Display.GrowUp()
     r:ClearAllPoints()
-    if i == 1 then
-        r:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, 0)
-    elseif Style.IconsOnly(st) then
-        r:SetPoint("TOPLEFT", rows[i - 1], "TOPRIGHT", st.row.gap, 0)
+    if Style.IconsOnly(st) then
+        local per = Display.ICONS_PER_LINE
+        local col, line = (i - 1) % per, math.floor((i - 1) / per)
+        local h = st.row.height
+        local x, y = col * (h + st.stripe + gap), line * (h + gap)
+        if up then
+            r:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", x, y)
+        else
+            r:SetPoint("TOPLEFT", anchor, "TOPLEFT", x, -y)
+        end
+    elseif i == 1 then
+        local p = up and "BOTTOMLEFT" or "TOPLEFT"
+        r:SetPoint(p, anchor, p, 0, 0)
+    elseif up then
+        r:SetPoint("BOTTOMLEFT", rows[i - 1], "TOPLEFT", 0, gap)
     else
-        r:SetPoint("TOPLEFT", rows[i - 1], "BOTTOMLEFT", 0, -st.row.gap)
+        r:SetPoint("TOPLEFT", rows[i - 1], "BOTTOMLEFT", 0, -gap)
     end
 end
 
@@ -3108,10 +3140,13 @@ function Menu.LayoutMenu(e)
     local height = -y + pad + st.inset
     menu:SetSize(width, height)
 
-    -- Position: an der gespeicherten Stelle, innerhalb des Bildschirms
+    -- Position: am Mauszeiger, innerhalb des Bildschirms. Reicht der Platz unter dem
+    -- Mauszeiger nicht, klappt das Fenster nach oben auf (Unterkante knapp unter dem Zeiger).
     local sw, sh = UIParent:GetWidth(), UIParent:GetHeight()
     local x = math.max(0, math.min(menu.x or 0, sw - width))
-    local top = math.min(sh, math.max(menu.y or sh, height))
+    local top = menu.y or sh
+    if top - height < 0 then top = top - 20 + height end
+    top = math.min(sh, math.max(top, height))
     menu:ClearAllPoints()
     menu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, top)
 
@@ -3472,6 +3507,7 @@ function RefreshConfig()
     config.styleBtn:SetText(L.STYLE:format(L.STYLE_NAMES[db.style] or db.style))
     config.iconsCB:SetChecked(db.iconsOnly)
     Cfg.SetCheckEnabled(config.iconsCB, Style.STYLES[db.style] ~= nil and Style.STYLES[db.style].iconsOnly)
+    config.growBtn:SetText(L.GROW:format(db.growUp and L.GROW_UP or L.GROW_DOWN))
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
 end
 
@@ -3773,6 +3809,18 @@ local function BuildConfig()
         NoteDeferred()
         Display.ApplyStyle()
         Evaluate()
+    end)
+    y = y - 30
+
+    -- Wachstumsrichtung: neue Warnungen unterhalb (Standard) oder oberhalb des Ankers
+    config.growBtn = Cfg.MakeButton(p, "", 260)
+    config.growBtn:SetPoint("TOPLEFT", 18, y)
+    config.growBtn:SetScript("OnClick", function()
+        db.growUp = not db.growUp
+        NoteDeferred()
+        Display.ApplyStyle()   -- ordnet die Zeilen neu an (im Kampf erst danach)
+        Evaluate()
+        RefreshConfig()
     end)
     y = y - 34
 
