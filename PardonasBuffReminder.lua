@@ -23,6 +23,7 @@ local Variant = {}   -- Variantenmenü per Rechtsklick (experimentell)
 local Tracking = {}  -- Minimap-Tracking (z. B. Mineraliensuche)
 local Demo = {}      -- versteckter Demo-Modus mit Screenshot-Lauf (nur mit BuffReminderDB.demo)
 local Elixir = {}    -- Wunsch-Elixiere pro Charakter (experimentell)
+local Scroll = {}    -- Rollen (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -1032,6 +1033,8 @@ function Items.ItemChoices(e)
         end)
     elseif kind == "weapon" or kind == "poison" then
         return Items.WeaponChoices(e, kind)
+    elseif kind == "scroll" then
+        return Scroll.Choices(e)
     elseif kind == "elixir" then
         -- ein Eintrag = ein Elixier
         local cnt = Items.bagCounts[e.item]
@@ -1203,6 +1206,7 @@ local function EntryLabel(e)
     if e.kind == "reagent" then return ItemName(e.item) end
     if e.kind == "tracking" then return Tracking.Label(e.trackType) end
     if e.kind == "elixir" then return ItemName(e.item) end
+    if e.kind == "scroll" then return Scroll.Label(e) end
     if e.label then   -- Variantengruppen: Grundwort + bekannte Varianten (Variant.GroupLabel)
         return e.variantClass and Variant.GroupLabel(e.variantClass, e.key, e.label) or L[e.label]
     end
@@ -1221,6 +1225,12 @@ local function EntryIcon(e)
         return ItemIcon(Conjure.RankItem(e)) or SpellIcon(e.knownIds[1]) or FALLBACK_ICON
     end
     if e.kind == "elixir" then return ItemIcon(e.item) or FALLBACK_ICON end
+    if e.kind == "scroll" then
+        -- Icon der besten Rolle der Art in den Taschen, sonst der höchsten Rolle
+        local c = Scroll.Choices(e)[1]
+        local def = Scroll.TYPES[e.scrollType]
+        return ItemIcon(c and c.id or def.items[#def.items]) or FALLBACK_ICON
+    end
     if e.weaponItems then
         -- Icon der aktuell besten Wahl aus den Taschen
         local c = Items.KindOf(e) and Items.ItemChoices(e)[1]
@@ -1427,6 +1437,8 @@ local function IsEnabled(e)
     if e.kind == "tracking" then return ExpOn("expTracking") and e.trackType ~= nil end
     -- Wunsch-Elixiere: nur mit Experimental-Schalter und Haken in der Liste (pro Charakter)
     if e.kind == "elixir" then return ExpOn("expElixirs") and cdb.elixirsWanted[e.item] == true end
+    -- Rollen: nur mit Experimental-Schalter; je Art abschaltbar (pro Charakter)
+    if e.kind == "scroll" then return ExpOn("expScrolls") and not cdb.scrollsOff[e.scrollType] end
     -- Waffen-Items: nur mit Experimental-Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return false end
@@ -1799,6 +1811,10 @@ local function CheckMissing(e, scan)
     if e.kind == "tracking" then return Tracking.Missing(e, scan) end
     if e.kind == "elixir" then
         local pre = Elixir.Precheck(e)   -- nicht in den Taschen / Buff unbekannt -> keine Warnung
+        if pre ~= nil then return pre end
+    end
+    if e.kind == "scroll" then
+        local pre = Scroll.Precheck(e, scan)   -- keine Rolle / Wert durch Klassenbuff abgedeckt
         if pre ~= nil then return pre end
     end
     if e.kind == "weapon_mh" or e.kind == "weapon_oh" then
@@ -2443,6 +2459,8 @@ function Items.LearnItem(id)
         Items.LearnFlaskSpell(id)
     elseif Elixir.IsElixir(id) then
         Elixir.Seen(id)
+    elseif Scroll.TypeOf(id) then
+        Scroll.Learn(id)
     end
 end
 
@@ -2504,6 +2522,140 @@ function Elixir.List()
         return a.item < b.item
     end)
     return list
+end
+
+---------------------------------------------------------------------------
+-- Rollen (experimentell, Schalter expScrolls): je Art eine Warnung, wenn eine Rolle dieser Art
+-- in den Taschen liegt, ihr Buff fehlt und der Wert nicht schon durch einen Klassenbuff
+-- abgedeckt ist (Intelligenz, Willenskraft, Ausdauer). Linksklick: höchste Rolle der Art,
+-- Rechtsklick: Item-Menü mit den Rollen der Art. Aus pro Charakter: cdb.scrollsOff[art] = true.
+--   items  : Rollen I-IV (Item-IDs, aufsteigend); Rückfall: Verbrauchsgut/Rolle, deren Zauber
+--            (ID oder Name) zu einer Art gehört
+--   spells : Buffs der Ränge I-IV (Classic-IDs; zusätzlich die Item-Zauber aus dem Client)
+--   cover  : Klassenbuff, der den Wert schon liefert (Eintrag in CLASS_BUFFS, alle Ränge)
+---------------------------------------------------------------------------
+Scroll.ORDER = { "agility", "strength", "intellect", "spirit", "stamina", "protection" }
+Scroll.TYPES = {
+    agility    = { items = { 3012, 1477, 4425, 10309 }, spells = { 8115, 8116, 8117, 12174 } },
+    strength   = { items = { 954, 2289, 4426, 10310 },  spells = { 8118, 8119, 8120, 12179 } },
+    intellect  = { items = { 955, 2290, 4419, 10308 },  spells = { 8096, 8097, 8098, 12176 },
+                   cover = { "MAGE", "intellect" } },
+    spirit     = { items = { 1181, 1712, 4424, 10306 }, spells = { 8112, 8113, 8114, 12177 },
+                   cover = { "PRIEST", "divinespirit" } },
+    stamina    = { items = { 1180, 1711, 4422, 10307 }, spells = { 8099, 8100, 8101, 12178 },
+                   cover = { "PRIEST", "fortitude" } },
+    protection = { items = { 3013, 1478, 4421, 10305 }, spells = { 8091, 8094, 8095, 12175 } },
+}
+Scroll.byItem = {}     -- Item-ID -> { type, rank } (feste IDs + per Rückfall erkannte)
+Scroll.bySpell = {}    -- Spell-ID -> Art
+Scroll.byName = {}     -- Zaubername -> Art
+Scroll.entries = {}    -- Art -> Eintrag
+-- Nachschlagetabellen der festen IDs (Funktion statt Schleife im Haupt-Chunk: keine weiteren locals)
+function Scroll.Init()
+    for t, def in pairs(Scroll.TYPES) do
+        for i, id in ipairs(def.items) do Scroll.byItem[id] = { type = t, rank = i } end
+        for _, id in ipairs(def.spells) do Scroll.bySpell[id] = t end
+    end
+end
+Scroll.Init()
+
+-- Art einer Rolle; nil = keine Rolle. Rückfall über Item-Klasse + Zauber (gecacht)
+function Scroll.TypeOf(id)
+    local info = Scroll.byItem[id]
+    if info then return info.type, info.rank end
+    if info == false then return nil end
+    if not Items.IsConsumableSub(id, "Scroll", 4) then return nil end
+    local spellID, name = Items.ItemSpell(id)
+    if not spellID then return nil end   -- später erneut (Item-Daten folgen)
+    local t = Scroll.bySpell[spellID] or (name and Scroll.byName[name])
+    Scroll.byItem[id] = t and { type = t, rank = 0 } or false
+    return t, 0
+end
+
+-- Zauber einer Rolle aus dem Client übernehmen (falls Forever andere IDs nutzt)
+function Scroll.Learn(id)
+    local t = Scroll.TypeOf(id)
+    local e = t and Scroll.entries[t]
+    if not e then return end
+    local spellID, name = Items.ItemSpell(id)
+    if spellID then
+        Scroll.bySpell[spellID] = t
+        Elixir.AddSpell(e, spellID, name)
+    end
+end
+
+-- PLAYER_LOGIN: sechs Einträge (Reihenfolge Scroll.ORDER) + Klassenbuffs, die Werte abdecken
+function Scroll.Setup()
+    for _, t in ipairs(Scroll.ORDER) do
+        local def = Scroll.TYPES[t]
+        local e = { key = "scroll_" .. t, general = true, kind = "scroll", itemKind = "scroll",
+                    scrollType = t, ids = def.spells, nameIds = { def.spells[#def.spells] } }
+        PrepareEntry(e)
+        for _, n in ipairs(e.names) do Scroll.byName[n] = t end
+        e.coverSet, e.coverNames = {}, {}
+        if def.cover then
+            for _, c in ipairs(CLASS_BUFFS[def.cover[1]] or {}) do
+                if c.key == def.cover[2] then
+                    for _, id in ipairs(c.ids or {}) do e.coverSet[id] = true end
+                    for _, id in ipairs(c.nameIds or {}) do
+                        local n = SpellName(id)
+                        if n then e.coverNames[n] = true end
+                    end
+                end
+            end
+        end
+        Scroll.entries[t] = e
+        entries[#entries + 1] = e
+        ItemName(def.items[#def.items])   -- Name der höchsten Rolle vorladen (Einstellungen)
+    end
+end
+
+-- Rollen der Art des Eintrags aus den Taschen: Favoriten, dann höchster Rang, dann Anzahl
+function Scroll.Choices(e)
+    local list, favs = {}, cdb and cdb.favorites or {}
+    local lvl = UnitLevel("player") or 1
+    for id, n in pairs(Items.bagCounts) do
+        local t, rank = Scroll.TypeOf(id)
+        if t == e.scrollType then
+            local _, minLevel = Items.ItemLevels(id)
+            if not minLevel or minLevel <= lvl then
+                list[#list + 1] = { id = id, count = n, rank = rank or 0, fav = favs[id] == true }
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.fav ~= b.fav then return a.fav end
+        if a.rank ~= b.rank then return a.rank > b.rank end
+        if a.count ~= b.count then return a.count > b.count end
+        return a.id < b.id
+    end)
+    return list
+end
+
+-- Anzahl der Rollen einer Art in den Taschen
+function Scroll.Count(e)
+    local n = 0
+    for _, c in ipairs(Scroll.Choices(e)) do n = n + c.count end
+    return n
+end
+
+-- Name der Art: Rolle des höchsten Rangs (aus dem Client)
+function Scroll.Label(e)
+    local def = Scroll.TYPES[e.scrollType]
+    return ItemName(def.items[#def.items])
+end
+
+-- false = keine Rolle in den Taschen oder Wert durch einen Klassenbuff abgedeckt; nil = weiter
+function Scroll.Precheck(e, scan)
+    if #Scroll.Choices(e) == 0 then return false end
+    if not scan then return nil end
+    for id in pairs(e.coverSet) do
+        if scan.ids[id] then return false end
+    end
+    for n in pairs(e.coverNames) do
+        if scan.names[n] then return false end
+    end
+    return nil
 end
 
 -- true = fehlt, false = nicht relevant/vorhanden, nil = unbekannt (Rest in CheckMissing)
@@ -3665,6 +3817,7 @@ function Menu.ItemHeadText(kind)
     if kind == "flask" then return L.MENU_FLASK end
     if kind == "weapon" then return L.MENU_WEAPON end
     if kind == "poison" then return L.MENU_POISON end
+    if kind == "scroll" then return L.MENU_SCROLL end
     return L.MENU_FOOD
 end
 
@@ -4304,6 +4457,7 @@ function RefreshConfig()
     config.expTrackCB:SetChecked(expTrack)
     config.trackBtn:SetText(Tracking.ButtonText())
     config.expElixirCB:SetChecked(ExpOn("expElixirs"))
+    config.expScrollCB:SetChecked(ExpOn("expScrolls"))
     if Elixir.dirty then Cfg.LayoutElixirs() end
     config.elixirEmpty:SetTextColor(ExpOn("expElixirs") and 0.6 or 0.4, ExpOn("expElixirs") and 0.6 or 0.4, 0.4)
     if expTrack then config.trackBtn:Enable() else config.trackBtn:Disable() end
@@ -4959,6 +5113,20 @@ function Cfg.BuildOtherTab()
     end)
     y = y - 30
 
+    -- Rollen: Schalter + je Art ein Haken (Standard an; Name = Rolle des höchsten Rangs)
+    config.expScrollCB = Cfg.MakeBetaCheck(p, L.EXP_SCROLLS, 16, y, function(self)
+        db.expScrolls = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 26
+    for _, t in ipairs(Scroll.ORDER) do
+        Cfg.MakeEntryRow(p, Scroll.entries[t], y)
+        y = y - 26
+    end
+    y = y - 4
+
     -- Wunsch-Elixiere: Schalter + Liste aller bekannten Elixiere (Taschen + Merkliste); die Liste
     -- wächst, wenn neue Elixiere in die Taschen kommen (Cfg.LayoutElixirs rückt die Fußzeile nach)
     config.expElixirCB = Cfg.MakeBetaCheck(p, L.EXP_ELIXIRS, 16, y, function(self)
@@ -5005,9 +5173,9 @@ function Cfg.LayoutElixirs()
     Elixir.dirty = false
 end
 
--- Anzahl der Rollen einer Art in den Taschen (Rollen folgen in Scroll.Count)
-function Cfg.ScrollCount()
-    return 0
+-- Anzahl der Rollen einer Art in den Taschen
+function Cfg.ScrollCount(e)
+    return Scroll.Count(e)
 end
 
 -- Tab "Gruppe" (nur Klassen mit Gruppen-Buffs: Priester, Magier, Druide, Paladin)
@@ -5801,6 +5969,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         db.elixirSpells = db.elixirSpells or {}   -- Elixier-Item-ID -> Spell-ID des Buffs (gelernt)
         cdb.elixirsSeen = cdb.elixirsSeen or {}   -- Elixier-Item-ID -> true: schon in den Taschen gewesen
         cdb.elixirsWanted = cdb.elixirsWanted or {}   -- Elixier-Item-ID -> true: gewünscht (Warnung)
+        cdb.scrollsOff = cdb.scrollsOff or {}     -- Rollen-Art -> true: keine Warnung
         -- versteckter Sprach-Schalter (nicht in Hilfe/README/Einstellungen; /br reset lässt ihn stehen):
         -- /run BuffReminderDB.locale = "frFR" + /reload; nil = Client-Sprache
         ns.Locales.Activate(db.locale)
@@ -5852,6 +6021,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         Items.UpdateXP()            -- zählt Erfahrung? (XP-Essen bevorzugen / Abzeichen)
         Eat.ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
         Elixir.Setup()              -- Einträge der gemerkten Elixiere (neue folgen beim Taschen-Scan)
+        Scroll.Setup()              -- sechs Rollen-Einträge (Agility … Protection)
         Items.ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
         reagentLines = REAGENT_SPELLS[class] or {}
