@@ -4917,7 +4917,7 @@ function Demo.BuildShots()
 end
 Demo.SHOTS = Demo.BuildShots()
 
--- Eintrag für ein Motiv (Name/Icon aus dem Client, Rückfall-Icon falls nicht geladen)
+-- Eintrag für ein Motiv (Name/Icon aus dem Client; Demo.Show lässt unbekannte Motive aus)
 function Demo.Entry(d)
     local label = (d.label and L[d.label]) or (d.spell and SpellName(d.spell)) or (d.item and ItemName(d.item)) or "?"
     local icon = (d.spell and SpellIcon(d.spell)) or (d.item and ItemIcon(d.item)) or FALLBACK_ICON
@@ -4953,21 +4953,44 @@ function Demo.FillRow(r, e, st)
 end
 
 -- Essens-Menü: Beispiel-Items (erstes = beste Wahl mit XP-Abzeichen und Stern)
+-- Kennt der Client den Zauber bzw. das Item? (Name und Icon vorhanden; nach dem Vorladen)
+function Demo.SpellKnown(id)
+    return SpellName(id) ~= nil and SpellIcon(id) ~= nil
+end
+
+function Demo.ItemKnown(id)
+    return Items.ItemLevels(id) ~= nil and ItemIcon(id) ~= nil
+end
+
+-- Motiv zeigbar? Alle Zauber/Items des Motivs müssen dem Client bekannt sein
+function Demo.RowKnown(d)
+    if d.spell and not Demo.SpellKnown(d.spell) then return false end
+    if d.item and not Demo.ItemKnown(d.item) then return false end
+    if d.hintItem and not Demo.ItemKnown(d.hintItem) then return false end
+    return true
+end
+
+-- Essens-Menü: Beispiel-Items (erstes = beste Wahl mit XP-Abzeichen und Stern); unbekannte weglassen
 function Demo.FoodChoices()
     local list = {}
     for _, c in ipairs(Demo.FOOD) do
-        list[#list + 1] = { id = c.id, count = c.count, cat = c.cat, xp = c.xp == true, fav = c.fav == true }
+        if Demo.ItemKnown(c.id) then
+            list[#list + 1] = { id = c.id, count = c.count, cat = c.cat, xp = c.xp == true, fav = c.fav == true }
+        end
     end
     return list
 end
 
--- Variantenmenü: Magier-Rüstungen aus CAST_DATA, unabhängig davon, ob gelernt
+-- Variantenmenü: Magier-Rüstungen aus CAST_DATA, unabhängig davon, ob gelernt; nur Zauber,
+-- die der Client kennt (z. B. fehlt Molten Armor 30482, TBC, in Forever)
 function Demo.VariantChoices()
     local list = {}
     for _, v in ipairs(CAST_DATA.MAGE.armor.variants) do
         local id = v.castIds[1]
-        list[#list + 1] = { spell = id, vkey = v.key, name = SpellName(id) or v.key,
-            icon = SpellIcon(id) or FALLBACK_ICON, last = v.key == Demo.VARIANT_LAST }
+        if Demo.SpellKnown(id) then
+            list[#list + 1] = { spell = id, vkey = v.key, name = SpellName(id), icon = SpellIcon(id),
+                last = v.key == Demo.VARIANT_LAST }
+        end
     end
     return list
 end
@@ -5017,8 +5040,10 @@ function Demo.Show()
     if not Demo.active or InCombatLockdown() then return end
     local list, exp = {}, {}
     for _, d in ipairs(Demo.ROWS) do
-        local e = Demo.Entry(d)
-        if d.expiry then exp[#exp + 1] = e else list[#list + 1] = e end
+        if Demo.RowKnown(d) then   -- Motive ohne Client-Daten auslassen
+            local e = Demo.Entry(d)
+            if d.expiry then exp[#exp + 1] = e else list[#list + 1] = e end
+        end
     end
     local from = #list + 1
     for _, e in ipairs(exp) do list[#list + 1] = e end
@@ -5239,9 +5264,14 @@ function Demo.RunShot(i)
         return
     end
     if s.settings then
-        -- Einstellungsbilder mit sichtbarem Interface, ohne Beispielzeilen
+        -- Einstellungsbilder mit sichtbarem Interface, ohne Beispielzeilen, im echten Stil
+        -- (Stand vor dem Lauf), damit die Einstellungen den tatsächlichen Stand zeigen
         if menu:IsShown() then menu:Hide() end
         Display.ShowRows({})
+        if Demo.saved and (db.style ~= Demo.saved.style or db.iconsOnly ~= Demo.saved.iconsOnly) then
+            db.style, db.iconsOnly = Demo.saved.style, Demo.saved.iconsOnly
+            Display.ApplyStyle()
+        end
         if not (config and config:IsVisible()) then ToggleConfig() end
         Demo.After(0.5, function()
             if not Demo.ScrollSettings(s.settings) then Demo.RunShot(i + 1); return end
