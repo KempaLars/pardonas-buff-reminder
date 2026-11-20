@@ -39,6 +39,7 @@ read_globals = {
     "UIParent",
     "SOUNDKIT",
     -- functions
+    "GetAddOnInfo",
     "GetAddOnMetadata",
     "GetBindingKey",
     "GetBindingText",
@@ -53,6 +54,7 @@ read_globals = {
     "GetLocale",
     "GetMaxLevelForPlayerExpansion",
     "GetMaxPlayerLevel",
+    "GetNumAddOns",
     "GetNormalizedRealmName",
     "GetNumGroupMembers",
     "GetNumTrackingTypes",
@@ -64,6 +66,7 @@ read_globals = {
     "GetTrackingTexture",
     "GetWeaponEnchantInfo",
     "InCombatLockdown",
+    "IsAddOnLoaded",
     "IsInGroup",
     "IsInInstance",
     "IsInRaid",

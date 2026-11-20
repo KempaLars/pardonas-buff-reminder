@@ -114,6 +114,8 @@ if GetLocale() == "deDE" then
         EXP_CONSUMABLES = "Klassen-Verbrauchsgüter",
         EXP_WEAPONITEMS = "Steine, Öle, Gifte per Klick",
         EXP_VARIANTMENU = "Variantenmenü per Rechtsklick",
+        EXP_BLESSINGS = "Segen des Paladins in Gruppenbuffs",
+        BLESS_PALLYPOWER = "Aus, solange Pally Power geladen ist",
         -- Variantenmenü
         MENU_VARIANT  = "Variante zaubern",
         SUB_VARIANT   = "Variante zaubern oder stummschalten",
@@ -271,6 +273,8 @@ else
         EXP_CONSUMABLES = "Class consumables",
         EXP_WEAPONITEMS = "Stones, oils, poisons by click",
         EXP_VARIANTMENU = "Variant menu on right-click",
+        EXP_BLESSINGS = "Paladin blessings in group buffs",
+        BLESS_PALLYPOWER = "Off while Pally Power is loaded",
         MENU_VARIANT  = "Cast a variant",
         SUB_VARIANT   = "Cast a variant or mute",
         LAST_USED     = "last used",
@@ -2038,8 +2042,38 @@ function Group.GroupModeOk()
     return true
 end
 
+-- Segen des Paladins in den Gruppenbuffs: experimentell (expBlessings, zusätzlich zu expGroup)
+-- und komplett aus, solange Pally Power geladen ist (Group.pallyPower, nach PLAYER_LOGIN).
+-- Der eigene Segen-Eintrag (Klassenbuff auf sich selbst) ist davon unabhängig.
+function Group.BlessingsOn()
+    return ExpOn("expBlessings") and not Group.pallyPower
+end
+
 function Group.SupportsGroup(e)
-    return e.groupIds ~= nil or e.groupByVariant == true
+    if e.groupByVariant then return Group.BlessingsOn() end
+    return e.groupIds ~= nil
+end
+
+-- Ist ein Addon geladen, dessen Ordnername mit "PallyPower" beginnt? (einmal nach PLAYER_LOGIN)
+function Group.DetectPallyPower()
+    Group.pallyPower = false
+    local api = C_AddOns or {}
+    local numFn = api.GetNumAddOns or GetNumAddOns
+    local infoFn = api.GetAddOnInfo or GetAddOnInfo
+    local loadedFn = api.IsAddOnLoaded or IsAddOnLoaded
+    if not (numFn and infoFn and loadedFn) then return end
+    local ok, n = pcall(numFn)
+    if not ok or type(n) ~= "number" or IsSecret(n) then return end
+    for i = 1, n do
+        local okI, name = pcall(infoFn, i)
+        if okI and type(name) == "string" and not IsSecret(name) and name:sub(1, 10) == "PallyPower" then
+            local okL, loaded = pcall(loadedFn, name)
+            if okL and loaded and not IsSecret(loaded) then
+                Group.pallyPower = true
+                return
+            end
+        end
+    end
 end
 
 -- Gruppen-Check für einen (erlernten, aktivierten) Eintrag aktiv?
@@ -2393,8 +2427,9 @@ function Group.PrintDebug(log)
         if log then log[#log + 1] = msg end
     end
     local units = Group.GroupUnits()
-    out(("group: feature=%s expGroup=%s check=%s mode=%s modeOk=%s inGroup=%s members=%d"):format(
-        tostring(GroupFeatureOn()), tostring(ExpOn("expGroup")), tostring(db and db.groupCheck),
+    out(("group: feature=%s expGroup=%s blessings=%s pallyPower=%s check=%s mode=%s modeOk=%s inGroup=%s members=%d"):format(
+        tostring(GroupFeatureOn()), tostring(ExpOn("expGroup")), tostring(ExpOn("expBlessings")),
+        tostring(Group.pallyPower), tostring(db and db.groupCheck),
         tostring(db and db.groupMode), tostring(Group.GroupModeOk()),
         tostring(IsInGroup and IsInGroup()), GetNumGroupMembers and GetNumGroupMembers() or 0))
     for _, u in ipairs(units) do
@@ -4063,6 +4098,11 @@ function RefreshConfig()
     if config.groupCB then
         config.groupCB:SetChecked(db.groupCheck)
         Cfg.SetCheckEnabled(config.groupCB, expGroup)
+        if config.blessCB then
+            config.blessCB:SetChecked(ExpOn("expBlessings"))
+            Cfg.SetCheckEnabled(config.blessCB, expGroup and not Group.pallyPower)
+            config.blessNote:SetText(Group.pallyPower and L.BLESS_PALLYPOWER or "")
+        end
         config.groupModeBtn:SetText(L.GROUP_MODE:format(L.GROUP_MODES[db.groupMode] or db.groupMode))
         if expGroup then config.groupModeBtn:Enable() else config.groupModeBtn:Disable() end
     end
@@ -4437,9 +4477,10 @@ local function BuildConfig()
     end)
     y = y - 26
     -- Detail-Einstellungen nur für Klassen mit Gruppen-Buffs (Priester, Magier, Druide, Paladin)
-    local hasGroup = false
+    local hasGroup, hasBlessings = false, false
     for _, e in ipairs(classEntries) do
-        if Group.SupportsGroup(e) then hasGroup = true end
+        if e.groupIds or e.groupByVariant then hasGroup = true end
+        if e.groupByVariant then hasBlessings = true end
     end
     if hasGroup then
         config.groupCB = Cfg.MakeCheck(p, L.GROUP_CHECK, 36, y, function(self)
@@ -4459,6 +4500,21 @@ local function BuildConfig()
             Evaluate()
             RefreshConfig()
         end)
+        y = y - 26
+    end
+    -- Segen des Paladins in den Gruppenbuffs (experimentell, nur Paladine; aus mit Pally Power)
+    if hasBlessings then
+        config.blessCB = Cfg.MakeCheck(p, L.EXP_BLESSINGS, 36, y, function(self)
+            db.expBlessings = self:GetChecked() and true or false
+            wipe(Group.groupState)
+            Group.MarkGroupDirty()
+            NoteDeferred()
+            Evaluate()
+            RefreshConfig()
+        end)
+        config.blessNote = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        config.blessNote:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y - 6)
+        config.blessNote:SetJustifyH("RIGHT")
         y = y - 26
     end
 
@@ -4739,6 +4795,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             if g then e.groupIds, e.manaOnly, e.groupByVariant, e.ownOnly = g.groupIds, g.manaOnly, g.groupByVariant, g.ownOnly end
         end
         Conjure.Preload(classEntries)   -- Namen der Verbrauchsgüter-Items vorladen
+        Group.DetectPallyPower()        -- Segen in den Gruppenbuffs aus, solange Pally Power geladen ist
         -- Waffen-Items: nicht für Schamanen (eigene Waffenverzauberungen); Schurke: an den
         -- Gift-Eintrag desselben Slots koppeln
         for i = #GENERAL_BUFFS, 1, -1 do
@@ -5007,7 +5064,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         for k in pairs(DEFAULTS) do db[k] = nil end
         -- Experimental-Schalter: wieder Build-abhängig
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
-        db.expVariantMenu = nil
+        db.expVariantMenu, db.expBlessings = nil, nil
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
