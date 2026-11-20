@@ -4354,6 +4354,80 @@ Cfg.TAB_TEMPLATES = { "PanelTopTabButtonTemplate", "TabButtonTemplate", "PanelTa
     "CharacterFrameTabButtonTemplate" }
 Cfg.WIDTH = 440   -- Breite des Inhalts eines Tabs (Status rechtsbündig bei 424)
 Cfg.tabs, Cfg.tabList = {}, {}
+Cfg.TAB_X, Cfg.TAB_GAP = 8, 0   -- Abstand des ersten Tabs vom Kastenrand, Abstand zwischen Tabs
+-- Inhaltskasten unter der Tab-Leiste: erste bekannte Vorlage für eingelassene Kästen, sonst eigener
+-- Rand (BackdropTemplate mit Tooltip-Rand; Größe fest über die Anker am Einstellungsrahmen)
+Cfg.INSET_TEMPLATES = { "InsetFrameTemplate", "InsetFrameTemplate3", "InsetFrameTemplate2" }
+
+-- Kasten mit Rand und dunklem, nahezu deckendem Hintergrund (Cfg.insetTemplate = genutzte Vorlage)
+function Cfg.MakeInset(parent)
+    local f
+    for _, tpl in ipairs(Cfg.INSET_TEMPLATES) do
+        local ok, fr = pcall(CreateFrame, "Frame", nil, parent, tpl)
+        if ok and fr and (fr.NineSlice or fr.Bg) then
+            f, Cfg.insetTemplate = fr, tpl
+            break
+        elseif ok and fr then
+            fr:Hide()
+        end
+    end
+    if not f then
+        Cfg.insetTemplate = "BackdropTemplate"
+        f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        if f.SetBackdrop then
+            f:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 14,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+            f:SetBackdropBorderColor(0.6, 0.6, 0.6, 1)
+        end
+    end
+    -- über dem Hintergrund der Vorlage, unter ihrem Rand (NineSlice ist ein eigener Frame darüber)
+    f.darkBg = f:CreateTexture(nil, "BACKGROUND", nil, 7)
+    f.darkBg:SetPoint("TOPLEFT", 3, -3)
+    f.darkBg:SetPoint("BOTTOMRIGHT", -3, 3)
+    f.darkBg:SetColorTexture(0.04, 0.04, 0.05, 0.88)
+    return f
+end
+
+-- Breite eines Tab-Knopfs nach Text (maxW = Obergrenze, nil = natürliche Breite)
+function Cfg.SizeTab(b, maxW)
+    if Cfg.tabTemplate ~= "UIPanelButtonTemplate" and type(PanelTemplates_TabResize) == "function" then
+        if pcall(PanelTemplates_TabResize, b, 0, nil, nil, maxW) then return end
+    end
+    local fs = b:GetFontString()
+    local w = (fs and fs:GetStringWidth() or 86) + 24
+    if maxW and w > maxW then w = maxW end
+    b:SetWidth(w)
+end
+
+-- Alle Tabs in eine Reihe: zu breite Tabs schmaler machen (Text wird gekürzt) statt umzubrechen
+function Cfg.FitTabs()
+    local list, inset = Cfg.tabList, Cfg.inset
+    if #list == 0 or not inset then return end
+    local avail = (inset:GetWidth() or 0) - 2 * Cfg.TAB_X
+    if avail <= 0 then return end
+    local total = Cfg.TAB_GAP * (#list - 1)
+    for _, t in ipairs(list) do
+        Cfg.SizeTab(t.button)
+        total = total + t.button:GetWidth()
+    end
+    if total <= avail then return end
+    -- Obergrenze so, dass schmale Tabs bleiben und die breiten sich den Rest teilen
+    local maxW = (avail - Cfg.TAB_GAP * (#list - 1)) / #list
+    for _ = 1, #list do
+        local rest, wide = avail - Cfg.TAB_GAP * (#list - 1), 0
+        for _, t in ipairs(list) do
+            local w = t.button:GetWidth()
+            if w <= maxW then rest = rest - w else wide = wide + 1 end
+        end
+        if wide == 0 then break end
+        local m = math.floor(rest / wide)
+        if m <= maxW then maxW = m; break end
+        maxW = m
+    end
+    for _, t in ipairs(list) do
+        if t.button:GetWidth() > maxW then Cfg.SizeTab(t.button, maxW) end
+    end
+end
 
 -- Text eines experimentellen Schalters: "<Text> (beta)"
 function Cfg.Beta(text) return text .. " " .. L.BETA_TAG end
@@ -4417,9 +4491,7 @@ function Cfg.MakeTabButton(parent, index, text)
     end
     b:SetID(index)
     b:SetText(text)
-    if Cfg.tabTemplate ~= "UIPanelButtonTemplate" and type(PanelTemplates_TabResize) == "function" then
-        pcall(PanelTemplates_TabResize, b, 0)
-    end
+    Cfg.SizeTab(b)
     local w = b:GetWidth()
     if type(w) ~= "number" or w < 40 then b:SetWidth(110) end
     return b
@@ -4431,15 +4503,20 @@ function Cfg.NewTab(key, textKey)
     local t = { key = key }
     t.button = Cfg.MakeTabButton(config, index, L[textKey])
     t.button:ClearAllPoints()
+    -- Tabs stehen auf der Oberkante des Kastens (echte Tab-Vorlagen überlappen 2 px, damit der
+    -- aktive Tab in den Kasten übergeht); Ebene über dem Kasten
+    local real = Cfg.tabTemplate ~= "UIPanelButtonTemplate"
+    Cfg.TAB_GAP = real and 0 or 4
     if index == 1 then
-        t.button:SetPoint("TOPLEFT", config, "TOPLEFT", 16, -44)
+        t.button:SetPoint("BOTTOMLEFT", Cfg.inset, "TOPLEFT", Cfg.TAB_X, real and -2 or 2)
     else
-        t.button:SetPoint("LEFT", Cfg.tabList[index - 1].button, "RIGHT", 2, 0)
+        t.button:SetPoint("LEFT", Cfg.tabList[index - 1].button, "RIGHT", Cfg.TAB_GAP, 0)
     end
+    t.button:SetFrameLevel(Cfg.inset:GetFrameLevel() + 5)
     t.button:SetScript("OnClick", function() Cfg.SelectTab(key) end)
-    t.scroll, t.content = Cfg.MakeScroll(config, "BuffReminderConfigScroll" .. index)
-    t.scroll:SetPoint("TOPLEFT", config, "TOPLEFT", 4, -76)
-    t.scroll:SetPoint("BOTTOMRIGHT", config, "BOTTOMRIGHT", -28, 8)
+    t.scroll, t.content = Cfg.MakeScroll(Cfg.inset, "BuffReminderConfigScroll" .. index)
+    t.scroll:SetPoint("TOPLEFT", Cfg.inset, "TOPLEFT", 8, -8)
+    t.scroll:SetPoint("BOTTOMRIGHT", Cfg.inset, "BOTTOMRIGHT", -28, 8)
     Cfg.tabs[key] = t
     Cfg.tabList[index] = t
     return t.content
@@ -4785,6 +4862,11 @@ local function BuildConfig()
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText(L.TITLE)
 
+    -- Inhaltskasten über die volle Breite bis unten; darüber die Tab-Leiste
+    Cfg.inset = Cfg.MakeInset(config)
+    Cfg.inset:SetPoint("TOPLEFT", config, "TOPLEFT", 8, -74)
+    Cfg.inset:SetPoint("BOTTOMRIGHT", config, "BOTTOMRIGHT", -8, 6)
+
     Cfg.BuildGeneralTab()
     Cfg.BuildClassTab()
     Cfg.BuildBuffsTab()
@@ -4797,7 +4879,14 @@ local function BuildConfig()
     if hasGroup then Cfg.BuildGroupTab(hasBlessings) end
 
     Cfg.LayoutClassRows()
-    config:SetScript("OnShow", RefreshConfig)
+    -- Tab-Breiten an die Seitenbreite anpassen (auch nach dem OnShow der Tab-Vorlagen)
+    Cfg.inset:SetScript("OnSizeChanged", function() Cfg.FitTabs() end)
+    config:SetScript("OnShow", function()
+        Cfg.FitTabs()
+        C_Timer.After(0, Cfg.FitTabs)
+        RefreshConfig()
+    end)
+    Cfg.FitTabs()
     Cfg.SelectTab(db.cfgTab)
     if not Cfg.configCanvas then config:Hide() end
 end
