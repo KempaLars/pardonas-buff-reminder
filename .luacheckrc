@@ -32,6 +32,7 @@ read_globals = {
     "C_UnitAuras",
     -- frames and UI objects
     "CreateColor",
+    "CreateFont",
     "CreateFrame",
     "Enum",
     "GameTooltip",
