@@ -4118,6 +4118,15 @@ end
 local layoutPending = false
 
 -- Position, Größe und Deckkraft der Warnliste; im Kampf erst danach (geschützte Zeilen)
+-- Strata der Warnliste: normal HIGH. Im Demo-Modus (ohne Screenshot-Lauf) MEDIUM, damit das
+-- Einstellungsfenster (Blizzard-Einstellungen HIGH, eigenes Fenster DIALOG) immer darüber liegt:
+-- Bei gleicher Strata HIGH entscheidet sonst die Frame-Ebene, und die Beispielzeilen in der
+-- Bildschirmmitte konnten das Fenster überdecken. Der Screenshot-Lauf nutzt HIGH (Demo.BeginRun).
+function Display.Strata()
+    if Demo.active and not Demo.run then return "MEDIUM" end
+    return "HIGH"
+end
+
 local function ApplyLayout()
     if InCombatLockdown() then layoutPending = true; return end
     layoutPending = false
@@ -4128,6 +4137,7 @@ local function ApplyLayout()
     anchor:SetPoint(p[1], UIParent, p[3], p[4] * k, p[5] * k)
     anchor:SetScale(s)
     anchor:SetAlpha(Display.Alpha())
+    anchor:SetFrameStrata(Display.Strata())
 end
 
 local rows = {}
@@ -7848,6 +7858,7 @@ function Demo.BeginRun()
     db.demoShots = { started = time(), shots = {} }
     local _, sw, sh = Demo.PixelScale()
     if sw then db.demoShots.screen = { w = sw, h = sh } end   -- physische Pixel (Prüfung im Skript)
+    anchor:SetFrameStrata("HIGH")   -- Screenshot-Lauf wie bisher (Demo-Modus selbst: MEDIUM)
     if menu:IsShown() then menu:Hide() end
     Demo.ToWorld(anchor, true)
     Demo.ToWorld(menu)
