@@ -3524,8 +3524,13 @@ function Display.ShowRows(list, dragMode, expFrom)
         local r = Display.GetRow(i)
         local isExp = not dragMode and expFrom ~= nil and i >= expFrom
         r.expiryRow = isExp
+        -- Deckkraft der Zeile (Ablauf-Zeile: Ablauf-Faktor, wirkt mit der Deckkraft der Anzeige
+        -- multipliziert). Stop() setzt die Alpha-Animation auf ihren Startwert 1 zurück: Ablauf-
+        -- Zeilen daher zuerst anhalten, dann die Deckkraft setzen; pulsierende Zeilen nicht anfassen.
         local alpha = isExp and Expiry.Alpha() or 1
-        if r.baseAlpha ~= alpha then r.baseAlpha = alpha; r:SetAlpha(alpha) end   -- nur bei Änderung (Puls)
+        r.baseAlpha = alpha
+        if isExp then r.pulse:Stop() end
+        if isExp or not r.pulse:IsPlaying() then r:SetAlpha(alpha) end
         r.icon:SetTexture(EntryIcon(e))
         r.right:SetText("")
         if dragMode then
@@ -3636,6 +3641,7 @@ function Display.ShowRows(list, dragMode, expFrom)
     for i = #list + 1, #rows do
         rows[i]:Hide()
         rows[i].pulse:Stop()
+        rows[i]:SetAlpha(rows[i].baseAlpha or 1)   -- nach Stop() neu setzen (Animation setzt auf 1)
         rows[i].entry = nil
         rows[i].expiryRow = nil
         Display.SetRowAction(rows[i], nil)
@@ -3660,6 +3666,7 @@ function Display.SyncPulse(n)
         local r = rows[i]
         if r.expiryRow then
             r.pulse:Stop()
+            r:SetAlpha(r.baseAlpha or 1)   -- nach Stop() neu setzen (Animation setzt auf 1)
         elseif not r.pulse:IsPlaying() then
             restart = true
         end
@@ -3667,7 +3674,23 @@ function Display.SyncPulse(n)
     if not restart then return end
     for i = 1, n do
         local r = rows[i]
-        if not r.expiryRow then r.pulse:Stop(); r.pulse:Play() end
+        if not r.expiryRow then
+            r.pulse:Stop()
+            r:SetAlpha(r.baseAlpha or 1)
+            r.pulse:Play()
+        end
+    end
+end
+
+-- Deckkraft der sichtbaren Ablauf-Zeilen sofort neu setzen (Regler "Deckkraft (relativ)");
+-- SetAlpha ist nicht geschützt, wirkt also auch im Kampf
+function Display.ApplyRowAlpha()
+    for _, r in ipairs(rows) do
+        if r:IsShown() and r.expiryRow then
+            r.baseAlpha = Expiry.Alpha()
+            r.pulse:Stop()
+            r:SetAlpha(r.baseAlpha)
+        end
     end
 end
 
@@ -5453,7 +5476,7 @@ function Cfg.BuildDisplayTab()
     y = y - 26
     config.expiryAlphaSlider = Cfg.MakeSlider(p, "BuffReminderExpiryAlpha", 40, y, 20, 100, 5, function(v)
         db.expiryAlpha = v / 100
-        NoteDeferred()
+        Display.ApplyRowAlpha()   -- sichtbare Ablauf-Zeilen sofort
         Evaluate()
         RefreshConfig()
     end)
