@@ -4852,8 +4852,17 @@ end
 -- (gewählter Tab = gesperrt). Funktion und Speicherung der Einstellungen sind unabhängig davon.
 ---------------------------------------------------------------------------
 Cfg.TAB_ORDER = {
-    { "display", "TAB_DISPLAY" }, { "class", "TAB_CLASS" }, { "other", "TAB_OTHER" }, { "group", "TAB_GROUP" },
+    { "display", "TAB_DISPLAY" }, { "class", "TAB_CLASS" }, { "other", "TAB_OTHER" },
+    { "consumables", "TAB_CONSUMABLES" }, { "group", "TAB_GROUP" },
 }
+
+-- Gibt es den Tab-Key (Cfg.TAB_ORDER)? Ungültige gemerkte Werte setzt ADDON_LOADED auf "display"
+function Cfg.ValidTab(key)
+    for _, t in ipairs(Cfg.TAB_ORDER) do
+        if t[1] == key then return true end
+    end
+    return false
+end
 Cfg.TAB_TEMPLATES = { "PanelTopTabButtonTemplate", "TabButtonTemplate", "PanelTabButtonTemplate",
     "CharacterFrameTabButtonTemplate" }
 Cfg.WIDTH = 440   -- Breite des Inhalts eines Tabs (Status rechtsbündig bei 424)
@@ -5203,8 +5212,7 @@ function Cfg.BuildClassTab()
     Cfg.belowHeight = -Cfg.AddFooter(b, by) + 10
 end
 
--- Tab "Weitere Buffs": Liste + "Nur in Instanzen", Waffen-Items, Verbrauchsgüter,
--- Reagenzien und Verfolgung (alle beta) mit ihren Detail-Einstellungen
+-- Tab "Weitere Buffs": Liste + "Nur in Instanzen", Waffen-Items und Verfolgung (beta)
 function Cfg.BuildOtherTab()
     local p = Cfg.NewTab("other", "TAB_OTHER")
     local y = -8
@@ -5227,7 +5235,40 @@ function Cfg.BuildOtherTab()
         Evaluate()
         RefreshConfig()
     end)
-    y = y - 26
+    y = y - 30
+
+    -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine")
+    config.expTrackCB = Cfg.MakeBetaCheck(p, L.EXP_TRACKING, 16, y, function(self)
+        db.expTracking = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 28
+    config.trackBtn = Cfg.MakeButton(p, "", 240)
+    config.trackBtn:SetPoint("TOPLEFT", 40, y)
+    config.trackBtn:SetScript("OnClick", function()
+        Tracking.Cycle()
+        RefreshKnown()
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    y = y - 30
+    Cfg.FinishTab(p, Cfg.AddFooter(p, y))
+end
+
+-- Tab "Verbrauchsgüter": Klassen-Verbrauchsgüter, Reagenzien-Warnung, Rollen und Elixiere (alle
+-- beta) mit ihren Listen; Hinweis, dass "Weitere Buffs nur in Instanzen" auch hier gilt
+function Cfg.BuildConsumablesTab()
+    local p = Cfg.NewTab("consumables", "TAB_CONSUMABLES")
+    local y = -8
+    local note = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    note:SetPoint("TOPLEFT", 20, y)
+    note:SetWidth(Cfg.WIDTH - 40)
+    note:SetJustifyH("LEFT")
+    note:SetText(L.CONS_INSTANCE_NOTE)
+    y = y - math.max(28, math.ceil(note:GetStringHeight() or 0)) - 8
 
     -- Klassen-Verbrauchsgüter (Einträge stehen in der Klassenliste); Schwelle für gezaubertes
     -- Essen/Wasser nur bei Klassen mit solchen Einträgen (Magier)
@@ -5273,27 +5314,8 @@ function Cfg.BuildOtherTab()
         end
     end
 
-    -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine")
+    -- Rollen: Schalter + je Art ein Haken (Vorgabe pro Klasse; neutraler Name der Art)
     y = y - 4
-    config.expTrackCB = Cfg.MakeBetaCheck(p, L.EXP_TRACKING, 16, y, function(self)
-        db.expTracking = self:GetChecked() and true or false
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 28
-    config.trackBtn = Cfg.MakeButton(p, "", 240)
-    config.trackBtn:SetPoint("TOPLEFT", 40, y)
-    config.trackBtn:SetScript("OnClick", function()
-        Tracking.Cycle()
-        RefreshKnown()
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 30
-
-    -- Rollen: Schalter + je Art ein Haken (Standard an; Name = Rolle des höchsten Rangs)
     config.expScrollCB = Cfg.MakeBetaCheck(p, L.EXP_SCROLLS, 16, y, function(self)
         db.expScrolls = self:GetChecked() and true or false
         NoteDeferred()
@@ -5316,17 +5338,17 @@ function Cfg.BuildOtherTab()
         RefreshConfig()
     end)
     y = y - 26
-    Cfg.otherContent, Cfg.elixirTop, Cfg.elixirRows = p, y, {}
+    Cfg.consContent, Cfg.elixirTop, Cfg.elixirRows = p, y, {}
     config.elixirEmpty = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     config.elixirEmpty:SetText(L.ELIXIRS_EMPTY)
     local _, footer = Cfg.AddFooter(p, y)
-    Cfg.otherFooter = footer
+    Cfg.consFooter = footer
     Cfg.LayoutElixirs()
 end
 
--- Elixier-Liste im Tab "Weitere Buffs" (nach Name) anordnen; Fußzeile und Inhaltshöhe folgen
+-- Elixier-Liste im Tab "Verbrauchsgüter" (nach Name) anordnen; Fußzeile und Inhaltshöhe folgen
 function Cfg.LayoutElixirs()
-    local p = Cfg.otherContent
+    local p = Cfg.consContent
     if not p then return end
     local y = Cfg.elixirTop
     local list = Elixir.List()
@@ -5347,8 +5369,8 @@ function Cfg.LayoutElixirs()
     else
         config.elixirEmpty:Hide()
     end
-    Cfg.otherFooter:ClearAllPoints()
-    Cfg.otherFooter:SetPoint("TOPLEFT", 16, y - 10)
+    Cfg.consFooter:ClearAllPoints()
+    Cfg.consFooter:SetPoint("TOPLEFT", 16, y - 10)
     Cfg.FinishTab(p, y - 40)
     Elixir.dirty = false
 end
@@ -5449,6 +5471,7 @@ local function BuildConfig()
     Cfg.BuildDisplayTab()
     Cfg.BuildClassTab()
     Cfg.BuildOtherTab()
+    Cfg.BuildConsumablesTab()
     -- Tab "Gruppe" nur für Klassen mit Gruppen-Buffs
     local hasGroup, hasBlessings = false, false
     for _, e in ipairs(classEntries) do
@@ -5574,7 +5597,8 @@ Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
 }
 Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" } }
 Demo.SETTINGS_TABS = {      -- { Tab-Key (Cfg.TAB_ORDER), Name im Dateinamen }
-    { "display", "display" }, { "class", "class-buffs" }, { "other", "other-buffs" }, { "group", "group" },
+    { "display", "display" }, { "class", "class-buffs" }, { "other", "other-buffs" },
+    { "consumables", "consumables" }, { "group", "group" },
 }
 
 function Demo.BuildShots()
@@ -6153,6 +6177,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         cdb.elixirsWanted = cdb.elixirsWanted or {}   -- Elixier-Item-ID -> true: gewünscht (Warnung)
         cdb.scrolls = cdb.scrolls or {}           -- Rollen-Art -> true/false (ausdrücklich), nil = Klassenvorgabe
         Scroll.MigrateOff()                       -- altes cdb.scrollsOff übernehmen und entfernen
+        if not Cfg.ValidTab(db.cfgTab) then db.cfgTab = "display" end   -- gemerkter Tab ungültig
         -- versteckter Sprach-Schalter (nicht in Hilfe/README/Einstellungen; /br reset lässt ihn stehen):
         -- /run BuffReminderDB.locale = "frFR" + /reload; nil = Client-Sprache
         ns.Locales.Activate(db.locale)
