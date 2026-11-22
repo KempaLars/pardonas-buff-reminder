@@ -2331,6 +2331,7 @@ end
 -- Erscheinen der Verzauberung gesehene Restzeit pro Slot.
 ---------------------------------------------------------------------------
 Expiry.weapon = {}   -- Slot (16/17) -> { max = Sek., left = Sek. | nil, id = Enchant-ID | nil }
+Expiry.shownEnd = {} -- Eintrag-Key -> Ende (GetTime) der zuletzt angezeigten Ablauf-Zeile (Evaluate)
 
 function Expiry.Pct()
     local v = tonumber(db and db.expiryPct) or 10
@@ -4659,8 +4660,14 @@ function Evaluate()
             -- Angezeigt wird erst nach MISSING_CONFIRM Sek. durchgehendem Fehlen (eine
             -- kurzzeitig leere Aura-Liste, z. B. nach Ladebildschirmen, löst nichts aus).
             -- Bereits angezeigte Warnungen bleiben stehen, solange der Buff fehlt.
+            -- Ausnahme: War der Buff als Ablauf-Zeile angezeigt (Expiry.shownEnd) und ist seine
+            -- Restzeit so gut wie vorbei (höchstens 2 Sek. vor dem angezeigten Ende), gilt das Fehlen
+            -- sofort als bestätigt: die Ablauf-Zeile wird ohne Lücke zur Fehlt-Zeile. Ein vorzeitiges
+            -- Verschwinden (z. B. leere Aura-Liste nach Ladebildschirm) bleibt entprellt.
             local since = missingSince[e.key]
+            local shownEnd = Expiry.shownEnd[e.key]
             local confirmed = shownKeys[e.key] or (since ~= nil and now - since >= MISSING_CONFIRM)
+                or (shownEnd ~= nil and now >= shownEnd - 2)
             -- Ess-Countdown: Zeile sofort zeigen, zählt aber nicht als "neu fehlend" (keine
             -- Chatmeldung, kein Ton). Da sie danach in shownKeys steht, bleibt auch die normale
             -- Warnung nach dem Aufstehen (Ess-Aura weg, kein Well Fed) ohne erneute Meldung.
@@ -4702,6 +4709,9 @@ function Evaluate()
 
     wipe(shownKeys)
     for _, e in ipairs(list) do shownKeys[e.key] = true end
+    -- Ablauf-Zeilen dieser Anzeige mit ihrem Ende (sofortige Bestätigung beim Ablauf, s. o.)
+    wipe(Expiry.shownEnd)
+    for _, e in ipairs(expList) do Expiry.shownEnd[e.key] = e.expiryEnd end
     if newOnes then PlayAlertSound() end   -- Ton nur bei neu fehlendem Buff, keine Wiederholung
     local missingCount = #list
     for _, e in ipairs(expList) do list[#list + 1] = e end
