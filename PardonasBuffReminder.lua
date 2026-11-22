@@ -1362,20 +1362,12 @@ function Tracking.Choices()
     return list
 end
 
-function Tracking.Cycle()
-    local list, cur = Tracking.Choices(), Tracking.Wanted() or "none"
-    local idx = 0
-    for i, k in ipairs(list) do
-        if k == cur then idx = i end
-    end
-    cdb.trackWanted = list[idx % #list + 1]
-end
-
-function Tracking.ButtonText()
+-- Angezeigte Wahl im Dropdown "Verfolgen": Name, ohne eigene Wahl mit "(automatisch)"
+function Tracking.CurrentText()
     local key = Tracking.Wanted()
     local name = Tracking.Label(key)
     if key and cdb.trackWanted == nil then name = L.TRACK_AUTO:format(name) end
-    return L.TRACK:format(name)
+    return name
 end
 
 -- Linksklick bzw. Taste auf einer Verfolgungs-Zeile: Verfolgung einschalten (nur außerhalb des
@@ -4618,8 +4610,7 @@ function RefreshConfig()
             Cfg.SetCheckEnabled(config.blessCB, expGroup and not Group.pallyPower)
             config.blessNote:SetText(Group.pallyPower and L.BLESS_PALLYPOWER or "")
         end
-        config.groupModeBtn:SetText(L.GROUP_MODE:format(Cfg.ValueText("GROUP_MODE_", db.groupMode)))
-        if expGroup then config.groupModeBtn:Enable() else config.groupModeBtn:Disable() end
+        Cfg.SyncDropdown(config.groupModeDD, expGroup)
     end
     local expExpiry = ExpOn("expExpiry")
     config.expExpiryCB:SetChecked(expExpiry)
@@ -4635,19 +4626,18 @@ function RefreshConfig()
     config.expVariantCB:SetChecked(ExpOn("expVariantMenu"))
     local expTrack = ExpOn("expTracking")
     config.expTrackCB:SetChecked(expTrack)
-    config.trackBtn:SetText(Tracking.ButtonText())
+    Cfg.SyncDropdown(config.trackDD, expTrack)
     config.expElixirCB:SetChecked(ExpOn("expElixirs"))
     config.expScrollCB:SetChecked(ExpOn("expScrolls"))
     if Elixir.dirty then Cfg.LayoutElixirs() end
     Cfg.LayoutTab("other")      -- Listen ein-/ausklappen (Schalter an/aus)
     Cfg.LayoutTab("supplies")
     config.elixirEmpty:SetTextColor(ExpOn("expElixirs") and 0.6 or 0.4, ExpOn("expElixirs") and 0.6 or 0.4, 0.4)
-    if expTrack then config.trackBtn:Enable() else config.trackBtn:Disable() end
-    config.soundBtn:SetText(L.SOUND:format(Cfg.ValueText("SOUND_", db.sound)))
-    config.styleBtn:SetText(L.STYLE:format(Cfg.ValueText("STYLE_NAME_", db.style)))
+    Cfg.SyncDropdown(config.soundDD, true)
+    Cfg.SyncDropdown(config.styleDD, true)
     config.iconsCB:SetChecked(db.iconsOnly)
     Cfg.SetCheckEnabled(config.iconsCB, Style.STYLES[db.style] ~= nil and Style.STYLES[db.style].iconsOnly)
-    config.growBtn:SetText(L.GROW:format(db.growUp and L.GROW_UP or L.GROW_DOWN))
+    Cfg.SyncDropdown(config.growDD, true)
     config.keyText:SetText(L.KEY_LINE:format(L.KEY_NAME, Keybind.KeyText() or L.KEY_NONE))
     config.moveBtn:SetText(unlocked and L.LOCK or L.MOVE)
 end
@@ -4841,6 +4831,143 @@ function Cfg.SyncSlider(s, value, text, on)
         s:SetAlpha(0.5)
         s.label:SetTextColor(0.5, 0.5, 0.5)
     end
+end
+
+---------------------------------------------------------------------------
+-- Auswahllisten (Dropdowns) mit Beschriftung links. Vorlage: moderne Blizzard-Dropdowns
+-- (WowStyle1DropdownTemplate mit SetupMenu), sonst UIDropDownMenuTemplate, sonst ein
+-- Durchklick-Knopf; alles per pcall. spec:
+--   label   : Text links
+--   width   : Breite der Auswahl
+--   options : function() -> { { value = v, text = "…" } | { title = "…" } (Trennzeile), ... }
+--   get     : function() -> aktueller Wert (Markierung)
+--   set     : function(value) – speichert und wendet an (RefreshConfig folgt automatisch)
+--   text    : optional function() -> angezeigter Text (sonst Text der gewählten Option)
+-- Cfg.SyncDropdown (aus RefreshConfig) setzt Text und Aktiv-Zustand.
+---------------------------------------------------------------------------
+Cfg.DROPDOWN_LABEL_W = 140
+Cfg.dropdownCount = 0
+
+function Cfg.MakeDropdown(parent, x, y, spec)
+    local dd = { spec = spec }
+    dd.label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dd.label:SetPoint("TOPLEFT", x, y - 7)
+    dd.label:SetWidth((spec.labelWidth or Cfg.DROPDOWN_LABEL_W) - 8)
+    dd.label:SetJustifyH("LEFT")
+    dd.label:SetWordWrap(false)
+    dd.label:SetText(spec.label)
+    local bx = x + (spec.labelWidth or Cfg.DROPDOWN_LABEL_W)
+    local ok, f = false, nil
+    if type(MenuUtil) == "table" then
+        ok, f = pcall(CreateFrame, "DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+    end
+    if ok and f and type(f.SetupMenu) == "function"
+        and pcall(f.SetupMenu, f, function(_, root) Cfg.FillModernMenu(dd, root) end) then
+        dd.kind, dd.frame = "modern", f
+        f:SetPoint("TOPLEFT", bx, y)
+        f:SetWidth(spec.width)
+        Cfg.dropdownTemplate = Cfg.dropdownTemplate or "WowStyle1DropdownTemplate"
+        return dd
+    elseif ok and f then
+        f:Hide()
+    end
+    Cfg.dropdownCount = Cfg.dropdownCount + 1
+    ok, f = pcall(CreateFrame, "Frame", "BuffReminderDropdown" .. Cfg.dropdownCount, parent, "UIDropDownMenuTemplate")
+    if ok and f and type(UIDropDownMenu_Initialize) == "function"
+        and pcall(UIDropDownMenu_Initialize, f, function(_, level) Cfg.FillLegacyMenu(dd, level) end) then
+        dd.kind, dd.frame = "legacy", f
+        f:SetPoint("TOPLEFT", bx - 16, y + 2)   -- die Vorlage hat links 16 px Rand
+        if type(UIDropDownMenu_SetWidth) == "function" then pcall(UIDropDownMenu_SetWidth, f, spec.width) end
+        Cfg.dropdownTemplate = Cfg.dropdownTemplate or "UIDropDownMenuTemplate"
+        return dd
+    elseif ok and f then
+        f:Hide()
+    end
+    dd.kind = "button"
+    dd.frame = Cfg.MakeButton(parent, "", spec.width)
+    dd.frame:SetPoint("TOPLEFT", bx, y)
+    dd.frame:SetScript("OnClick", function() Cfg.CycleDropdown(dd) end)
+    Cfg.dropdownTemplate = Cfg.dropdownTemplate or "UIPanelButtonTemplate"
+    return dd
+end
+
+function Cfg.PickDropdown(dd, value)
+    dd.spec.set(value)
+    RefreshConfig()
+end
+
+function Cfg.FillModernMenu(dd, root)
+    for _, o in ipairs(dd.spec.options()) do
+        if o.title then
+            if root.CreateDivider then root:CreateDivider() end
+            if root.CreateTitle then root:CreateTitle(o.title) end
+        else
+            root:CreateRadio(o.text, function(v) return dd.spec.get() == v end,
+                function(v) Cfg.PickDropdown(dd, v) end, o.value)
+        end
+    end
+end
+
+function Cfg.FillLegacyMenu(dd, level)
+    if type(UIDropDownMenu_CreateInfo) ~= "function" or type(UIDropDownMenu_AddButton) ~= "function" then return end
+    for _, o in ipairs(dd.spec.options()) do
+        local info = UIDropDownMenu_CreateInfo()
+        if o.title then
+            info.text, info.isTitle, info.notCheckable = o.title, true, true
+        else
+            info.text, info.value = o.text, o.value
+            info.checked = dd.spec.get() == o.value
+            info.func = function(btn)
+                Cfg.PickDropdown(dd, btn.value)
+                if type(CloseDropDownMenus) == "function" then CloseDropDownMenus() end
+            end
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+end
+
+-- Rückfall ohne Dropdown-Vorlage: nächste Option (Trennzeilen übersprungen)
+function Cfg.CycleDropdown(dd)
+    local list, cur, idx = {}, dd.spec.get(), 0
+    for _, o in ipairs(dd.spec.options()) do
+        if not o.title then list[#list + 1] = o.value end
+    end
+    if #list == 0 then return end
+    for i, v in ipairs(list) do if v == cur then idx = i end end
+    Cfg.PickDropdown(dd, list[idx % #list + 1])
+end
+
+-- Text der gewählten Option (sonst der Wert selbst)
+function Cfg.DropdownText(dd)
+    if dd.spec.text then return dd.spec.text() end
+    local cur = dd.spec.get()
+    for _, o in ipairs(dd.spec.options()) do
+        if not o.title and o.value == cur then return o.text end
+    end
+    return tostring(cur)
+end
+
+-- Angezeigten Text und Aktiv-Zustand setzen (RefreshConfig)
+function Cfg.SyncDropdown(dd, enabled)
+    if not dd then return end
+    local text, f = Cfg.DropdownText(dd), dd.frame
+    if dd.kind == "modern" then
+        if f.GenerateMenu then pcall(f.GenerateMenu, f) end
+        if f.OverrideText then
+            pcall(f.OverrideText, f, text)
+        elseif f.Text and f.Text.SetText then
+            f.Text:SetText(text)
+        end
+        if f.SetEnabled then pcall(f.SetEnabled, f, enabled) end
+    elseif dd.kind == "legacy" then
+        if type(UIDropDownMenu_SetText) == "function" then pcall(UIDropDownMenu_SetText, f, text) end
+        local fn = enabled and UIDropDownMenu_EnableDropDown or UIDropDownMenu_DisableDropDown
+        if type(fn) == "function" then pcall(fn, f) end
+    else
+        f:SetText(text)
+        if enabled then f:Enable() else f:Disable() end
+    end
+    if enabled then dd.label:SetTextColor(1, 1, 1) else dd.label:SetTextColor(0.5, 0.5, 0.5) end
 end
 
 -- Cfg.configCanvas: Seite unter "Pardona's Addons" in den Einstellungen (nil = eigenes Fenster)
@@ -5103,47 +5230,62 @@ function Cfg.BuildDisplayTab()
     y = y - 32
 
     -- Stil von Warnanzeige und Rechtsklick-Menü; "Nur Icons" nur bei Compact
-    config.styleBtn = Cfg.MakeButton(p, "", 160)
-    config.styleBtn:SetPoint("TOPLEFT", 18, y)
-    config.styleBtn:SetScript("OnClick", function()
-        local idx = 1
-        for i, k in ipairs(Style.STYLE_ORDER) do if k == db.style then idx = i end end
-        db.style = Style.STYLE_ORDER[idx % #Style.STYLE_ORDER + 1]
-        NoteDeferred()
-        Display.ApplyStyle()
-        Evaluate()
-        RefreshConfig()
-    end)
-    config.iconsCB = Cfg.MakeCheck(p, L.ICONS_ONLY, 190, y + 1, function(self)
+    config.styleDD = Cfg.MakeDropdown(p, 20, y, {
+        label = L.STYLE_LABEL, width = 130,
+        options = function()
+            local list = {}
+            for _, k in ipairs(Style.STYLE_ORDER) do
+                list[#list + 1] = { value = k, text = Cfg.ValueText("STYLE_NAME_", k) }
+            end
+            return list
+        end,
+        get = function() return db.style end,
+        set = function(v)
+            db.style = v
+            NoteDeferred()
+            Display.ApplyStyle()
+            Evaluate()
+        end,
+    })
+    config.iconsCB = Cfg.MakeCheck(p, L.ICONS_ONLY, 300, y - 1, function(self)
         db.iconsOnly = self:GetChecked() and true or false
         NoteDeferred()
         Display.ApplyStyle()
         Evaluate()
     end)
-    y = y - 30
+    y = y - 32
 
     -- Wachstumsrichtung: neue Warnungen unterhalb (Standard) oder oberhalb des Ankers
-    config.growBtn = Cfg.MakeButton(p, "", 260)
-    config.growBtn:SetPoint("TOPLEFT", 18, y)
-    config.growBtn:SetScript("OnClick", function()
-        db.growUp = not db.growUp
-        NoteDeferred()
-        Display.ApplyStyle()   -- ordnet die Zeilen neu an (im Kampf erst danach)
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 30
-
-    config.soundBtn = Cfg.MakeButton(p, "", 160)
-    config.soundBtn:SetPoint("TOPLEFT", 18, y)
-    config.soundBtn:SetScript("OnClick", function()
-        local idx = 1
-        for i, k in ipairs(SOUND_ORDER) do if k == db.sound then idx = i end end
-        db.sound = SOUND_ORDER[idx % #SOUND_ORDER + 1]
-        PlayAlertSound()
-        RefreshConfig()
-    end)
+    config.growDD = Cfg.MakeDropdown(p, 20, y, {
+        label = L.GROW_LABEL, width = 130,
+        options = function()
+            return { { value = "down", text = L.GROW_DOWN }, { value = "up", text = L.GROW_UP } }
+        end,
+        get = function() return db.growUp and "up" or "down" end,
+        set = function(v)
+            db.growUp = v == "up"
+            NoteDeferred()
+            Display.ApplyStyle()   -- ordnet die Zeilen neu an (im Kampf erst danach)
+            Evaluate()
+        end,
+    })
     y = y - 32
+
+    -- Ton bei neuer Warnung; Auswahl spielt ihn einmal zur Probe
+    config.soundDD = Cfg.MakeDropdown(p, 20, y, {
+        label = L.SOUND_LABEL, width = 180,
+        options = function()
+            local list = {}
+            for _, k in ipairs(SOUND_ORDER) do list[#list + 1] = { value = k, text = Cfg.ValueText("SOUND_", k) } end
+            return list
+        end,
+        get = function() return db.sound end,
+        set = function(v)
+            db.sound = v
+            PlayAlertSound()
+        end,
+    })
+    y = y - 34
 
     -- Tastenbelegung "Oberste Warnung auslösen": aktuelle Taste + wo sie belegt wird
     config.keyText = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -5359,22 +5501,30 @@ function Cfg.BuildOtherTab()
     end
 
     -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine"; bleibt sichtbar)
-    f = Cfg.NewSection("other", 54)
+    f = Cfg.NewSection("other", 60)
     config.expTrackCB = Cfg.MakeBetaCheck(f, L.EXP_TRACKING, 16, 0, function(self)
         db.expTracking = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
-    config.trackBtn = Cfg.MakeButton(f, "", 240)
-    config.trackBtn:SetPoint("TOPLEFT", 40, -28)
-    config.trackBtn:SetScript("OnClick", function()
-        Tracking.Cycle()
-        RefreshKnown()
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
+    -- gelernte Verfolgungen und "keine"; ohne Wahl automatisch (Anzeige "(automatisch)")
+    config.trackDD = Cfg.MakeDropdown(f, 44, -26, {
+        label = L.TRACK_LABEL, width = 180, labelWidth = 116,
+        options = function()
+            local list = {}
+            for _, k in ipairs(Tracking.Choices()) do list[#list + 1] = { value = k, text = Tracking.Label(k) } end
+            return list
+        end,
+        get = function() return Tracking.Wanted() or "none" end,
+        set = function(v)
+            cdb.trackWanted = v
+            RefreshKnown()
+            NoteDeferred()
+            Evaluate()
+        end,
+        text = Tracking.CurrentText,
+    })
 
     Cfg.FooterSection("other")
     Cfg.LayoutElixirs()   -- ordnet auch den Tab an
@@ -5490,18 +5640,24 @@ function Cfg.BuildGroupTab(hasBlessings)
         Evaluate()
     end)
     y = y - 30
-    config.groupModeBtn = Cfg.MakeButton(p, "", 220)
-    config.groupModeBtn:SetPoint("TOPLEFT", 40, y)
-    config.groupModeBtn:SetScript("OnClick", function()
-        local idx = 1
-        for i, k in ipairs(GROUP_MODE_ORDER) do if k == db.groupMode then idx = i end end
-        db.groupMode = GROUP_MODE_ORDER[idx % #GROUP_MODE_ORDER + 1]
-        Group.MarkGroupDirty()
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 30
+    config.groupModeDD = Cfg.MakeDropdown(p, 44, y, {
+        label = L.GROUP_MODE_LABEL, width = 180, labelWidth = 116,
+        options = function()
+            local list = {}
+            for _, k in ipairs(GROUP_MODE_ORDER) do
+                list[#list + 1] = { value = k, text = Cfg.ValueText("GROUP_MODE_", k) }
+            end
+            return list
+        end,
+        get = function() return db.groupMode end,
+        set = function(v)
+            db.groupMode = v
+            Group.MarkGroupDirty()
+            NoteDeferred()
+            Evaluate()
+        end,
+    })
+    y = y - 34
     -- Segen des Paladins in den Gruppenbuffs (nur Paladine; aus, solange Pally Power geladen ist)
     if hasBlessings then
         config.blessCB = Cfg.MakeBetaCheck(p, L.EXP_BLESSINGS, 36, y, function(self)
