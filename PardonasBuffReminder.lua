@@ -1226,10 +1226,9 @@ local function EntryIcon(e)
     end
     if e.kind == "elixir" then return ItemIcon(e.item) or FALLBACK_ICON end
     if e.kind == "scroll" then
-        -- Icon der besten Rolle der Art in den Taschen, sonst der höchsten Rolle
+        -- Icon der Rolle des Linksklicks, sonst der Rolle I der Art
         local c = Scroll.Choices(e)[1]
-        local def = Scroll.TYPES[e.scrollType]
-        return ItemIcon(c and c.id or def.items[#def.items]) or FALLBACK_ICON
+        return (c and ItemIcon(c.id)) or Scroll.TypeIcon(e.scrollType)
     end
     if e.weaponItems then
         -- Icon der aktuell besten Wahl aus den Taschen
@@ -1437,8 +1436,8 @@ local function IsEnabled(e)
     if e.kind == "tracking" then return ExpOn("expTracking") and e.trackType ~= nil end
     -- Wunsch-Elixiere: nur mit Experimental-Schalter und Haken in der Liste (pro Charakter)
     if e.kind == "elixir" then return ExpOn("expElixirs") and cdb.elixirsWanted[e.item] == true end
-    -- Rollen: nur mit Experimental-Schalter; je Art abschaltbar (pro Charakter)
-    if e.kind == "scroll" then return ExpOn("expScrolls") and not cdb.scrollsOff[e.scrollType] end
+    -- Rollen: nur mit Experimental-Schalter; je Art Wahl pro Charakter, sonst Vorgabe der Klasse
+    if e.kind == "scroll" then return ExpOn("expScrolls") and Scroll.Enabled(e.scrollType) end
     -- Waffen-Items: nur mit Experimental-Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return false end
@@ -1741,7 +1740,7 @@ local function ScanAuras(unit)
                     local dur, exp = aura.duration, aura.expirationTime
                     if IsSecret(dur) or IsSecret(exp) then dur, exp = nil, nil end
                     list[#list + 1] = { id = id, name = name, icon = icon, duration = dur, expirationTime = exp,
-                        isOwn = isOwn, secretSrc = IsSecret(src) }
+                        isOwn = isOwn, secretSrc = IsSecret(src), points = Scroll.AuraPoints(aura) }
                 end
             end
         end
@@ -2525,39 +2524,130 @@ function Elixir.List()
 end
 
 ---------------------------------------------------------------------------
--- Rollen (experimentell, Schalter expScrolls): je Art eine Warnung, wenn eine Rolle dieser Art
--- in den Taschen liegt, ihr Buff fehlt und der Wert nicht schon durch einen Klassenbuff
--- abgedeckt ist (Intelligenz, Willenskraft, Ausdauer). Linksklick: höchste Rolle der Art,
--- Rechtsklick: Item-Menü mit den Rollen der Art. Aus pro Charakter: cdb.scrollsOff[art] = true.
+-- Rollen (experimentell, Schalter expScrolls): je Art eine Warnung, wenn eine benutzbare Rolle
+-- dieser Art in den Taschen liegt, ihr Buff (irgendein Rang) fehlt und kein aktiver Klassenbuff
+-- schon mindestens so viel vom Wert gibt (Intelligenz, Willenskraft, Ausdauer).
+-- Benutzbar = Mindeststufe (Item-Daten) bekannt und <= Stufe des Spielers.
+-- Linksklick: beste benutzbare Rolle (Favoriten, dann höchster Rang); Rechtsklick: Item-Menü mit
+-- allen Rollen der Art (zu hohe Stufe: ausgegraut, nicht klickbar).
+-- An/aus pro Charakter: cdb.scrolls[art] = true/false nur nach ausdrücklicher Wahl,
+-- nil = Vorgabe der Klasse (Scroll.CLASS_DEFAULTS; unbekannte Klasse und Druide: alle Arten).
 --   items  : Rollen I-IV (Item-IDs, aufsteigend); Rückfall: Verbrauchsgut/Rolle, deren Zauber
 --            (ID oder Name) zu einer Art gehört
 --   spells : Buffs der Ränge I-IV (Classic-IDs; zusätzlich die Item-Zauber aus dem Client)
---   cover  : Klassenbuff, der den Wert schon liefert (Eintrag in CLASS_BUFFS, alle Ränge)
+--   stat   : globaler Wertname des Clients für "Rolle: <Wert>" (Rückfall L["SCROLL_STAT_<ART>"])
+--   values : Wert der Ränge I-IV (Original-Werte; nur Arten mit cover)
+--   cover  : Klassenbuff, der den Wert ebenfalls liefert (Eintrag in CLASS_BUFFS, alle Ränge)
 ---------------------------------------------------------------------------
 Scroll.ORDER = { "agility", "strength", "intellect", "spirit", "stamina", "protection" }
 Scroll.TYPES = {
-    agility    = { items = { 3012, 1477, 4425, 10309 }, spells = { 8115, 8116, 8117, 12174 } },
-    strength   = { items = { 954, 2289, 4426, 10310 },  spells = { 8118, 8119, 8120, 12179 } },
+    agility    = { items = { 3012, 1477, 4425, 10309 }, spells = { 8115, 8116, 8117, 12174 },
+                   stat = "SPELL_STAT2_NAME" },
+    strength   = { items = { 954, 2289, 4426, 10310 },  spells = { 8118, 8119, 8120, 12179 },
+                   stat = "SPELL_STAT1_NAME" },
     intellect  = { items = { 955, 2290, 4419, 10308 },  spells = { 8096, 8097, 8098, 12176 },
-                   cover = { "MAGE", "intellect" } },
+                   stat = "SPELL_STAT4_NAME", values = { 4, 8, 12, 16 }, cover = { "MAGE", "intellect" } },
     spirit     = { items = { 1181, 1712, 4424, 10306 }, spells = { 8112, 8113, 8114, 12177 },
-                   cover = { "PRIEST", "divinespirit" } },
+                   stat = "SPELL_STAT5_NAME", values = { 3, 7, 11, 15 }, cover = { "PRIEST", "divinespirit" } },
     stamina    = { items = { 1180, 1711, 4422, 10307 }, spells = { 8099, 8100, 8101, 12178 },
-                   cover = { "PRIEST", "fortitude" } },
-    protection = { items = { 3013, 1478, 4421, 10305 }, spells = { 8091, 8094, 8095, 12175 } },
+                   stat = "SPELL_STAT3_NAME", values = { 4, 8, 12, 16 }, cover = { "PRIEST", "fortitude" } },
+    protection = { items = { 3013, 1478, 4421, 10305 }, spells = { 8091, 8094, 8095, 12175 },
+                   stat = "ARMOR" },
+}
+-- Vorgabe pro Klasse (Klassen-Token); fehlende Klasse = alle Arten
+Scroll.CLASS_DEFAULTS = {
+    WARRIOR     = { "agility", "strength", "stamina", "protection" },
+    ROGUE       = { "agility", "strength", "stamina", "protection" },
+    DEATHKNIGHT = { "agility", "strength", "stamina", "protection" },
+    HUNTER      = { "agility", "intellect", "stamina", "protection" },
+    PALADIN     = { "strength", "agility", "intellect", "stamina", "protection" },
+    SHAMAN      = { "strength", "agility", "intellect", "stamina", "protection" },
+    PRIEST      = { "intellect", "spirit", "stamina", "protection" },
+    MAGE        = { "intellect", "spirit", "stamina", "protection" },
+    WARLOCK     = { "intellect", "spirit", "stamina", "protection" },
+}
+-- Original-Werte der abdeckenden Klassenbuffs (Spell-ID -> Wert), falls die Aura keinen lesbaren
+-- Wert (points) liefert. Nicht aufgeführte Ränge (TBC/WotLK) = Wert unbekannt -> keine Warnung.
+Scroll.COVER_VALUES = {
+    -- Power Word: Fortitude R1-R6, Prayer of Fortitude R1-R2 (Ausdauer)
+    [1243] = 3, [1244] = 8, [1245] = 20, [2791] = 32, [10937] = 43, [10938] = 54,
+    [21562] = 43, [21564] = 54,
+    -- Arcane Intellect R1-R5, Arcane Brilliance R1 (Intelligenz)
+    [1459] = 2, [1460] = 7, [1461] = 15, [10156] = 22, [10157] = 31, [23028] = 31,
+    -- Divine Spirit R1-R4, Prayer of Spirit R1 (Willenskraft)
+    [14752] = 17, [14818] = 23, [14819] = 33, [27841] = 40, [27681] = 40,
 }
 Scroll.byItem = {}     -- Item-ID -> { type, rank } (feste IDs + per Rückfall erkannte)
 Scroll.bySpell = {}    -- Spell-ID -> Art
 Scroll.byName = {}     -- Zaubername -> Art
+Scroll.valueBySpell = {}   -- Spell-ID des Rollen-Buffs -> Wert (Arten mit values)
+Scroll.defaultSets = {}    -- Klassen-Token -> { [art] = true }
 Scroll.entries = {}    -- Art -> Eintrag
 -- Nachschlagetabellen der festen IDs (Funktion statt Schleife im Haupt-Chunk: keine weiteren locals)
 function Scroll.Init()
     for t, def in pairs(Scroll.TYPES) do
         for i, id in ipairs(def.items) do Scroll.byItem[id] = { type = t, rank = i } end
-        for _, id in ipairs(def.spells) do Scroll.bySpell[id] = t end
+        for i, id in ipairs(def.spells) do
+            Scroll.bySpell[id] = t
+            if def.values then Scroll.valueBySpell[id] = def.values[i] end
+        end
+    end
+    for class, list in pairs(Scroll.CLASS_DEFAULTS) do
+        local set = {}
+        for _, t in ipairs(list) do set[t] = true end
+        Scroll.defaultSets[class] = set
     end
 end
 Scroll.Init()
+
+-- Art an? Ausdrückliche Wahl (cdb.scrolls), sonst Vorgabe der Klasse
+function Scroll.Enabled(t)
+    local v = cdb and cdb.scrolls and cdb.scrolls[t]
+    if v ~= nil then return v == true end
+    local set = Scroll.defaultSets[Scroll.class or ""]
+    return set == nil or set[t] == true
+end
+
+-- Einmalig beim Laden: altes cdb.scrollsOff[art] = true -> cdb.scrolls[art] = false
+function Scroll.MigrateOff()
+    if type(cdb.scrollsOff) == "table" then
+        for t, off in pairs(cdb.scrollsOff) do
+            if off == true and cdb.scrolls[t] == nil then cdb.scrolls[t] = false end
+        end
+    end
+    cdb.scrollsOff = nil
+end
+
+-- Stufe des Spielers; PLAYER_LEVEL_UP liefert die neue Stufe, bevor UnitLevel sie kennt
+function Scroll.PlayerLevel()
+    local ok, lvl = pcall(UnitLevel, "player")
+    if not ok or type(lvl) ~= "number" or IsSecret(lvl) then lvl = nil end
+    local up = Scroll.levelUp
+    if up and (not lvl or up > lvl) then lvl = up end
+    return lvl
+end
+
+function Scroll.OnLevelUp(level)
+    if type(level) == "number" and not IsSecret(level) then Scroll.levelUp = level end
+end
+
+-- Mindeststufe einer Rolle; nil = Item-Daten (noch) nicht geladen -> Laden anstoßen
+-- (GET_ITEM_INFO_RECEIVED wertet neu aus)
+function Scroll.MinLevel(id)
+    local _, minLevel = Items.ItemLevels(id)
+    if type(minLevel) == "number" then return minLevel end
+    if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+    return nil
+end
+
+-- Wert einer Rolle (nur Arten mit values): Rang aus der festen Liste, sonst über den Item-Zauber
+function Scroll.ItemValue(t, id, rank)
+    local def = Scroll.TYPES[t]
+    if not (def and def.values) then return nil end
+    if rank and rank > 0 then return def.values[rank] end
+    local spellID = Items.ItemSpell(id)
+    return spellID and Scroll.valueBySpell[spellID] or nil
+end
 
 -- Art einer Rolle; nil = keine Rolle. Rückfall über Item-Klasse + Zauber (gecacht)
 function Scroll.TypeOf(id)
@@ -2585,7 +2675,8 @@ function Scroll.Learn(id)
 end
 
 -- PLAYER_LOGIN: sechs Einträge (Reihenfolge Scroll.ORDER) + Klassenbuffs, die Werte abdecken
-function Scroll.Setup()
+function Scroll.Setup(class)
+    Scroll.class = class   -- Vorgabe der Arten (Scroll.Enabled)
     for _, t in ipairs(Scroll.ORDER) do
         local def = Scroll.TYPES[t]
         local e = { key = "scroll_" .. t, general = true, kind = "scroll", itemKind = "scroll",
@@ -2606,55 +2697,124 @@ function Scroll.Setup()
         end
         Scroll.entries[t] = e
         entries[#entries + 1] = e
-        ItemName(def.items[#def.items])   -- Name der höchsten Rolle vorladen (Einstellungen)
+        ItemName(def.items[1])   -- Rolle I vorladen (Icon der Art in den Einstellungen)
     end
 end
 
--- Rollen der Art des Eintrags aus den Taschen: Favoriten, dann höchster Rang, dann Anzahl
-function Scroll.Choices(e)
+-- Alle Rollen der Art des Eintrags aus den Taschen; c.usable = Mindeststufe bekannt und erreicht
+function Scroll.InBags(e)
     local list, favs = {}, cdb and cdb.favorites or {}
-    local lvl = UnitLevel("player") or 1
+    local lvl = Scroll.PlayerLevel()
     for id, n in pairs(Items.bagCounts) do
         local t, rank = Scroll.TypeOf(id)
         if t == e.scrollType then
-            local _, minLevel = Items.ItemLevels(id)
-            if not minLevel or minLevel <= lvl then
-                list[#list + 1] = { id = id, count = n, rank = rank or 0, fav = favs[id] == true }
-            end
+            local minLevel = Scroll.MinLevel(id)
+            list[#list + 1] = { id = id, count = n, rank = rank or 0, fav = favs[id] == true,
+                minLevel = minLevel, usable = minLevel ~= nil and (lvl == nil or minLevel <= lvl),
+                value = Scroll.ItemValue(t, id, rank) }
         end
     end
-    table.sort(list, function(a, b)
-        if a.fav ~= b.fav then return a.fav end
-        if a.rank ~= b.rank then return a.rank > b.rank end
-        if a.count ~= b.count then return a.count > b.count end
-        return a.id < b.id
-    end)
     return list
 end
 
--- Anzahl der Rollen einer Art in den Taschen
+-- Reihenfolge: benutzbare vor gesperrten; benutzbare nach Favorit, dann höchstem Rang;
+-- gesperrte nach Rang aufsteigend (nächster erreichbarer zuerst); dann Anzahl, ID
+function Scroll.SortChoices(a, b)
+    if a.usable ~= b.usable then return a.usable end
+    if a.usable and a.fav ~= b.fav then return a.fav end
+    if a.rank ~= b.rank then
+        if a.usable then return a.rank > b.rank end
+        return a.rank < b.rank
+    end
+    if a.count ~= b.count then return a.count > b.count end
+    return a.id < b.id
+end
+
+-- Benutzbare Rollen der Art (Linksklick, "beste Wahl", Warnung): erste = beste Wahl
+function Scroll.Choices(e)
+    local list = {}
+    for _, c in ipairs(Scroll.InBags(e)) do
+        if c.usable then list[#list + 1] = c end
+    end
+    table.sort(list, Scroll.SortChoices)
+    return list
+end
+
+-- Rechtsklick-Menü: alle Rollen der Art; c.locked = Stufe zu niedrig (ausgegraut, nicht klickbar)
+function Scroll.MenuChoices(e)
+    local list = Scroll.InBags(e)
+    for _, c in ipairs(list) do c.locked = not c.usable end
+    table.sort(list, Scroll.SortChoices)
+    return list
+end
+
+-- Anzahl der Rollen einer Art in den Taschen (alle Ränge, auch nicht benutzbare)
 function Scroll.Count(e)
     local n = 0
-    for _, c in ipairs(Scroll.Choices(e)) do n = n + c.count end
+    for _, c in ipairs(Scroll.InBags(e)) do n = n + c.count end
     return n
 end
 
--- Name der Art: Rolle des höchsten Rangs (aus dem Client)
-function Scroll.Label(e)
-    local def = Scroll.TYPES[e.scrollType]
-    return ItemName(def.items[#def.items])
+-- Neutraler Name der Art, z. B. "Scroll: Intellect" (Wertname aus dem Client, sonst eigener Text)
+function Scroll.TypeName(t)
+    local def = Scroll.TYPES[t]
+    local stat = def and _G[def.stat]
+    if type(stat) ~= "string" or IsSecret(stat) or stat == "" then
+        stat = L["SCROLL_STAT_" .. tostring(t):upper()]
+    end
+    return L.SCROLL_TYPE:format(stat)
 end
 
--- false = keine Rolle in den Taschen oder Wert durch einen Klassenbuff abgedeckt; nil = weiter
+-- Icon der Art: Rolle des Rangs I
+function Scroll.TypeIcon(t)
+    local def = Scroll.TYPES[t]
+    return (def and ItemIcon(def.items[1])) or FALLBACK_ICON
+end
+
+-- Beschriftung der Warnung: Rolle, die der Linksklick benutzt; ohne sie der neutrale Name
+function Scroll.Label(e)
+    local c = Scroll.Choices(e)[1]
+    if c then return ItemName(c.id) end
+    return Scroll.TypeName(e.scrollType)
+end
+
+-- Wert aus den Aura-Daten (points[1]); nil = nicht vorhanden oder Secret
+function Scroll.ReadPoints(aura)
+    local pts = aura.points
+    if type(pts) ~= "table" or IsSecret(pts) then return nil end
+    return pts[1]
+end
+
+function Scroll.AuraPoints(aura)
+    local ok, v = pcall(Scroll.ReadPoints, aura)
+    if ok and type(v) == "number" and not IsSecret(v) and v > 0 then return v end
+    return nil
+end
+
+-- Stärkster aktiver Klassenbuff, der den Wert der Art ebenfalls gibt: nil = keiner aktiv,
+-- false = aktiv, aber Wert nicht bestimmbar. Wert: Aura (points), sonst Scroll.COVER_VALUES.
+function Scroll.CoverValue(e, scan)
+    local best
+    for _, a in ipairs(scan.list) do
+        if (a.id and e.coverSet[a.id]) or (a.name and e.coverNames[a.name]) then
+            local v = a.points or (a.id and Scroll.COVER_VALUES[a.id])
+            if type(v) ~= "number" then return false end
+            if not best or v > best then best = v end
+        end
+    end
+    return best
+end
+
+-- false = keine benutzbare Rolle in den Taschen oder ein Klassenbuff gibt schon mindestens so viel
+-- wie die Rolle des Linksklicks (Wert unbestimmbar: lieber keine Warnung); nil = weiter prüfen
+-- (eigener Buff der Art, irgendein Rang, in CheckMissing)
 function Scroll.Precheck(e, scan)
-    if #Scroll.Choices(e) == 0 then return false end
+    local best = Scroll.Choices(e)[1]
+    if not best then return false end
     if not scan then return nil end
-    for id in pairs(e.coverSet) do
-        if scan.ids[id] then return false end
-    end
-    for n in pairs(e.coverNames) do
-        if scan.names[n] then return false end
-    end
+    local cover = Scroll.CoverValue(e, scan)
+    if cover == false then return false end
+    if cover and (type(best.value) ~= "number" or cover >= best.value) then return false end
     return nil
 end
 
@@ -3779,6 +3939,7 @@ end
 
 -- Kategorie (Essen) bzw. leer (Fläschchen) für die Info-Zeile
 function Menu.ItemInfoText(c)
+    if c.locked then return L.SCROLL_LEVEL:format(c.minLevel and tostring(c.minLevel) or "?") end
     if c.cat then return ns.Locales.Text("FOOD_CAT_" .. c.cat:upper(), c.cat) end
     if c.wcat then return ns.Locales.Text("WEAPON_CAT_" .. c.wcat:upper(), c.wcat) end
     return ""
@@ -3924,7 +4085,9 @@ function Menu.LayoutMenu(e)
     if withItems or variants then
         Separator()
         Head(menu.itemHead, variants and L.MENU_VARIANT or Menu.ItemHeadText(kind))
-        local choices = variants or (e.demo and Demo.FoodChoices()) or Items.ItemChoices(e)
+        -- Rollen: alle der Art, nicht benutzbare gesperrt (c.locked)
+        local choices = variants or (e.demo and Demo.FoodChoices())
+            or (kind == "scroll" and Scroll.MenuChoices(e)) or Items.ItemChoices(e)
         n = math.min(#choices, Menu.MAX_ITEM_CHOICES)
         itemTop = y
         if n == 0 then
@@ -3947,10 +4110,15 @@ function Menu.LayoutMenu(e)
                 b.itemID, b.variantKey = nil, c.vkey
                 b.spellID = type(c.spell) == "number" and c.spell or nil
                 Menu.SetSpellButtonAction(b, c.spell)
+            elseif c.locked then
+                -- Stufe zu niedrig: ohne secure Aktion, gesperrt (Tooltip bleibt)
+                b.itemID, b.variantKey, b.spellID = c.id, nil, nil
+                Menu.ClearButtonAction(b)
             else
                 b.itemID, b.variantKey, b.spellID = c.id, nil, nil
                 Menu.SetItemButtonAction(b, c.id, e, kind)
             end
+            if c.locked then b:Disable() else b:Enable() end
             b:SetSize(rowsWidth, h)
             b:ClearAllPoints()
             b:SetPoint("TOPLEFT", 0, -(i - 1) * (h + 1))
@@ -3959,24 +4127,30 @@ function Menu.LayoutMenu(e)
             b.icon:ClearAllPoints()
             b.icon:SetPoint("LEFT", 4, 0)
             b.icon:SetTexture(variants and c.icon or (ItemIcon(c.id) or FALLBACK_ICON))
+            b.icon:SetDesaturated(c.locked == true)
             Style.StyleIconBorder(b.iconBorder, b.icon, st.iconBorder)
             b.count:ClearAllPoints()
             b.count:SetPoint("RIGHT", -4, 0)
             b.count:SetText(variants and "" or c.count)
             -- Zeile 1: Name (+ XP-Abzeichen); Zeile 2: Kategorie + "beste Wahl"
             -- (Varianten: Zeile 2 = "zuletzt genutzt" bei der Variante des Linksklicks)
-            local best = i == 1 and not variants
+            local best = i == 1 and not variants and not c.locked
             local info = variants and (c.last and L.LAST_USED or "") or Menu.ItemInfoText(c)
             local nameY = ms.itemTwoLines and 6 or 0
             if variants and info == "" then nameY = 0 end   -- Variante ohne Zeile 2: mittig
             b.name:ClearAllPoints()
             b.name:SetPoint("LEFT", b.icon, "RIGHT", 6, nameY)
-            Style.SetColor(b.name, "SetTextColor", ms.textColor)
+            if c.locked then
+                b.name:SetTextColor(0.5, 0.5, 0.5)
+            else
+                Style.SetColor(b.name, "SetTextColor", ms.textColor)
+            end
             local name = variants and c.name or ItemName(c.id)
             if best and not ms.itemTwoLines then name = Style.StarMarkup(12) .. " " .. name end
             if variants and c.last and not ms.itemTwoLines then
                 name = name .. " |cff999999(" .. L.LAST_USED .. ")|r"
             end
+            if c.locked and not ms.itemTwoLines then name = name .. " |cff999999(" .. info .. ")|r" end
             b.name:SetText(name)
             local maxName = rowsWidth - iconSize - 50 - (c.xp and 26 or 0)
             local w = (b.name.GetUnboundedStringWidth and b.name:GetUnboundedStringWidth()) or b.name:GetStringWidth()
@@ -4347,14 +4521,20 @@ function RefreshConfig()
         if e.kind == "elixir" then
             w.cb:SetChecked(cdb.elixirsWanted[e.item] == true)
         elseif e.kind == "scroll" then
-            w.cb:SetChecked(not cdb.scrollsOff[e.scrollType])
+            w.cb:SetChecked(Scroll.Enabled(e.scrollType))   -- wirksamer Wert (Wahl oder Klassenvorgabe)
         elseif e.kind == "conjure" or e.weaponItems then
             w.cb:SetChecked(cdb.buffs[e.key] ~= false)
         else
             w.cb:SetChecked(IsEnabled(e))
         end
-        w.icon:SetTexture(EntryIcon(e))
-        w.name:SetText(EntryLabel(e))
+        -- Rollen: neutraler Name und Icon der Art (Rang I), keine konkrete Rolle
+        if e.kind == "scroll" then
+            w.icon:SetTexture(Scroll.TypeIcon(e.scrollType))
+            w.name:SetText(Scroll.TypeName(e.scrollType))
+        else
+            w.icon:SetTexture(EntryIcon(e))
+            w.name:SetText(EntryLabel(e))
+        end
         if known then
             if gated then w.cb:Disable() else w.cb:Enable() end
             w.icon:SetDesaturated(gated)
@@ -4532,7 +4712,7 @@ function Cfg.MakeEntryRow(parent, e, y)
         if e.kind == "elixir" then
             cdb.elixirsWanted[e.item] = on or nil        -- Wunsch-Elixier (pro Charakter)
         elseif e.kind == "scroll" then
-            cdb.scrollsOff[e.scrollType] = (not on) or nil   -- Rollen-Art aus (pro Charakter)
+            cdb.scrolls[e.scrollType] = on   -- ausdrückliche Wahl (pro Charakter)
         else
             cdb.buffs[e.key] = on
         end
@@ -5971,7 +6151,8 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         db.elixirSpells = db.elixirSpells or {}   -- Elixier-Item-ID -> Spell-ID des Buffs (gelernt)
         cdb.elixirsSeen = cdb.elixirsSeen or {}   -- Elixier-Item-ID -> true: schon in den Taschen gewesen
         cdb.elixirsWanted = cdb.elixirsWanted or {}   -- Elixier-Item-ID -> true: gewünscht (Warnung)
-        cdb.scrollsOff = cdb.scrollsOff or {}     -- Rollen-Art -> true: keine Warnung
+        cdb.scrolls = cdb.scrolls or {}           -- Rollen-Art -> true/false (ausdrücklich), nil = Klassenvorgabe
+        Scroll.MigrateOff()                       -- altes cdb.scrollsOff übernehmen und entfernen
         -- versteckter Sprach-Schalter (nicht in Hilfe/README/Einstellungen; /br reset lässt ihn stehen):
         -- /run BuffReminderDB.locale = "frFR" + /reload; nil = Client-Sprache
         ns.Locales.Activate(db.locale)
@@ -6023,7 +6204,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         Items.UpdateXP()            -- zählt Erfahrung? (XP-Essen bevorzugen / Abzeichen)
         Eat.ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
         Elixir.Setup()              -- Einträge der gemerkten Elixiere (neue folgen beim Taschen-Scan)
-        Scroll.Setup()              -- sechs Rollen-Einträge (Agility … Protection)
+        Scroll.Setup(class)         -- sechs Rollen-Einträge (Agility … Protection)
         Items.ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
         reagentLines = REAGENT_SPELLS[class] or {}
@@ -6189,6 +6370,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- XP-Bonus neu bewerten (arg1 = neue Stufe bei PLAYER_LEVEL_UP); offenes Item-Menü
         -- und Warnzeilen (beste Wahl) folgen
         Items.UpdateXP(event == "PLAYER_LEVEL_UP" and arg1 or nil)
+        if event == "PLAYER_LEVEL_UP" then Scroll.OnLevelUp(arg1) end   -- Rollen: benutzbare Ränge
         Menu.RefreshItemPanel()
         if event ~= "PLAYER_LEVEL_UP" then Evaluate(); return end
     end
@@ -6288,6 +6470,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
         wipe(cdb.reagents)
+        wipe(cdb.scrolls)                         -- Rollen-Arten wieder nach Klassenvorgabe
         ApplyLayout(); Display.ApplyStyle(); Print(L.RESET); Evaluate()
     else
         for _, k in ipairs({ "HELP_OPEN", "HELP_TEST", "HELP_MOVE", "HELP_LOCK", "HELP_MINIMAP", "HELP_UNMUTE", "HELP_AURAS", "HELP_RESET" }) do
