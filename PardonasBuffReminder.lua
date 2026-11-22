@@ -606,7 +606,8 @@ Sound.LSM_PREFIX = "lsm:"
 local DEFAULTS = {
     enabled      = true,
     sound        = "ping",
-    scale        = 1.0,
+    scale        = 1.0,        -- Größe der Warnliste (0.5-2); Position (point) in Einheiten dieser Größe
+    alpha        = 1.0,        -- Deckkraft der Warnliste (0.3-1)
     point        = { "CENTER", "UIParent", "CENTER", 0, 140 },
     instanceOnly = true,
     groupCheck   = true,       -- Gruppen-Buffs bei Party-/Raid-Mitgliedern prüfen
@@ -3172,21 +3173,57 @@ function Display.MakePulse(r)
     return g
 end
 
+-- Größe und Deckkraft der Warnliste (Einstellungen, db.scale/db.alpha). Display.neutral (Demo und
+-- Screenshot-Lauf): 100 % / 100 %, die Werte des Spielers bleiben gespeichert.
+-- db.point wird in Einheiten von db.scale gespeichert; bei anderer wirksamer Größe rechnet
+-- ApplyLayout die Abstände um, damit der Ankerpunkt auf dem Bildschirm bleibt.
+function Display.SavedScale()
+    local s = tonumber(db and db.scale) or 1
+    return math.max(0.5, math.min(2, s))
+end
+
+function Display.Scale()
+    if Display.neutral then return 1 end
+    return Display.SavedScale()
+end
+
+function Display.Alpha()
+    if Display.neutral then return 1 end
+    local a = tonumber(db and db.alpha) or 1
+    return math.max(0.3, math.min(1, a))
+end
+
+-- Neue Größe speichern; Abstände des Ankerpunkts so umrechnen, dass er an seiner Bildschirm-
+-- position bleibt (wirksam über ApplyLayout, im Kampf danach)
+function Display.SetScale(s)
+    local old = Display.SavedScale()
+    db.scale = math.max(0.5, math.min(2, s))
+    local p, k = db.point, old / db.scale
+    if type(p) == "table" and type(p[4]) == "number" and type(p[5]) == "number" then
+        p[4], p[5] = p[4] * k, p[5] * k
+    end
+end
+
 function Display.SavePoint()
     anchor:StopMovingOrSizing()
     local p, _, rp, x, y = anchor:GetPoint()
-    db.point = { p, "UIParent", rp, x, y }
+    local k = Display.Scale() / Display.SavedScale()   -- in Einheiten von db.scale
+    db.point = { p, "UIParent", rp, (x or 0) * k, (y or 0) * k }
 end
 
 local layoutPending = false
 
+-- Position, Größe und Deckkraft der Warnliste; im Kampf erst danach (geschützte Zeilen)
 local function ApplyLayout()
     if InCombatLockdown() then layoutPending = true; return end
     layoutPending = false
+    local s = Display.Scale()
+    local k = Display.SavedScale() / s
     anchor:ClearAllPoints()
     local p = db.point
-    anchor:SetPoint(p[1], UIParent, p[3], p[4], p[5])
-    anchor:SetScale(db.scale)
+    anchor:SetPoint(p[1], UIParent, p[3], p[4] * k, p[5] * k)
+    anchor:SetScale(s)
+    anchor:SetAlpha(Display.Alpha())
 end
 
 local rows = {}
@@ -3607,7 +3644,7 @@ function Display.ShowRows(list, dragMode, expFrom)
     Keybind.Update(#list)
     if #list > 0 then
         if not anchor:IsShown() then
-            anchor:SetAlpha(1)
+            anchor:SetAlpha(Display.Alpha())   -- Ablauf-Zeilen und Pulsieren wirken relativ dazu
             anchor:Show()
         end
     else
@@ -4718,6 +4755,10 @@ function RefreshConfig()
     Cfg.LayoutTab("supplies")
     config.elixirEmpty:SetTextColor(ExpOn("expElixirs") and 0.6 or 0.4, ExpOn("expElixirs") and 0.6 or 0.4, 0.4)
     Cfg.SyncDropdown(config.soundDD, true)
+    local scalePct = math.floor(Display.SavedScale() * 100 + 0.5)
+    local alphaPct = math.floor(math.max(0.3, math.min(1, tonumber(db.alpha) or 1)) * 100 + 0.5)
+    Cfg.SyncSlider(config.scaleSlider, scalePct, L.SIZE:format(scalePct), true)
+    Cfg.SyncSlider(config.alphaSlider, alphaPct, L.OPACITY:format(alphaPct), true)
     Cfg.SyncDropdown(config.styleDD, true)
     config.iconsCB:SetChecked(db.iconsOnly)
     Cfg.SetCheckEnabled(config.iconsCB, Style.STYLES[db.style] ~= nil and Style.STYLES[db.style].iconsOnly)
@@ -5366,7 +5407,23 @@ function Cfg.BuildDisplayTab()
         end,
         text = function() return Sound.Label(db.sound) end,
     })
-    y = y - 34
+    y = y - 38
+
+    -- Größe und Deckkraft der Warnliste (im Kampf erst danach; Menüs bleiben unverändert)
+    config.scaleSlider = Cfg.MakeSlider(p, "BuffReminderScale", 24, y, 50, 200, 5, function(v)
+        Display.SetScale(v / 100)
+        NoteDeferred()
+        ApplyLayout()
+        RefreshConfig()
+    end)
+    y = y - 26
+    config.alphaSlider = Cfg.MakeSlider(p, "BuffReminderAlpha", 24, y, 30, 100, 5, function(v)
+        db.alpha = v / 100
+        NoteDeferred()
+        ApplyLayout()
+        RefreshConfig()
+    end)
+    y = y - 30
 
     -- Tastenbelegung "Oberste Warnung auslösen": aktuelle Taste + wo sie belegt wird
     config.keyText = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -6182,6 +6239,8 @@ function Demo.Start(after)
         return
     end
     Demo.active = true
+    Display.neutral = true   -- Demo und Bilder mit 100 % Größe und Deckkraft (Werte bleiben gespeichert)
+    ApplyLayout()
     if menu:IsShown() then menu:Hide() end
     Print(L.DEMO_ON)
     Demo.Preload(function()
@@ -6196,7 +6255,9 @@ function Demo.Stop(quiet)
     Demo.run = nil      -- laufende Timer verfallen
     Demo.active = false
     Demo.loadCheck = nil
+    Display.neutral = nil    -- Größe und Deckkraft des Spielers wieder anwenden
     Demo.Restore()
+    ApplyLayout()            -- im Kampf erst danach (layoutPending)
     if not InCombatLockdown() then
         if menu:IsShown() then menu:Hide() end
         Display.ShowRows({})   -- Beispielzeilen weg, auch falls Evaluate (noch) nichts zeigt
