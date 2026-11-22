@@ -5605,6 +5605,35 @@ local function PardonaStatus()
     return L.STATUS_MANY:format(warnCount)
 end
 
+-- /br debug: Diagnose der LibPardona (LP:GetDiagnostics, MINOR >= 6): aktive Kopie, Stil-/Menü-
+-- Versionen und die von Buff Reminder mitgebrachte Kopie. Ältere Libs: Hinweiszeile.
+function Cfg.LibDiagLines()
+    if not (LP and type(LP.GetDiagnostics) == "function") then
+        return { "Lib diagnostics: not available (Lib < 6)" }
+    end
+    local ok, diag = pcall(LP.GetDiagnostics, LP)
+    if not ok or type(diag) ~= "table" then return { "Lib diagnostics: error (" .. tostring(diag) .. ")" } end
+    local lines = {
+        ("lib: active MINOR %s (from %s), style %s, menu %s, diagnostics %s"):format(tostring(diag.minor),
+            tostring(diag.from), tostring(diag.styleVersion or "-"), tostring(diag.menuVersion or "-"),
+            tostring(diag.diagnosticsVersion or "-")),
+    }
+    local own
+    for _, c in ipairs(type(diag.copies) == "table" and diag.copies or {}) do
+        if type(c) == "table" and c.addon == ADDON_NAME and (not own or (tonumber(c.minor) or 0) > own) then
+            own = tonumber(c.minor)
+        end
+    end
+    lines[#lines + 1] = ("lib: bundled with %s: %s"):format(ADDON_NAME, own and ("MINOR " .. own) or "not recorded (< 6)")
+    for _, a in ipairs(type(diag.addons) == "table" and diag.addons or {}) do
+        if type(a) == "table" then
+            lines[#lines + 1] = ("lib: addon %s %s – Lib %s"):format(tostring(a.name), tostring(a.version),
+                a.libMinor and tostring(a.libMinor) or "< 6")
+        end
+    end
+    return lines
+end
+
 -- Ist mindestens eine Warnung stummgeschaltet (noch nicht abgelaufen)?
 function Cfg.AnyMuted()
     local now = GetTime()
@@ -6620,6 +6649,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         dprint(Style.DebugLine())
         dprint(("locale: %s (client %s, override %s)"):format(ns.Locales.active, ns.Locales.Client(),
             tostring(db.locale)))
+        for _, line in ipairs(Cfg.LibDiagLines()) do dprint(line) end
         db.lastDebug = log
     elseif cmd == "auras" then
         Print(L.AURAS_HEAD)
