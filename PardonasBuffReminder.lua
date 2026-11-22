@@ -4639,6 +4639,8 @@ function RefreshConfig()
     config.expElixirCB:SetChecked(ExpOn("expElixirs"))
     config.expScrollCB:SetChecked(ExpOn("expScrolls"))
     if Elixir.dirty then Cfg.LayoutElixirs() end
+    Cfg.LayoutTab("other")      -- Listen ein-/ausklappen (Schalter an/aus)
+    Cfg.LayoutTab("supplies")
     config.elixirEmpty:SetTextColor(ExpOn("expElixirs") and 0.6 or 0.4, ExpOn("expElixirs") and 0.6 or 0.4, 0.4)
     if expTrack then config.trackBtn:Enable() else config.trackBtn:Disable() end
     config.soundBtn:SetText(L.SOUND:format(Cfg.ValueText("SOUND_", db.sound)))
@@ -4853,7 +4855,7 @@ end
 ---------------------------------------------------------------------------
 Cfg.TAB_ORDER = {
     { "display", "TAB_DISPLAY" }, { "class", "TAB_CLASS" }, { "other", "TAB_OTHER" },
-    { "consumables", "TAB_CONSUMABLES" }, { "group", "TAB_GROUP" },
+    { "supplies", "TAB_SUPPLIES" }, { "group", "TAB_GROUP" },
 }
 
 -- Gibt es den Tab-Key (Cfg.TAB_ORDER)? Ungültige gemerkte Werte setzt ADDON_LOADED auf "display"
@@ -5212,41 +5214,160 @@ function Cfg.BuildClassTab()
     Cfg.belowHeight = -Cfg.AddFooter(b, by) + 10
 end
 
--- Tab "Weitere Buffs": Liste + "Nur in Instanzen", Waffen-Items und Verfolgung (beta)
-function Cfg.BuildOtherTab()
-    local p = Cfg.NewTab("other", "TAB_OTHER")
-    local y = -8
-    for _, e in ipairs(GENERAL_BUFFS) do
-        Cfg.MakeEntryRow(p, e, y)
-        y = y - 26
+-- Abschnitte der Tabs "Weitere Buffs" und "Vorräte": je Abschnitt ein eigener Frame (Kinder mit
+-- Koordinaten relativ zum Abschnitt, y = 0 oben). Cfg.LayoutTab ordnet die sichtbaren Abschnitte
+-- untereinander an (einheitlicher Abstand Cfg.SECTION_GAP); Listen unter einem Beta-Schalter
+-- (Elixiere, Rollen, Reagenzien) sind eingeklappt, solange der Schalter aus ist (visible()).
+Cfg.sections = {}      -- Tab-Key -> { { frame, visible = function | nil }, ... }
+Cfg.SECTION_GAP = 6
+
+function Cfg.NewSection(tabKey, height, visible)
+    local f = CreateFrame("Frame", nil, Cfg.tabs[tabKey].content)
+    f:SetSize(Cfg.WIDTH, height)
+    local list = Cfg.sections[tabKey]
+    if not list then
+        list = {}
+        Cfg.sections[tabKey] = list
     end
-    y = y - 4
-    config.instCB = Cfg.MakeCheck(p, L.INSTANCE_ONLY, 16, y, function(self)
+    list[#list + 1] = { frame = f, visible = visible }
+    return f
+end
+
+function Cfg.LayoutTab(tabKey)
+    local t, list = Cfg.tabs[tabKey], Cfg.sections[tabKey]
+    if not (t and list) then return end
+    local y = -8
+    for _, s in ipairs(list) do
+        if s.visible == nil or s.visible() then
+            s.frame:ClearAllPoints()
+            s.frame:SetPoint("TOPLEFT", t.content, "TOPLEFT", 0, y)
+            s.frame:Show()
+            y = y - s.frame:GetHeight() - Cfg.SECTION_GAP
+        else
+            s.frame:Hide()
+        end
+    end
+    Cfg.FinishTab(t.content, y)
+end
+
+-- Fußzeile "(beta) = …" als letzter Abschnitt eines Tabs
+function Cfg.FooterSection(tabKey)
+    Cfg.AddFooter(Cfg.NewSection(tabKey, 30), 10)
+end
+
+-- Rollen-Art als Zelle der zweispaltigen Liste (col 1/2, row 1-3): Haken, Icon, Name, Anzahl.
+-- Der Name wird bei Platzmangel gekürzt; der volle Name steht im Tooltip. Zeile in
+-- Cfg.configRows, damit RefreshConfig Haken, Icon, Name und Anzahl setzt.
+Cfg.SCROLL_COL_X, Cfg.SCROLL_COL_W, Cfg.SCROLL_ROW_H = { 16, 228 }, 204, 24
+
+function Cfg.MakeScrollCell(parent, e, col, row)
+    local x, y = Cfg.SCROLL_COL_X[col], -(row - 1) * Cfg.SCROLL_ROW_H
+    local w = { entry = e, parent = parent }
+    w.cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    w.cb:SetSize(24, 24)
+    w.cb:SetPoint("TOPLEFT", x, y)
+    w.cb:SetScript("OnClick", function(self)
+        cdb.scrolls[e.scrollType] = self:GetChecked() and true or false   -- ausdrückliche Wahl
+        NoteDeferred()
+        Evaluate()
+    end)
+    w.icon = parent:CreateTexture(nil, "ARTWORK")
+    w.icon:SetSize(18, 18)
+    w.icon:SetPoint("LEFT", w.cb, "RIGHT", 2, 0)
+    w.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.status:SetPoint("RIGHT", parent, "TOPLEFT", x + Cfg.SCROLL_COL_W, y - 12)
+    w.status:SetJustifyH("RIGHT")
+    w.name = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.name:SetPoint("LEFT", w.icon, "RIGHT", 6, 0)
+    w.name:SetPoint("RIGHT", w.status, "LEFT", -6, 0)
+    w.name:SetJustifyH("LEFT")
+    w.name:SetWordWrap(false)
+    -- Tooltip mit dem vollen Namen über Icon und Name
+    w.hover = CreateFrame("Frame", nil, parent)
+    w.hover:SetPoint("TOPLEFT", w.icon, "TOPLEFT")
+    w.hover:SetPoint("BOTTOMRIGHT", w.name, "BOTTOMRIGHT")
+    w.hover:EnableMouse(true)
+    w.hover:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(w.name:GetText() or "", 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    w.hover:SetScript("OnLeave", function(self)
+        if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+    end)
+    Cfg.configRows[#Cfg.configRows + 1] = w
+    return w
+end
+
+-- Tab "Weitere Buffs" (Buffs aktiv halten): allgemeine Buffs, "Nur in Instanzen" mit Hinweis,
+-- Steine/Öle/Gifte, Elixiere mit Liste, Rollen mit Liste, Verfolgung (alle beta)
+function Cfg.BuildOtherTab()
+    Cfg.NewTab("other", "TAB_OTHER")
+    local f = Cfg.NewSection("other", 26 * #GENERAL_BUFFS)
+    for i, e in ipairs(GENERAL_BUFFS) do
+        Cfg.MakeEntryRow(f, e, -(i - 1) * 26)
+    end
+
+    -- "Weitere Buffs nur in Instanzen" + Satz darunter, wofür es gilt
+    f = Cfg.NewSection("other", 40)
+    config.instCB = Cfg.MakeCheck(f, L.INSTANCE_ONLY, 16, 0, function(self)
         db.instanceOnly = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
     end)
-    y = y - 32
+    local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    note:SetPoint("TOPLEFT", 44, -24)
+    note:SetWidth(Cfg.WIDTH - 60)
+    note:SetJustifyH("LEFT")
+    note:SetText(L.INSTANCE_ONLY_NOTE)
 
     -- Steine, Öle, Gifte per Klick
-    config.expWeaponCB = Cfg.MakeBetaCheck(p, L.EXP_WEAPONITEMS, 16, y, function(self)
+    f = Cfg.NewSection("other", 24)
+    config.expWeaponCB = Cfg.MakeBetaCheck(f, L.EXP_WEAPONITEMS, 16, 0, function(self)
         db.expWeaponItems = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
-    y = y - 30
 
-    -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine")
-    config.expTrackCB = Cfg.MakeBetaCheck(p, L.EXP_TRACKING, 16, y, function(self)
+    -- Wunsch-Elixiere: Schalter + Liste aller bekannten Elixiere (Taschen + Merkliste); die Liste
+    -- wächst, wenn neue Elixiere in die Taschen kommen (Cfg.LayoutElixirs)
+    f = Cfg.NewSection("other", 24)
+    config.expElixirCB = Cfg.MakeBetaCheck(f, L.EXP_ELIXIRS, 16, 0, function(self)
+        db.expElixirs = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    Cfg.elixirSection = Cfg.NewSection("other", 20, function() return ExpOn("expElixirs") end)
+    Cfg.elixirRows = {}
+    config.elixirEmpty = Cfg.elixirSection:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    config.elixirEmpty:SetText(L.ELIXIRS_EMPTY)
+
+    -- Rollen: Schalter + sechs Arten in zwei Spalten (Vorgabe pro Klasse; neutraler Name der Art)
+    f = Cfg.NewSection("other", 24)
+    config.expScrollCB = Cfg.MakeBetaCheck(f, L.EXP_SCROLLS, 16, 0, function(self)
+        db.expScrolls = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    f = Cfg.NewSection("other", 3 * Cfg.SCROLL_ROW_H, function() return ExpOn("expScrolls") end)
+    for i, t in ipairs(Scroll.ORDER) do
+        Cfg.MakeScrollCell(f, Scroll.entries[t], i <= 3 and 1 or 2, (i - 1) % 3 + 1)
+    end
+
+    -- Verfolgungs-Erinnerung + Umschalt-Knopf (gelernte Verfolgungen und "keine"; bleibt sichtbar)
+    f = Cfg.NewSection("other", 54)
+    config.expTrackCB = Cfg.MakeBetaCheck(f, L.EXP_TRACKING, 16, 0, function(self)
         db.expTracking = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
-    y = y - 28
-    config.trackBtn = Cfg.MakeButton(p, "", 240)
-    config.trackBtn:SetPoint("TOPLEFT", 40, y)
+    config.trackBtn = Cfg.MakeButton(f, "", 240)
+    config.trackBtn:SetPoint("TOPLEFT", 40, -28)
     config.trackBtn:SetScript("OnClick", function()
         Tracking.Cycle()
         RefreshKnown()
@@ -5254,108 +5375,21 @@ function Cfg.BuildOtherTab()
         Evaluate()
         RefreshConfig()
     end)
-    y = y - 30
-    Cfg.FinishTab(p, Cfg.AddFooter(p, y))
+
+    Cfg.FooterSection("other")
+    Cfg.LayoutElixirs()   -- ordnet auch den Tab an
 end
 
--- Tab "Verbrauchsgüter": Klassen-Verbrauchsgüter, Reagenzien-Warnung, Rollen und Elixiere (alle
--- beta) mit ihren Listen; Hinweis, dass "Weitere Buffs nur in Instanzen" auch hier gilt
-function Cfg.BuildConsumablesTab()
-    local p = Cfg.NewTab("consumables", "TAB_CONSUMABLES")
-    local y = -8
-    local note = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    note:SetPoint("TOPLEFT", 20, y)
-    note:SetWidth(Cfg.WIDTH - 40)
-    note:SetJustifyH("LEFT")
-    note:SetText(L.CONS_INSTANCE_NOTE)
-    y = y - math.max(28, math.ceil(note:GetStringHeight() or 0)) - 8
-
-    -- Klassen-Verbrauchsgüter (Einträge stehen in der Klassenliste); Schwelle für gezaubertes
-    -- Essen/Wasser nur bei Klassen mit solchen Einträgen (Magier)
-    config.expConsCB = Cfg.MakeBetaCheck(p, L.EXP_CONSUMABLES, 16, y, function(self)
-        db.expConsumables = self:GetChecked() and true or false
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 26
-    local hasConjureSum = false
-    for _, e in ipairs(classEntries) do
-        if e.kind == "conjure" and e.conj.mode == "sum" then hasConjureSum = true end
-    end
-    if hasConjureSum then
-        y = y - 4
-        config.conjureSlider = Cfg.MakeSlider(p, "BuffReminderConjureThreshold", 40, y, 0, 60, 1, function(v)
-            db.conjureThreshold = v
-            NoteDeferred()
-            Evaluate()
-            RefreshConfig()
-        end)
-        y = y - 28
-    end
-
-    -- Reagenzien-Warnung; Schwellenwerte nur für die Reagenzien der eigenen Klasse
-    config.expReagCB = Cfg.MakeBetaCheck(p, L.EXP_REAGENTS, 16, y, function(self)
-        db.expReagents = self:GetChecked() and true or false
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 26
-    if #reagentEntries > 0 then
-        config.reagentHint = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        config.reagentHint:SetPoint("TOPRIGHT", p, "TOPLEFT", 424, y - 2)
-        config.reagentHint:SetJustifyH("RIGHT")
-        config.reagentHint:SetText(L.REAGENT_HINT)
-        y = y - 18
-        for _, e in ipairs(reagentEntries) do
-            Cfg.MakeReagentRow(p, e, y)
-            y = y - 26
-        end
-    end
-
-    -- Rollen: Schalter + je Art ein Haken (Vorgabe pro Klasse; neutraler Name der Art)
-    y = y - 4
-    config.expScrollCB = Cfg.MakeBetaCheck(p, L.EXP_SCROLLS, 16, y, function(self)
-        db.expScrolls = self:GetChecked() and true or false
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 26
-    for _, t in ipairs(Scroll.ORDER) do
-        Cfg.MakeEntryRow(p, Scroll.entries[t], y)
-        y = y - 26
-    end
-    y = y - 4
-
-    -- Wunsch-Elixiere: Schalter + Liste aller bekannten Elixiere (Taschen + Merkliste); die Liste
-    -- wächst, wenn neue Elixiere in die Taschen kommen (Cfg.LayoutElixirs rückt die Fußzeile nach)
-    config.expElixirCB = Cfg.MakeBetaCheck(p, L.EXP_ELIXIRS, 16, y, function(self)
-        db.expElixirs = self:GetChecked() and true or false
-        NoteDeferred()
-        Evaluate()
-        RefreshConfig()
-    end)
-    y = y - 26
-    Cfg.consContent, Cfg.elixirTop, Cfg.elixirRows = p, y, {}
-    config.elixirEmpty = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    config.elixirEmpty:SetText(L.ELIXIRS_EMPTY)
-    local _, footer = Cfg.AddFooter(p, y)
-    Cfg.consFooter = footer
-    Cfg.LayoutElixirs()
-end
-
--- Elixier-Liste im Tab "Verbrauchsgüter" (nach Name) anordnen; Fußzeile und Inhaltshöhe folgen
+-- Elixier-Liste (nach Name) im eigenen Abschnitt anordnen; Abschnittshöhe und Tab folgen
 function Cfg.LayoutElixirs()
-    local p = Cfg.consContent
-    if not p then return end
-    local y = Cfg.elixirTop
+    local f = Cfg.elixirSection
+    if not f then return end
+    local y = 0
     local list = Elixir.List()
     for _, e in ipairs(list) do
         local w = Cfg.elixirRows[e.key]
         if not w then
-            w = Cfg.MakeEntryRow(p, e, y)
+            w = Cfg.MakeEntryRow(f, e, y)
             Cfg.elixirRows[e.key] = w
         end
         Cfg.PlaceEntryRow(w, y)
@@ -5365,14 +5399,71 @@ function Cfg.LayoutElixirs()
         config.elixirEmpty:ClearAllPoints()
         config.elixirEmpty:SetPoint("TOPLEFT", 44, y - 2)
         config.elixirEmpty:Show()
-        y = y - 20
+        y = y - 18
     else
         config.elixirEmpty:Hide()
     end
-    Cfg.consFooter:ClearAllPoints()
-    Cfg.consFooter:SetPoint("TOPLEFT", 16, y - 10)
-    Cfg.FinishTab(p, y - 40)
+    f:SetHeight(-y)
     Elixir.dirty = false
+    Cfg.LayoutTab("other")
+end
+
+-- Tab "Vorräte" (genug dabeihaben): Klassen-Verbrauchsgüter, Reagenzien-Warnung mit Liste (beta),
+-- Hinweis auf spätere Erweiterungen
+function Cfg.BuildSuppliesTab()
+    Cfg.NewTab("supplies", "TAB_SUPPLIES")
+    -- Klassen-Verbrauchsgüter (Einträge stehen in der Klassenliste); Schwelle für gezaubertes
+    -- Essen/Wasser nur bei Klassen mit solchen Einträgen (Magier; bleibt ausgegraut sichtbar)
+    local hasConjureSum = false
+    for _, e in ipairs(classEntries) do
+        if e.kind == "conjure" and e.conj.mode == "sum" then hasConjureSum = true end
+    end
+    local f = Cfg.NewSection("supplies", hasConjureSum and 52 or 24)
+    config.expConsCB = Cfg.MakeBetaCheck(f, L.EXP_CONSUMABLES, 16, 0, function(self)
+        db.expConsumables = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    if hasConjureSum then
+        config.conjureSlider = Cfg.MakeSlider(f, "BuffReminderConjureThreshold", 40, -30, 0, 60, 1, function(v)
+            db.conjureThreshold = v
+            NoteDeferred()
+            Evaluate()
+            RefreshConfig()
+        end)
+    end
+
+    -- Reagenzien-Warnung; Schwellenwerte nur für die Reagenzien der eigenen Klasse (eingeklappt,
+    -- solange der Schalter aus ist)
+    f = Cfg.NewSection("supplies", 24)
+    config.expReagCB = Cfg.MakeBetaCheck(f, L.EXP_REAGENTS, 16, 0, function(self)
+        db.expReagents = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    if #reagentEntries > 0 then
+        f = Cfg.NewSection("supplies", 18 + 26 * #reagentEntries, function() return ExpOn("expReagents") end)
+        config.reagentHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        config.reagentHint:SetPoint("TOPRIGHT", f, "TOPLEFT", 424, -2)
+        config.reagentHint:SetJustifyH("RIGHT")
+        config.reagentHint:SetText(L.REAGENT_HINT)
+        for i, e in ipairs(reagentEntries) do
+            Cfg.MakeReagentRow(f, e, -18 - (i - 1) * 26)
+        end
+    end
+
+    -- Hinweis: weitere Vorräte folgen
+    f = Cfg.NewSection("supplies", 30)
+    local later = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    later:SetPoint("TOPLEFT", 20, -4)
+    later:SetWidth(Cfg.WIDTH - 40)
+    later:SetJustifyH("LEFT")
+    later:SetText(L.SUPPLIES_LATER)
+
+    Cfg.FooterSection("supplies")
+    Cfg.LayoutTab("supplies")
 end
 
 -- Anzahl der Rollen einer Art in den Taschen
@@ -5471,7 +5562,7 @@ local function BuildConfig()
     Cfg.BuildDisplayTab()
     Cfg.BuildClassTab()
     Cfg.BuildOtherTab()
-    Cfg.BuildConsumablesTab()
+    Cfg.BuildSuppliesTab()
     -- Tab "Gruppe" nur für Klassen mit Gruppen-Buffs
     local hasGroup, hasBlessings = false, false
     for _, e in ipairs(classEntries) do
@@ -5598,7 +5689,7 @@ Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
 Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" } }
 Demo.SETTINGS_TABS = {      -- { Tab-Key (Cfg.TAB_ORDER), Name im Dateinamen }
     { "display", "display" }, { "class", "class-buffs" }, { "other", "other-buffs" },
-    { "consumables", "consumables" }, { "group", "group" },
+    { "supplies", "supplies" }, { "group", "group" },
 }
 
 function Demo.BuildShots()
