@@ -24,6 +24,7 @@ local Tracking = {}  -- Minimap-Tracking (z. B. Mineraliensuche)
 local Demo = {}      -- versteckter Demo-Modus mit Screenshot-Lauf (nur mit BuffReminderDB.demo)
 local Elixir = {}    -- Wunsch-Elixiere pro Charakter (experimentell)
 local Scroll = {}    -- Rollen (experimentell)
+local Pet = {}       -- Tier-Erinnerung: Jäger-Tier (fehlt/tot/füttern), Hexenmeister-Dämon (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -987,6 +988,7 @@ end
 function Items.ScanBags()
     if not (C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerItemInfo) then return end
     wipe(Items.bagCounts)
+    Pet.foodDirty = true   -- Tierfutter beim nächsten Zugriff neu scannen
     for bag = 0, NUM_BAG_SLOTS or 4 do
         local okN, slots = pcall(C_Container.GetContainerNumSlots, bag)
         if okN and type(slots) == "number" and not IsSecret(slots) then
@@ -1050,6 +1052,8 @@ function Items.ItemChoices(e)
         return Items.WeaponChoices(e, kind)
     elseif kind == "scroll" then
         return Scroll.Choices(e)
+    elseif kind == "petfood" then
+        return Pet.Food().list   -- Tierfutter (eigene Favoriten, eigene Sortierung)
     elseif kind == "elixir" then
         -- ein Eintrag = ein Elixier
         local cnt = Items.bagCounts[e.item]
@@ -1240,6 +1244,7 @@ local function EntryIcon(e)
         return ItemIcon(Conjure.RankItem(e)) or SpellIcon(e.knownIds[1]) or FALLBACK_ICON
     end
     if e.kind == "elixir" then return ItemIcon(e.item) or FALLBACK_ICON end
+    if e.kind == "pet" then return Pet.Icon(e) end
     if e.kind == "scroll" then
         -- Icon der Rolle des Linksklicks, sonst der Rolle I der Art
         local c = Scroll.Choices(e)[1]
@@ -1445,6 +1450,8 @@ local function IsEnabled(e)
     if e.kind == "elixir" then return ExpOn("expElixirs") and cdb.elixirsWanted[e.item] == true end
     -- Rollen: nur mit Experimental-Schalter; je Art Wahl pro Charakter, sonst Vorgabe der Klasse
     if e.kind == "scroll" then return ExpOn("expScrolls") and Scroll.Enabled(e.scrollType) end
+    -- Tier-Erinnerung: nur mit Experimental-Schalter; Einzelschalter (cdb.buffs) wie Klassenbuffs
+    if e.kind == "pet" and not ExpOn("expPet") then return false end
     -- Waffen-Items: nur mit Experimental-Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return false end
@@ -1586,6 +1593,10 @@ end
 -- Variantenmenü (experimentell, Schalter expVariantMenu): nur für markierte Variantengruppen
 -- (CAST_DATA menu = true), mit "Linksklick zaubert Buff" und nicht für Gruppen-Zeilen
 function Variant.MenuOn(e)
+    -- Tier-Zeilen (Tier rufen/wiederbeleben, Dämon): eigener Beta-Schalter expPet
+    if e ~= nil and e.kind == "pet" then
+        return e.petMenu == true and db.clickCast and ExpOn("expPet") and true or false
+    end
     return e ~= nil and e.variantMenu == true and not e.groupActive and db.clickCast
         and ExpOn("expVariantMenu") and true or false
 end
@@ -1593,6 +1604,7 @@ end
 -- erlernte Varianten in der Reihenfolge von CAST_DATA, je mit dem höchsten erlernten Rang:
 -- { { spell = ID/Name, vkey, name, icon, last = zuletzt genutzt }, ... }
 function Variant.Choices(e)
+    if e.kind == "pet" then return Pet.MenuChoices(e) end
     local list, last = {}, cdb.lastVariant[e.key]
     for _, v in ipairs(e.variants or {}) do
         local spell = BestCast(v.castIds)
@@ -1815,6 +1827,7 @@ local function CheckMissing(e, scan)
     end
     if e.kind == "conjure" then return Conjure.Missing(e) end
     if e.kind == "tracking" then return Tracking.Missing(e, scan) end
+    if e.kind == "pet" then return Pet.Missing(e) end
     if e.kind == "elixir" then
         local pre = Elixir.Precheck(e)   -- nicht in den Taschen / Buff unbekannt -> keine Warnung
         if pre ~= nil then return pre end
@@ -2345,7 +2358,7 @@ end
 
 -- Welche Einträge können eine Ablauf-Zeile bekommen? (nicht: Reagenzien, Well-Rested)
 function Expiry.Eligible(e)
-    if e.kind == "reagent" or e.kind == "conjure" or e.kind == "tracking" then return false end
+    if e.kind == "reagent" or e.kind == "conjure" or e.kind == "tracking" or e.kind == "pet" then return false end
     if e.general then
         return e.itemKind == "food" or e.itemKind == "flask" or e.itemKind == "elixir" or e.itemKind == "scroll"
             or e.weaponItems == true
@@ -2838,6 +2851,447 @@ function Elixir.Precheck(e)
     return nil
 end
 
+---------------------------------------------------------------------------
+-- Tier-Erinnerung (experimentell, Schalter expPet), Reiter "Tier"
+-- Einträge kind = "pet", petType = "missing" | "dead" | "feed" (Jäger) bzw. "demon" (Hexenmeister);
+-- Einzelschalter pro Charakter in cdb.buffs (Standard an). Alle Spiel-APIs abgesichert (type-Prüfung,
+-- pcall); unlesbare Werte (Fehler, Secret) -> nil = Zustand beibehalten, keine neue Zeile.
+--   Jäger : Tier rufen 883, Tier wiederbeleben 982, Tier füttern 6991, Fress-Effekt 1539 (Aura auf "pet")
+--           Laune: C_PetInfo.GetPetHappiness() 1 = unglücklich, 2 = zufrieden, 3 = glücklich
+--           Futter: Taschen-Items mit C_PetInfo.CanPetEatItem = true, nicht gesperrt; Reihenfolge
+--           Tierfutter-Favoriten (cdb.petFavorites), höchste Itemstufe, kleinerer Stapel
+--           Füttern: Secure-Aktion "spell" 6991 + target-bag/target-slot (nur per echtem Klick);
+--           PreClick sucht außerhalb des Kampfes den Taschenplatz neu (Pet.PreClick).
+--   Hexer : Linksklick beschwört cdb.demon (eigene Wahl), sonst cdb.lastDemon (zuletzt beschworen),
+--           sonst den Wichtel; ohne Seelensplitter (6265) springt der Wichtel ein.
+---------------------------------------------------------------------------
+Pet.CALL, Pet.REVIVE, Pet.FEED, Pet.FEED_AURA = 883, 982, 6991, 1539
+Pet.SOUL_SHARD, Pet.IMP = 6265, 688
+Pet.DEMONS = { 688, 697, 712, 691, 30146 }   -- Wichtel, Leerwandler, Sukkubus, Teufelsjäger, Teufelswache
+Pet.DEFS = {
+    HUNTER = {
+        { key = "pet_missing", kind = "pet", petType = "missing", level = 10, knownIds = { 883 },
+          label = "PET_MISSING", icon = 883, petMenu = true },
+        { key = "pet_dead", kind = "pet", petType = "dead", level = 10, knownIds = { 883, 982 },
+          label = "PET_DEAD", icon = 982 },
+        { key = "pet_feed", kind = "pet", petType = "feed", level = 10, knownIds = { 6991 },
+          label = "PET_FEED", icon = 6991, itemKind = "petfood" },
+    },
+    WARLOCK = {
+        { key = "pet_demon", kind = "pet", petType = "demon", level = 1, knownIds = Pet.DEMONS,
+          label = "PET_DEMON", icon = 688, petMenu = true },
+    },
+}
+Pet.entries = {}      -- Einträge der eigenen Klasse (auch in entries)
+Pet.food = { list = {}, total = 0 }   -- letzter Futter-Scan (Pet.ScanFood)
+Pet.foodDirty = true  -- Taschen/Tier/Favoriten geändert: beim nächsten Zugriff neu scannen
+Pet.waiting = {}      -- Item-ID -> true: Item-Daten angefordert (GET_ITEM_INFO_RECEIVED)
+
+-- PLAYER_LOGIN: Einträge der Klasse anlegen
+function Pet.Setup(class)
+    Pet.class = class
+    for _, e in ipairs(Pet.DEFS[class] or {}) do
+        PrepareEntry(e)
+        Pet.entries[#Pet.entries + 1] = e
+        entries[#entries + 1] = e
+    end
+end
+
+function Pet.HasClass()
+    return Pet.DEFS[Pet.class or ""] ~= nil
+end
+
+-- Events der Klasse registrieren (reg = SafeRegisterEvent)
+function Pet.RegisterEvents(frame, reg)
+    if not Pet.HasClass() then return end
+    reg(frame, "UNIT_PET", "player")
+    if Pet.class == "HUNTER" then
+        reg(frame, "UNIT_HAPPINESS", "pet")
+        reg(frame, "UNIT_POWER_UPDATE", "pet")
+    end
+end
+
+-- UNIT_PET, UNIT_HAPPINESS, UNIT_POWER_UPDATE (nur Laune)
+function Pet.OnEvent(event, unit, powerType)
+    if event == "UNIT_POWER_UPDATE" and (IsSecret(powerType) or powerType ~= "HAPPINESS") then return end
+    if event == "UNIT_PET" then Pet.foodDirty = true end
+    Evaluate()
+end
+
+-- GET_ITEM_INFO_RECEIVED: angeforderte Item-Daten da -> Futter neu bewerten
+function Pet.OnItemInfo(id)
+    if Pet.waiting[id] then
+        Pet.waiting[id] = nil
+        Pet.foodDirty = true
+    end
+end
+
+function Pet.IsDemon(id)
+    if type(id) ~= "number" or IsSecret(id) then return false end
+    for _, d in ipairs(Pet.DEMONS) do
+        if d == id then return true end
+    end
+    return false
+end
+
+-- UNIT_SPELLCAST_SUCCEEDED des Spielers: zuletzt beschworenen Dämon merken
+function Pet.RememberCast(spellID)
+    if cdb and Pet.class == "WARLOCK" and Pet.IsDemon(spellID) then cdb.lastDemon = spellID end
+end
+
+-- Zustand des Begleiters: "none" | "dead" | "alive"; nil = nicht lesbar
+function Pet.State()
+    local exists = Group.UnitFlag(UnitExists, "pet")
+    if exists == nil then return nil end
+    if not exists then return "none" end
+    local dead = Group.UnitFlag(UnitIsDeadOrGhost, "pet")
+    if dead == nil then return nil end
+    return dead and "dead" or "alive"
+end
+
+function Pet.Mounted()
+    return Group.UnitFlag(IsMounted) == true
+end
+
+function Pet.Guid()
+    if type(UnitGUID) ~= "function" then return nil end
+    local ok, g = pcall(UnitGUID, "pet")
+    if not ok or IsSecret(g) then return nil end
+    return g
+end
+
+-- Laune 1-3; nil = nicht lesbar
+function Pet.Happiness()
+    local fn = C_PetInfo and C_PetInfo.GetPetHappiness
+    if type(fn) ~= "function" then return nil end
+    local ok, h = pcall(fn)
+    if not ok or IsSecret(h) or type(h) ~= "number" then return nil end
+    return h
+end
+
+-- Jägertier? (HasPetUI, 2. Rückgabewert); nil = nicht lesbar
+function Pet.IsHunterPet()
+    if type(HasPetUI) ~= "function" then return nil end
+    local ok, has, hunter = pcall(HasPetUI)
+    if not ok or IsSecret(has) or IsSecret(hunter) then return nil end
+    return (has and hunter) and true or false
+end
+
+-- Fress-Effekt auf dem Tier aktiv?; nil = nicht lesbar
+function Pet.IsEating()
+    local name = SpellName(Pet.FEED_AURA)
+    local fn = C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName
+    if name and type(fn) == "function" then
+        local ok, a = pcall(fn, "pet", name, "HELPFUL")
+        if not ok or IsSecret(a) then return nil end
+        return a ~= nil
+    end
+    local ids, names, unreliable = ScanAuras("pet")
+    if not ids then return nil end
+    if ids[Pet.FEED_AURA] or (name and names[name]) then return true end
+    if unreliable then return nil end
+    return false
+end
+
+-- Zauber auf Abklingzeit (ohne globale Abklingzeit)?; nil = nicht lesbar
+function Pet.OnCooldown(spell)
+    local fn = C_Spell and C_Spell.GetSpellCooldown
+    if type(fn) ~= "function" then return false end
+    local ok, cd = pcall(fn, spell)
+    if not ok or IsSecret(cd) then return nil end
+    if type(cd) ~= "table" then return false end
+    local start, dur = cd.startTime, cd.duration
+    if IsSecret(start) or IsSecret(dur) then return nil end
+    if type(start) ~= "number" or type(dur) ~= "number" then return false end
+    return start > 0 and dur > 1.5 and start + dur > GetTime()
+end
+
+-- Ernährung des Tiers als Text (Tooltip); nil = nicht lesbar
+function Pet.Diet()
+    local fn = C_PetInfo and C_PetInfo.GetPetFoodTypes
+    if type(fn) ~= "function" then return nil end
+    local res = { pcall(fn) }
+    if not res[1] then return nil end
+    local src = res[2]
+    if type(src) ~= "table" or IsSecret(src) then src = { select(2, unpack(res)) } end
+    local names = {}
+    for _, v in ipairs(src) do
+        if type(v) == "string" and not IsSecret(v) and v ~= "" then names[#names + 1] = v end
+    end
+    if #names == 0 then return nil end
+    return table.concat(names, ", ")
+end
+
+-- Kann das Tier das Item fressen? Rückgabe: Eintrag { id, count, ilvl } bzw. false; nicht geladene
+-- Items werden angefordert und markieren den Scan als unvollständig (f.pending)
+function Pet.EdibleInfo(id, canEat, f)
+    local ilvl = Items.ItemLevels(id)
+    if ilvl == nil then
+        f.pending = true
+        Pet.waiting[id] = true
+        if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+    end
+    local ok, yes = pcall(canEat, id)
+    if not ok or IsSecret(yes) then
+        f.pending = true
+        return false
+    end
+    if yes ~= true then return false end
+    return { id = id, count = 0, ilvl = type(ilvl) == "number" and ilvl or 0 }
+end
+
+function Pet.SortFood(a, b)
+    if a.fav ~= b.fav then return a.fav end
+    if a.ilvl ~= b.ilvl then return a.ilvl > b.ilvl end
+    if a.count ~= b.count then return a.count < b.count end
+    return a.id < b.id
+end
+
+-- Taschen nach Futter für das aktuelle Tier durchsuchen: je Item Anzahl und kleinster nicht
+-- gesperrter Stapel (bag/slot). f.unknown = APIs fehlen, f.pending = Item-Daten fehlen noch
+function Pet.ScanFood()
+    local f = { list = {}, total = 0, guid = Pet.Guid() }
+    Pet.food, Pet.foodDirty = f, false
+    local canEat = C_PetInfo and C_PetInfo.CanPetEatItem
+    if type(canEat) ~= "function" or not (C_Container and C_Container.GetContainerNumSlots
+        and C_Container.GetContainerItemInfo) then
+        f.unknown = true
+        return f
+    end
+    local last = (type(NUM_TOTAL_EQUIPPED_BAG_SLOTS) == "number" and NUM_TOTAL_EQUIPPED_BAG_SLOTS)
+        or NUM_BAG_SLOTS or 4
+    local byId, favs = {}, cdb and cdb.petFavorites or {}
+    for bag = 0, last do
+        local okN, slots = pcall(C_Container.GetContainerNumSlots, bag)
+        if okN and type(slots) == "number" and not IsSecret(slots) then
+            for slot = 1, slots do
+                local ok, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
+                if ok and type(info) == "table" and not IsSecret(info) then
+                    local id, n, locked = info.itemID, info.stackCount or 1, info.isLocked
+                    if type(id) == "number" and not IsSecret(id) and type(n) == "number" and not IsSecret(n)
+                        and not IsSecret(locked) then
+                        local c = byId[id]
+                        if c == nil then
+                            c = Pet.EdibleInfo(id, canEat, f)
+                            byId[id] = c
+                        end
+                        if c then
+                            c.count = c.count + n
+                            f.total = f.total + n
+                            if not locked and (not c.stack or n < c.stack) then c.bag, c.slot, c.stack = bag, slot, n end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for id, c in pairs(byId) do
+        if c and c.bag then
+            c.fav = favs[id] == true
+            f.list[#f.list + 1] = c
+        end
+    end
+    table.sort(f.list, Pet.SortFood)
+    return f
+end
+
+-- Futter (zwischengespeichert; neu nach Taschen-, Tier- oder Favoritenwechsel)
+function Pet.Food()
+    if Pet.foodDirty or Pet.food.guid ~= Pet.Guid() then return Pet.ScanFood() end
+    return Pet.food
+end
+
+-- Gewünschter Dämon: eigene Wahl (cdb.demon), sonst zuletzt beschworen (cdb.lastDemon), sonst der
+-- erste erlernte (Wichtel); jeweils nur erlernte. nil = keiner erlernt
+function Pet.WantedDemon()
+    for _, id in ipairs({ cdb.demon or false, cdb.lastDemon or false }) do
+        if Pet.IsDemon(id) and SpellKnown(id) then return id end
+    end
+    for _, id in ipairs(Pet.DEMONS) do
+        if SpellKnown(id) then return id end
+    end
+    return nil
+end
+
+-- Zauber des Linksklicks; 2. Wert true = Wichtel statt des gewünschten Dämons (kein Seelensplitter)
+function Pet.DemonSpell()
+    local want = Pet.WantedDemon()
+    if want and want ~= Pet.IMP and ItemCount(Pet.SOUL_SHARD) == 0 and SpellKnown(Pet.IMP) then
+        return Pet.IMP, true
+    end
+    return want, false
+end
+
+-- true = Zeile zeigen, false = nicht, nil = unbekannt (Zustand beibehalten).
+-- Feed: e.noFood = kein passendes Futter (Zeile "Kein Tierfutter" ohne Klick-Aktion)
+function Pet.Missing(e)
+    local t, s = e.petType, Pet.State()
+    if s == nil then return nil end
+    if t == "dead" then return s == "dead" end
+    if t == "missing" or t == "demon" then
+        if t == "missing" and s ~= "none" then return false end
+        if t == "demon" and s == "alive" then return false end
+        -- beritten: Tier kann ausgeblendet sein; bestehende Warnung bleibt, neue entsteht nicht
+        if Pet.Mounted() then return nil end
+        return true
+    end
+    -- Füttern
+    e.noFood = nil
+    if s ~= "alive" or Pet.IsHunterPet() == false then return false end
+    local h = Pet.Happiness()
+    if h == nil then return nil end
+    if h > ((cdb.petUnhappyOnly == true) and 1 or 2) then return false end
+    if InCombatLockdown() or Group.UnitFlag(UnitAffectingCombat, "player")
+        or Group.UnitFlag(UnitAffectingCombat, "pet") or Pet.Mounted() then
+        return false
+    end
+    local eating = Pet.IsEating()
+    if eating == nil then return nil end
+    if eating then return false end
+    local cd = Pet.OnCooldown(Pet.FEED)
+    if cd == nil then return nil end
+    if cd then return false end
+    local food = Pet.Food()
+    if #food.list == 0 then
+        if food.pending or food.unknown then return nil end
+        if cdb.petNoFoodWarn == false then return false end
+        e.noFood = true
+    end
+    return true
+end
+
+-- Klick-Aktion einer Tier-Zeile (Zeile und Taste "Oberste Warnung"); nil = keine
+function Pet.Action(e)
+    if not db.clickCast then return nil end
+    local t = e.petType
+    if t == "missing" then return SpellKnown(Pet.CALL) and { spell = Pet.CALL, noUnit = true } or nil end
+    if t == "dead" then return SpellKnown(Pet.REVIVE) and { spell = Pet.REVIVE, noUnit = true } or nil end
+    if t == "demon" then
+        local id = Pet.DemonSpell()
+        return id and { spell = id, noUnit = true } or nil
+    end
+    if t == "feed" and not e.noFood then
+        local c = Pet.Food().list[1]
+        if c then
+            return { spell = Pet.FEED, noUnit = true, targetBag = c.bag, targetSlot = c.slot, feedItem = c.id }
+        end
+    end
+    return nil
+end
+
+function Pet.Text(e)
+    if e.petType == "feed" and e.noFood then return L.PET_NOFOOD end
+    return L[e.label]
+end
+
+function Pet.Icon(e)
+    local id = e.icon
+    if e.petType == "demon" then id = Pet.DemonSpell() or Pet.IMP end
+    return SpellIcon(id) or FALLBACK_ICON
+end
+
+-- Warnzeile füllen (aus Display.ShowRows; nur außerhalb des Kampfes)
+function Pet.FillRow(r, e)
+    local a = Pet.Action(e)
+    Display.SetRowLines(r, false)
+    Display.SetRowAction(r, a)
+    Display.SetRowStatus(r, "missing")
+    r.text:SetText(Pet.Text(e))
+    local hint
+    if e.petType == "feed" then
+        hint = a and L.HINT_ITEM:format(ItemName(a.feedItem)) or L.HINT_MUTE
+    elseif e.petType == "demon" and a and select(2, Pet.DemonSpell()) then
+        hint = L.HINT_DEMON_IMP:format(SpellName(Pet.IMP) or "?")
+    elseif a then
+        hint = Variant.MenuOn(e) and L.HINT_CAST_CHOOSE or L.HINT_CAST
+    else
+        hint = Variant.MenuOn(e) and L.HINT_CHOOSE or L.HINT_MUTE
+    end
+    Display.SetRowHint(r, hint)
+end
+
+-- Tooltip-Zeilen einer Tier-Zeile (nach dem Titel)
+function Pet.AddTooltip(btn)
+    local e, a = btn.entry, btn.action
+    if e.petType == "feed" then
+        local h = Pet.Happiness()
+        if h then GameTooltip:AddLine(L.PET_MOOD:format(ns.Locales.Text("PET_HAPPY_" .. h, "?")), 1, 1, 1) end
+        local diet = Pet.Diet()
+        if diet then GameTooltip:AddLine(L.PET_DIET:format(diet), 1, 1, 1, true) end
+        if a and a.feedItem then GameTooltip:AddLine(L.LEFTCLICK_FEED:format(ItemName(a.feedItem)), 0.8, 0.8, 0.8) end
+        GameTooltip:AddLine(L.RIGHTCLICK_CHOOSE, 0.8, 0.8, 0.8)
+        return
+    end
+    if a and a.spell then GameTooltip:AddLine(L.LEFTCLICK_SPELL:format(SpellName(a.spell) or "?"), 0.8, 0.8, 0.8) end
+    GameTooltip:AddLine(Variant.MenuOn(e) and L.RIGHTCLICK_CHOOSE or L.RIGHTCLICK, 0.8, 0.8, 0.8)
+end
+
+-- Rechtsklick-Menü (Variantenmenü): Tier rufen / wiederbeleben bzw. erlernte Dämonen
+function Pet.MenuChoices(e)
+    local ids = e.petType == "demon" and Pet.DEMONS or { Pet.CALL, Pet.REVIVE }
+    local cur = e.petType == "demon" and Pet.WantedDemon() or nil
+    local list = {}
+    for _, id in ipairs(ids) do
+        if SpellKnown(id) then
+            list[#list + 1] = { spell = id, vkey = tostring(id), name = SpellName(id) or tostring(id),
+                icon = SpellIcon(id) or FALLBACK_ICON, last = id == cur }
+        end
+    end
+    return list
+end
+
+function Pet.MenuHead(e)
+    return e.petType == "demon" and L.PET_DEMON_LABEL or L.MENU_VARIANT
+end
+
+-- Auswahl im Menü: Dämon wird zur eigenen Wahl (Tier rufen/wiederbeleben: nur zaubern)
+function Pet.Picked(e, vkey)
+    if e.petType == "demon" and Pet.IsDemon(tonumber(vkey)) then cdb.demon = tonumber(vkey) end
+end
+
+-- Vor dem Klick (nur außerhalb des Kampfes): Taschenplatz des Futters neu ermitteln, damit
+-- Sortieren, Verschieben oder Aufbrauchen nie einen alten Platz füttert. suffix "1" = Warnzeile/
+-- Taste (gleiches Item, sonst neue erste Wahl), "" = Item-Menü (nur dasselbe Item).
+-- Passt nichts mehr: Aktion leeren (der Klick tut nichts).
+function Pet.Retarget(btn, suffix, itemID, anyFood)
+    Pet.foodDirty = true
+    local list, pick = Pet.Food().list, nil
+    for _, c in ipairs(list) do
+        if c.id == itemID then pick = c; break end
+    end
+    if not pick and anyFood then pick = list[1] end
+    btn.actionSig = nil   -- Display.SetRowAction setzt beim nächsten Mal alle Attribute neu
+    if pick then
+        btn:SetAttribute("type" .. suffix, "spell")
+        btn:SetAttribute("spell" .. suffix, Pet.FEED)
+        btn:SetAttribute("target-bag" .. suffix, pick.bag)
+        btn:SetAttribute("target-slot" .. suffix, pick.slot)
+    else
+        for _, k in ipairs({ "type", "spell", "target-bag", "target-slot" }) do btn:SetAttribute(k .. suffix, nil) end
+    end
+end
+
+-- PreClick von Warnzeile und Taste
+function Pet.PreClick(btn, button)
+    if button ~= "LeftButton" or InCombatLockdown() then return end
+    local a = btn.action
+    if a and a.feedItem then Pet.Retarget(btn, "1", a.feedItem, true) end
+end
+
+-- Dropdown "Zu beschwörender Dämon": automatisch (zuletzt beschworen) + erlernte Dämonen
+function Pet.DemonOptions()
+    local list = { { value = "auto", text = L.PET_DEMON_AUTO } }
+    for _, id in ipairs(Pet.DEMONS) do
+        if SpellKnown(id) then list[#list + 1] = { value = id, text = SpellName(id) or tostring(id) } end
+    end
+    return list
+end
+
+function Pet.DemonText()
+    if Pet.IsDemon(cdb.demon) then return SpellName(cdb.demon) or tostring(cdb.demon) end
+    local id = Pet.WantedDemon()
+    return id and L.TRACK_AUTO:format(SpellName(id) or tostring(id)) or L.PET_DEMON_AUTO
+end
 
 ---------------------------------------------------------------------------
 -- Stile (Warnanzeige + Rechtsklick-Menü)
@@ -3252,12 +3706,15 @@ end
 
 -- Klick-Aktion einer Zeile setzen (nur außerhalb des Kampfes aufrufen). a = nil oder
 --   { spell = ID/Name | item = Item-ID, unit = Ziel (Standard "player"),
---     ctrlSpell, ctrlUnit = Strg+Linksklick (Gruppen-Zeilen), isGroup, targetName }
+--     ctrlSpell, ctrlUnit = Strg+Linksklick (Gruppen-Zeilen), isGroup, targetName,
+--     noUnit = ohne Ziel-Unit (Tier-Zauber), targetBag/targetSlot = Item als Ziel des Zaubers
+--     (Tier füttern; feedItem = Item-ID, Pet.PreClick sucht den Platz vor dem Klick neu) }
 -- Ohne spell/item tut Linksklick nichts.
 function Display.SetRowAction(r, a)
     a = a or {}
     local sig = table.concat({ tostring(a.spell), tostring(a.item), tostring(a.macro), tostring(a.unit),
-        tostring(a.ctrlSpell), tostring(a.ctrlUnit), tostring(a.trackIndex) }, "|")
+        tostring(a.ctrlSpell), tostring(a.ctrlUnit), tostring(a.trackIndex), tostring(a.noUnit),
+        tostring(a.targetBag), tostring(a.targetSlot) }, "|")
     r.action = a
     r.castSpell, r.useItem = a.spell, a.item
     if r.actionSig == sig then return end
@@ -3282,7 +3739,19 @@ function Display.SetRowAction(r, a)
         r:SetAttribute("spell1", nil)
         r:SetAttribute("item1", nil)
     end
-    r:SetAttribute("unit1", a.unit or "player")
+    if a.noUnit then
+        r:SetAttribute("unit1", nil)
+    else
+        r:SetAttribute("unit1", a.unit or "player")
+    end
+    -- Tier füttern: Taschenplatz als Ziel des Zaubers (Bag 0 = Rucksack, daher kein "or nil"-Kurzschluss)
+    if a.spell and a.targetBag ~= nil and a.targetSlot ~= nil then
+        r:SetAttribute("target-bag1", a.targetBag)
+        r:SetAttribute("target-slot1", a.targetSlot)
+    else
+        r:SetAttribute("target-bag1", nil)
+        r:SetAttribute("target-slot1", nil)
+    end
     r:SetAttribute("ctrl-type1", a.ctrlSpell and "spell" or nil)
     r:SetAttribute("ctrl-spell1", a.ctrlSpell)
     r:SetAttribute("ctrl-unit1", a.ctrlUnit)
@@ -3434,6 +3903,7 @@ function Display.GetRow(i)
         r:RegisterForClicks("AnyUp")
     end
     r:RegisterForDrag("LeftButton")
+    r:HookScript("PreClick", Pet.PreClick)   -- Tier füttern: Taschenplatz vor dem Klick neu ermitteln
     r:SetScript("PostClick", function(self, button, down)
         if not Display.IsActionPhase(down) then return end
         if button == "LeftButton" then
@@ -3484,6 +3954,11 @@ function Display.GetRow(i)
             end
             if self.entry.groupActive then GameTooltip:AddLine(Group.MissingNames(self.entry), 1, 1, 1) end
             if self.hintText then GameTooltip:AddLine(self.hintText, 0.7, 0.7, 0.7) end
+        end
+        if self.entry.kind == "pet" then
+            Pet.AddTooltip(self)   -- Laune, Ernährung, Klick-Hinweise
+            GameTooltip:Show()
+            return
         end
         local a = self.action or {}
         if a.ctrlSpell then
@@ -3546,6 +4021,9 @@ function Display.ShowRows(list, dragMode, expFrom)
         elseif e.demo then
             r.entry = e
             Demo.FillRow(r, e, st)
+        elseif e.kind == "pet" then
+            r.entry = e
+            Pet.FillRow(r, e)
         elseif e.groupActive then
             -- Gruppen-Zeile: Anzahl, Namen, Gruppen-/Einzel-Klick auf den ersten Spieler ohne Buff
             r.entry = e
@@ -3739,6 +4217,7 @@ Keybind.button:SetSize(1, 1)
 Keybind.button:EnableMouse(false)
 -- beide Phasen: funktioniert mit beiden Werten von ActionButtonUseKeyDown und mit /click
 Keybind.button:RegisterForClicks("AnyUp", "AnyDown")
+Keybind.button:HookScript("PreClick", Pet.PreClick)   -- Tier füttern: Taschenplatz neu ermitteln
 Keybind.button:SetScript("PostClick", function(self, button, down)
     if button ~= "LeftButton" or not Display.IsActionPhase(down) then return end
     -- per Taste benutztes Fläschchen als "zuletzt benutzt" merken (wie beim Linksklick)
@@ -3846,7 +4325,8 @@ function Keybind.Update(n)
     b.entry = r and r.entry or nil
     b.actionSig = nil   -- neu setzen, auch wenn der Wrapper die Attribute im Kampf geleert hat
     Display.SetRowAction(b, a)
-    b:SetAttribute("pbr-oneshot", (a and not a.spell and (a.item or a.macro)) and true or nil)
+    -- Einmal-Sperre bei Item-Verbrauch: Item, Makro oder Zauber auf ein Taschen-Item (Tier füttern)
+    b:SetAttribute("pbr-oneshot", (a and ((not a.spell and (a.item or a.macro)) or a.targetBag ~= nil)) and true or nil)
     b:SetAttribute("pbr-keydown", Display.GetCVarFlag("ActionButtonUseKeyDown") and true or false)
     Keybind.Retry()
 end
@@ -4110,10 +4590,19 @@ function Menu.GetItemButton(i)
         local e, vkey = menu.entry, self.variantKey
         if e and e.demo then menu:Hide(); return end   -- Demo: keine Aktion, nichts merken
         if e and e.itemKind == "flask" and self.itemID then cdb.lastFlask = self.itemID end
-        -- Variantenmenü: gewählte Variante wird zur zuletzt genutzten (Linksklick der Warnung)
-        if e and vkey then cdb.lastVariant[e.key] = vkey end
+        -- Variantenmenü: gewählte Variante wird zur zuletzt genutzten (Linksklick der Warnung);
+        -- Tier-Zeilen: Dämon wird zur eigenen Wahl
+        if e and vkey then
+            if e.kind == "pet" then Pet.Picked(e, vkey) else cdb.lastVariant[e.key] = vkey end
+        end
         menu:Hide()   -- schließt auch das itemPanel
         if vkey then Evaluate() end
+    end)
+    -- Tierfutter: Taschenplatz vor dem Klick neu ermitteln (nur dasselbe Item; sonst leer)
+    b:HookScript("PreClick", function(self, button)
+        if self.feedItem and button == "LeftButton" and not InCombatLockdown() then
+            Pet.Retarget(self, "", self.feedItem, false)
+        end
     end)
     -- Item- bzw. Zauber-Tooltip beim Überfahren. HookScript statt SetScript: ergänzt nur die
     -- Anzeige, die Secure-Klickfunktion des Buttons bleibt unberührt.
@@ -4137,7 +4626,9 @@ function Menu.GetStar(i)
     s.text:SetPoint("CENTER")
     s:SetScript("OnClick", function(self)
         if not self.itemID or not cdb or (menu.entry and menu.entry.demo) then return end
-        cdb.favorites[self.itemID] = (not cdb.favorites[self.itemID]) or nil
+        local favs = Menu.Favs(menu.entry)
+        favs[self.itemID] = (not favs[self.itemID]) or nil
+        Pet.foodDirty = true   -- Tierfutter-Reihenfolge hängt an den Favoriten
         if not InCombatLockdown() then
             Menu.LayoutMenu(menu.entry)   -- Reihenfolge und Markierung neu
             Evaluate()               -- Linksklick der Warnung nimmt ggf. den neuen Favoriten
@@ -4146,7 +4637,7 @@ function Menu.GetStar(i)
     end)
     s:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(cdb.favorites[self.itemID] and L.FAV_REMOVE or L.FAV_ADD, 1, 1, 1)
+        GameTooltip:SetText(Menu.Favs(menu.entry)[self.itemID] and L.FAV_REMOVE or L.FAV_ADD, 1, 1, 1)
         GameTooltip:Show()
     end)
     s:SetScript("OnLeave", function(self)
@@ -4154,6 +4645,12 @@ function Menu.GetStar(i)
     end)
     menu.stars[i] = s
     return s
+end
+
+-- Favoriten-Tabelle des Menü-Eintrags: Tierfutter getrennt (cdb.petFavorites), sonst cdb.favorites
+function Menu.Favs(e)
+    if e and Items.KindOf(e) == "petfood" then return cdb.petFavorites end
+    return cdb.favorites
 end
 
 function Menu.SetStar(s, on, st)
@@ -4193,11 +4690,23 @@ function Menu.ItemInfoText(c)
     return ""
 end
 
--- Secure-Aktion einer Item-Zeile: normal "item", Waffen-Items per Makro auf den Slot
-function Menu.SetItemButtonAction(b, id, e, kind)
+-- Secure-Aktion einer Item-Zeile: normal "item", Waffen-Items per Makro auf den Slot, Tierfutter
+-- per "Tier füttern" mit Taschenplatz (c = Eintrag aus Pet.Food mit bag/slot)
+function Menu.SetItemButtonAction(b, id, e, kind, c)
     b:SetAttribute("spell", nil)
     b:SetAttribute("unit", nil)
-    if kind == "weapon" or kind == "poison" then
+    b:SetAttribute("target-bag", nil)
+    b:SetAttribute("target-slot", nil)
+    b.feedItem = nil
+    if kind == "petfood" then
+        b:SetAttribute("type", "spell")
+        b:SetAttribute("spell", Pet.FEED)
+        b:SetAttribute("target-bag", c.bag)
+        b:SetAttribute("target-slot", c.slot)
+        b:SetAttribute("item", nil)
+        b:SetAttribute("macrotext", nil)
+        b.feedItem = id
+    elseif kind == "weapon" or kind == "poison" then
         b:SetAttribute("type", "macro")
         b:SetAttribute("macrotext", Items.WeaponMacro(id, Items.WeaponSlot(e)))
         b:SetAttribute("item", nil)
@@ -4211,19 +4720,23 @@ end
 -- Secure-Aktion einer Varianten-Zeile: Zauber (höchster erlernter Rang) auf sich selbst
 -- Zeile ohne secure Aktion (Demo-Modus)
 function Menu.ClearButtonAction(b)
-    for _, k in ipairs({ "type", "item", "spell", "macrotext", "unit" }) do b:SetAttribute(k, nil) end
+    for _, k in ipairs({ "type", "item", "spell", "macrotext", "unit", "target-bag", "target-slot" }) do
+        b:SetAttribute(k, nil)
+    end
+    b.feedItem = nil
 end
 
-function Menu.SetSpellButtonAction(b, spell)
+-- noUnit: ohne Ziel-Unit (Tier rufen/wiederbeleben, Dämon beschwören)
+function Menu.SetSpellButtonAction(b, spell, noUnit)
+    Menu.ClearButtonAction(b)
     b:SetAttribute("type", "spell")
     b:SetAttribute("spell", spell)
-    b:SetAttribute("unit", "player")
-    b:SetAttribute("item", nil)
-    b:SetAttribute("macrotext", nil)
+    if not noUnit then b:SetAttribute("unit", "player") end
 end
 
 function Menu.ItemHeadText(kind)
     if kind == "flask" then return L.MENU_FLASK end
+    if kind == "petfood" then return L.MENU_PETFOOD end
     if kind == "weapon" then return L.MENU_WEAPON end
     if kind == "poison" then return L.MENU_POISON end
     if kind == "scroll" then return L.MENU_SCROLL end
@@ -4332,7 +4845,8 @@ function Menu.LayoutMenu(e)
     local h = ms.itemHeight
     if withItems or variants then
         Separator()
-        Head(menu.itemHead, variants and L.MENU_VARIANT or Menu.ItemHeadText(kind))
+        Head(menu.itemHead, variants and (e.kind == "pet" and Pet.MenuHead(e) or L.MENU_VARIANT)
+            or Menu.ItemHeadText(kind))
         -- Rollen: alle der Art, nicht benutzbare gesperrt (c.locked)
         local choices = variants or (e.demo and Demo.FoodChoices())
             or (kind == "scroll" and Scroll.MenuChoices(e)) or Items.ItemChoices(e)
@@ -4357,14 +4871,14 @@ function Menu.LayoutMenu(e)
             elseif variants then
                 b.itemID, b.variantKey = nil, c.vkey
                 b.spellID = type(c.spell) == "number" and c.spell or nil
-                Menu.SetSpellButtonAction(b, c.spell)
+                Menu.SetSpellButtonAction(b, c.spell, e.kind == "pet")
             elseif c.locked then
                 -- Stufe zu niedrig: ohne secure Aktion, gesperrt (Tooltip bleibt)
                 b.itemID, b.variantKey, b.spellID = c.id, nil, nil
                 Menu.ClearButtonAction(b)
             else
                 b.itemID, b.variantKey, b.spellID = c.id, nil, nil
-                Menu.SetItemButtonAction(b, c.id, e, kind)
+                Menu.SetItemButtonAction(b, c.id, e, kind, c)
             end
             if c.locked then b:Disable() else b:Enable() end
             b:SetSize(rowsWidth, h)
@@ -4449,9 +4963,7 @@ function Menu.LayoutMenu(e)
             if GameTooltip:IsOwned(b) then GameTooltip:Hide() end
             b:Hide()
             b.itemID, b.variantKey, b.spellID = nil, nil, nil
-            b:SetAttribute("item", nil)
-            b:SetAttribute("macrotext", nil)
-            b:SetAttribute("spell", nil)
+            Menu.ClearButtonAction(b)
         end
     end
     -- Sterne nur bei Items (Varianten: keine Favoriten)
@@ -4680,6 +5192,8 @@ function Evaluate()
                         Print(L.REAGENT_CHAT:format(EntryLabel(e), e.count or 0))
                     elseif e.kind == "conjure" then
                         Print(L.CONJURE_CHAT:format(Conjure.Text(e)))
+                    elseif e.kind == "pet" then
+                        Print(L.ALERT_CHAT:format(Pet.Text(e)))
                     elseif e.groupActive then
                         Print(L.GROUP_CHAT:format(EntryLabel(e), #(e.groupMissing or {})))
                     else
@@ -4779,7 +5293,7 @@ function RefreshConfig()
             w.cb:SetChecked(cdb.elixirsWanted[e.item] == true)
         elseif e.kind == "scroll" then
             w.cb:SetChecked(Scroll.Enabled(e.scrollType))   -- wirksamer Wert (Wahl oder Klassenvorgabe)
-        elseif e.kind == "conjure" or e.weaponItems then
+        elseif e.kind == "conjure" or e.kind == "pet" or e.weaponItems then
             w.cb:SetChecked(cdb.buffs[e.key] ~= false)
         else
             w.cb:SetChecked(IsEnabled(e))
@@ -4897,6 +5411,7 @@ function RefreshConfig()
     if Elixir.dirty then Cfg.LayoutElixirs() end
     Cfg.LayoutTab("other")      -- Listen ein-/ausklappen (Schalter an/aus)
     Cfg.LayoutTab("supplies")
+    Cfg.RefreshPet()
     config.elixirEmpty:SetTextColor(ExpOn("expElixirs") and 0.6 or 0.4, ExpOn("expElixirs") and 0.6 or 0.4, 0.4)
     Cfg.SyncDropdown(config.soundDD, true)
     local scalePct = math.floor(Display.SavedScale() * 100 + 0.5)
@@ -4923,6 +5438,7 @@ function Cfg.Gate(e, expCons)
     if e.kind == "elixir" then return not ExpOn("expElixirs"), nil end
     if e.kind == "scroll" then return not ExpOn("expScrolls"), nil end
     if e.kind == "conjure" then return not expCons, nil end
+    if e.kind == "pet" then return not ExpOn("expPet"), nil end
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return true, nil end
         if e.poisonEntry and IsEnabled(e.poisonEntry) then return true, L.WEAPON_BY_POISON end
@@ -5243,16 +5759,57 @@ end
 
 ---------------------------------------------------------------------------
 -- Einstellungsseite mit Tabs: Tab-Leiste oben, je Tab eine eigene Scrollfläche.
---   Cfg.TAB_ORDER: { Key, Text-Schlüssel }; "group" nur bei Klassen mit Gruppenbuffs
+--   Cfg.TAB_ORDER: { Key, Text-Schlüssel }; "group" nur bei Klassen mit Gruppenbuffs; "pet" wird
+--   immer gebaut, ist aber nur für Jäger/Hexenmeister und im Demo-Modus sichtbar (Cfg.TabShown)
 --   Cfg.tabs[key] = { key, button, scroll, content }; Cfg.tabList in Reihenfolge
 --   db.cfgTab: zuletzt gewählter Tab (beim Öffnen wieder gezeigt)
 -- Tab-Vorlage: erste, die der Client kennt (Cfg.TAB_TEMPLATES, per pcall); sonst normale Knöpfe
 -- (gewählter Tab = gesperrt). Funktion und Speicherung der Einstellungen sind unabhängig davon.
 ---------------------------------------------------------------------------
 Cfg.TAB_ORDER = {
-    { "display", "TAB_DISPLAY" }, { "class", "TAB_CLASS" }, { "other", "TAB_OTHER" },
+    { "display", "TAB_DISPLAY" }, { "class", "TAB_CLASS" }, { "pet", "TAB_PET" }, { "other", "TAB_OTHER" },
     { "supplies", "TAB_SUPPLIES" }, { "group", "TAB_GROUP" },
 }
+
+-- Tab sichtbar? Reiter "Tier" nur für Jäger/Hexenmeister, im Demo-Modus/Screenshot-Lauf immer
+function Cfg.TabShown(key)
+    if key == "pet" then return Pet.HasClass() or Demo.active == true or Demo.run ~= nil end
+    return true
+end
+
+-- sichtbare Tabs in Reihenfolge
+function Cfg.ShownTabs()
+    local list = {}
+    for _, t in ipairs(Cfg.tabList) do
+        if Cfg.TabShown(t.key) then list[#list + 1] = t end
+    end
+    return list
+end
+
+-- Tab-Knöpfe der sichtbaren Tabs nebeneinander auf die Oberkante des Kastens setzen, Breiten
+-- anpassen und den gemerkten Tab zeigen (Aufbau, Demo an/aus)
+function Cfg.UpdateTabs()
+    if not config then return end
+    local real = Cfg.tabTemplate ~= "UIPanelButtonTemplate"
+    local prev
+    for _, t in ipairs(Cfg.tabList) do
+        t.button:ClearAllPoints()
+        if Cfg.TabShown(t.key) then
+            if prev then
+                t.button:SetPoint("LEFT", prev.button, "RIGHT", Cfg.TAB_GAP, 0)
+            else
+                t.button:SetPoint("BOTTOMLEFT", Cfg.inset, "TOPLEFT", Cfg.TAB_X, real and -2 or 2)
+            end
+            t.button:Show()
+            prev = t
+        else
+            t.button:Hide()
+            t.scroll:Hide()
+        end
+    end
+    Cfg.FitTabs()
+    Cfg.SelectTab(db.cfgTab)
+end
 
 -- Gibt es den Tab-Key (Cfg.TAB_ORDER)? Ungültige gemerkte Werte setzt ADDON_LOADED auf "display"
 function Cfg.ValidTab(key)
@@ -5312,7 +5869,7 @@ end
 
 -- Alle Tabs in eine Reihe: zu breite Tabs schmaler machen (Text wird gekürzt) statt umzubrechen
 function Cfg.FitTabs()
-    local list, inset = Cfg.tabList, Cfg.inset
+    local list, inset = Cfg.ShownTabs(), Cfg.inset
     if #list == 0 or not inset then return end
     local avail = (inset:GetWidth() or 0) - 2 * Cfg.TAB_X
     if avail <= 0 then return end
@@ -5447,11 +6004,11 @@ end
 
 -- Tab zeigen (unbekannter Key: erster Tab) und merken
 function Cfg.SelectTab(key)
-    if not Cfg.tabs[key] then key = Cfg.tabList[1] and Cfg.tabList[1].key end
+    if not Cfg.tabs[key] or not Cfg.TabShown(key) then key = Cfg.tabList[1] and Cfg.tabList[1].key end
     if not key then return end
     db.cfgTab = key
     local real = Cfg.tabTemplate ~= "UIPanelButtonTemplate"
-    for _, t in ipairs(Cfg.tabList) do
+    for _, t in ipairs(Cfg.ShownTabs()) do
         local on = t.key == key
         if on then t.scroll:Show() else t.scroll:Hide() end
         local fn = on and PanelTemplates_SelectTab or PanelTemplates_DeselectTab
@@ -5636,6 +6193,74 @@ function Cfg.BuildClassTab()
     end)
     by = by - 24
     Cfg.belowHeight = -Cfg.AddFooter(b, by) + 10
+end
+
+-- Tab "Tier" (Jäger/Hexenmeister; im Demo-Modus für alle sichtbar): Beta-Schalter, darunter die
+-- Einzelschalter der eigenen Klasse (eingeklappt, solange der Schalter aus ist)
+function Cfg.BuildPetTab()
+    Cfg.NewTab("pet", "TAB_PET")
+    local f = Cfg.NewSection("pet", 24)
+    config.expPetCB = Cfg.MakeBetaCheck(f, L.EXP_PET, 16, 0, function(self)
+        db.expPet = self:GetChecked() and true or false
+        if menu:IsShown() then menu:Hide() end   -- nächstes Öffnen mit/ohne Tier-Auswahl
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    local function on() return ExpOn("expPet") end
+    if #Pet.entries == 0 then
+        f = Cfg.NewSection("pet", 20)
+        local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        note:SetPoint("TOPLEFT", 44, -2)
+        note:SetText(L.PET_CLASS_ONLY)
+    end
+    for _, e in ipairs(Pet.entries) do
+        f = Cfg.NewSection("pet", 26, on)
+        Cfg.MakeEntryRow(f, e, 0)
+        if e.petType == "feed" then
+            -- Füttern: nur bei "unglücklich"; Warnung, wenn kein passendes Futter dabei ist
+            f = Cfg.NewSection("pet", 48, on)
+            config.petUnhappyCB = Cfg.MakeCheck(f, L.PET_UNHAPPY_ONLY, 44, 0, function(self)
+                cdb.petUnhappyOnly = self:GetChecked() and true or false
+                NoteDeferred()
+                Evaluate()
+            end)
+            config.petNoFoodCB = Cfg.MakeCheck(f, L.PET_NOFOOD_WARN, 44, -24, function(self)
+                cdb.petNoFoodWarn = self:GetChecked() and true or false
+                NoteDeferred()
+                Evaluate()
+            end)
+        elseif e.petType == "demon" then
+            -- Dämon des Linksklicks (wie Rechtsklick auf die Warnung); "automatisch" = zuletzt beschworen
+            f = Cfg.NewSection("pet", 34, on)
+            config.demonDD = Cfg.MakeDropdown(f, 44, -2, {
+                label = L.PET_DEMON_LABEL, width = 180, labelWidth = 116,
+                options = Pet.DemonOptions,
+                get = function() return Pet.IsDemon(cdb.demon) and cdb.demon or "auto" end,
+                set = function(v)
+                    cdb.demon = Pet.IsDemon(v) and v or nil
+                    NoteDeferred()
+                    Evaluate()
+                end,
+                text = Pet.DemonText,
+            })
+        end
+    end
+    Cfg.FooterSection("pet")
+    Cfg.LayoutTab("pet")
+end
+
+-- Tab "Tier" in RefreshConfig: Schalter und Detail-Einstellungen
+function Cfg.RefreshPet()
+    if not config.expPetCB then return end
+    local on = ExpOn("expPet")
+    config.expPetCB:SetChecked(on)
+    if config.petUnhappyCB then
+        config.petUnhappyCB:SetChecked(cdb.petUnhappyOnly == true)
+        config.petNoFoodCB:SetChecked(cdb.petNoFoodWarn ~= false)
+    end
+    if config.demonDD then Cfg.SyncDropdown(config.demonDD, on) end
+    Cfg.LayoutTab("pet")
 end
 
 -- Abschnitte der Tabs "Weitere Buffs" und "Vorräte": je Abschnitt ein eigener Frame (Kinder mit
@@ -5999,6 +6624,7 @@ local function BuildConfig()
 
     Cfg.BuildDisplayTab()
     Cfg.BuildClassTab()
+    Cfg.BuildPetTab()
     Cfg.BuildOtherTab()
     Cfg.BuildSuppliesTab()
     -- Tab "Gruppe" nur für Klassen mit Gruppen-Buffs
@@ -6017,8 +6643,7 @@ local function BuildConfig()
         C_Timer.After(0, Cfg.FitTabs)
         RefreshConfig()
     end)
-    Cfg.FitTabs()
-    Cfg.SelectTab(db.cfgTab)
+    Cfg.UpdateTabs()   -- sichtbare Tabs anordnen, Breiten anpassen, gemerkten Tab zeigen
     if not Cfg.configCanvas then config:Hide() end
 end
 
@@ -6175,6 +6800,9 @@ Demo.ROWS = {
     { key = "expiry",   spell = 1126, expiry = "1:45", hint = "HINT_CAST" },                    -- Mal der Wildnis
     { key = "elixir",   item = 13452, hint = "HINT_USE" },                                      -- Elixier des Mungos
     { key = "scroll",   item = 955, hintItem = 955 },                                           -- Rolle der Intelligenz (Rang I)
+    { key = "petmissing", spell = 883, label = "PET_MISSING", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },   -- Tier rufen
+    { key = "petfeed",  spell = 6991, label = "PET_FEED", plain = true, pet = true, hintItem = 4599 },   -- Tier füttern: Gepökeltes Schinkensteak
+    { key = "demon",    spell = 697, label = "PET_DEMON", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },  -- Leerwandler beschwören
 }
 Demo.FOOD = {
     { id = 13931, count = 12, cat = "SpellDamage", xp = true, fav = true },
@@ -6191,7 +6819,7 @@ Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
 }
 Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" } }
 Demo.SETTINGS_TABS = {      -- { Tab-Key (Cfg.TAB_ORDER), Name im Dateinamen }
-    { "display", "display" }, { "class", "class-buffs" }, { "other", "other-buffs" },
+    { "display", "display" }, { "class", "class-buffs" }, { "pet", "pet" }, { "other", "other-buffs" },
     { "supplies", "supplies" }, { "group", "group" },
 }
 
@@ -6235,6 +6863,7 @@ function Demo.FillRow(r, e, st)
         status, text, right = "expiring", L.EXPIRES:format(label, d.expiry), ""
     elseif d.plain then
         text = label
+        if d.pet then right = "" end   -- Tier-Zeilen: Text sagt schon alles ("Tier fehlt", "Tier füttern")
     end
     if st.rightText and right ~= "" then
         text = label
@@ -6384,6 +7013,7 @@ function Demo.Start(after)
     end
     Demo.active = true
     Display.neutral = true   -- Demo und Bilder mit 100 % Größe und Deckkraft (Werte bleiben gespeichert)
+    Cfg.UpdateTabs()         -- Reiter "Tier" in der Demo immer sichtbar
     ApplyLayout()
     if menu:IsShown() then menu:Hide() end
     Print(L.DEMO_ON)
@@ -6401,6 +7031,7 @@ function Demo.Stop(quiet)
     Demo.loadCheck = nil
     Display.neutral = nil    -- Größe und Deckkraft des Spielers wieder anwenden
     Demo.Restore()
+    Cfg.UpdateTabs()         -- Reiter "Tier" wieder nur für Jäger/Hexenmeister
     ApplyLayout()            -- im Kampf erst danach (layoutPending)
     if not InCombatLockdown() then
         if menu:IsShown() then menu:Hide() end
@@ -6797,6 +7428,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         cdb.lastVariant = cdb.lastVariant or {}   -- Eintrag-Key -> zuletzt genutzte Variante
         cdb.reagents = cdb.reagents or {}         -- Reagenz-Item-ID -> Warnschwelle (0 = aus)
         cdb.favorites = cdb.favorites or {}       -- Item-ID -> true: Favorit (Essen/Fläschchen)
+        cdb.petFavorites = cdb.petFavorites or {} -- Item-ID -> true: Tierfutter-Favorit (getrennt)
         if not Style.STYLES[db.style] then db.style = DEFAULTS.style end
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
@@ -6859,6 +7491,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         Eat.ResolveAllEatSpells()   -- Ess-Auren aller FOOD-Items (fehlende werden nachgeladen)
         Elixir.Setup()              -- Einträge der gemerkten Elixiere (neue folgen beim Taschen-Scan)
         Scroll.Setup(class)         -- sechs Rollen-Einträge (Agility … Protection)
+        Pet.Setup(class)            -- Tier-Erinnerung (Jäger, Hexenmeister)
         Items.ScanBags()
         -- Reagenzien der Klasse (Reihenfolge wie in REAGENT_SPELLS, ohne Doppelte)
         reagentLines = REAGENT_SPELLS[class] or {}
@@ -6887,6 +7520,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         SafeRegisterEvent(self, "UNIT_SPELLCAST_SUCCEEDED", "player")
         SafeRegisterEvent(self, "UNIT_SPELLCAST_SENT")
         SafeRegisterEvent(self, "UI_ERROR_MESSAGE")
+        Pet.RegisterEvents(self, SafeRegisterEvent)   -- Tier: UNIT_PET, Laune (nur Jäger)
         C_Timer.NewTicker(1, Evaluate)
         return
     end
@@ -6896,6 +7530,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- bzw. Essen/Fläschchen in den Taschen (Name, Stufe, Tooltip jetzt verfügbar)
         if IsSecret(arg1) then return end
         if Demo.active then Demo.OnItemInfo(arg1) end   -- Demo: Vorladen fertig? Motive ergänzen
+        Pet.OnItemInfo(arg1)   -- Tierfutter: angeforderte Item-Daten da
         if Eat.eatPending[arg1] then Eat.ResolveEatSpell(arg1, true) end   -- Ess-Aura jetzt ermittelbar
         if Items.bagCounts[arg1] then
             Items.LearnItem(arg1)
@@ -6910,6 +7545,11 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 return
             end
         end
+        return
+    end
+
+    if event == "UNIT_PET" or event == "UNIT_HAPPINESS" or event == "UNIT_POWER_UPDATE" then
+        Pet.OnEvent(event, arg1, arg2)
         return
     end
 
@@ -6942,6 +7582,8 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             Evaluate()
         elseif GroupFeatureOn() and (arg1:find("^party%d") or arg1:find("^raid%d")) then
             Group.MarkGroupDirty()
+        elseif arg1 == "pet" and Pet.HasClass() then
+            Evaluate()   -- Tier: Fress-Effekt, Tod
         end
         return
     end
@@ -7002,6 +7644,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if GroupFeatureOn() then Group.MarkGroupDirty() end
         if cdb then
             RememberFromCast(arg3)
+            Pet.RememberCast(arg3)   -- Hexenmeister: zuletzt beschworener Dämon
             -- Fläschchen-Effekt (auch über Aktionsleiste/Taschen benutzt) -> zuletzt benutzt
             if arg3 ~= nil and not IsSecret(arg3) and Items.flaskBySpell[arg3] then
                 cdb.lastFlask = Items.flaskBySpell[arg3]
@@ -7121,8 +7764,9 @@ SlashCmdList.BUFFREMINDER = function(msg)
         -- Experimental-Schalter: wieder Build-abhängig
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
         db.expVariantMenu, db.expBlessings, db.expTracking = nil, nil, nil
-        db.expElixirs, db.expScrolls = nil, nil
+        db.expElixirs, db.expScrolls, db.expPet = nil, nil, nil
         cdb.trackWanted = nil                     -- Verfolgung wieder automatisch
+        cdb.petUnhappyOnly, cdb.petNoFoodWarn, cdb.demon = nil, nil, nil   -- Tier: Vorgaben
         RefreshKnown()
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
