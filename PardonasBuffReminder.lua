@@ -25,6 +25,7 @@ local Demo = {}      -- versteckter Demo-Modus mit Screenshot-Lauf (nur mit Buff
 local Elixir = {}    -- Wunsch-Elixiere pro Charakter (experimentell)
 local Scroll = {}    -- Rollen (experimentell)
 local Pet = {}       -- Tier-Erinnerung: Jäger-Tier (fehlt/tot/füttern), Hexenmeister-Dämon (experimentell)
+local Supply = {}    -- Vorräte: Munition, Seelensplitter, Tierfutter, eigene Items (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -1226,6 +1227,7 @@ local function EntryLabel(e)
     if e.kind == "tracking" then return Tracking.Label(e.trackType) end
     if e.kind == "elixir" then return ItemName(e.item) end
     if e.kind == "scroll" then return Scroll.Label(e) end
+    if e.kind == "supply" then return Supply.Label(e) end
     if e.label then   -- Variantengruppen: Grundwort + bekannte Varianten (Variant.GroupLabel)
         return e.variantClass and Variant.GroupLabel(e.variantClass, e.key, e.label) or L[e.label]
     end
@@ -1245,6 +1247,7 @@ local function EntryIcon(e)
     end
     if e.kind == "elixir" then return ItemIcon(e.item) or FALLBACK_ICON end
     if e.kind == "pet" then return Pet.Icon(e) end
+    if e.kind == "supply" then return Supply.Icon(e) end
     if e.kind == "scroll" then
         -- Icon der Rolle des Linksklicks, sonst der Rolle I der Art
         local c = Scroll.Choices(e)[1]
@@ -1411,6 +1414,7 @@ local function ComputeKnown(e)
         return e.trackType ~= nil and Tracking.Learned(e.trackType)
     end
     if e.general then return true end
+    if e.kind == "supply" then return true end   -- Vorräte: Einträge gibt es nur für passende Klassen
     local lvl = UnitLevel("player") or 1
     if e.levelOnly then return lvl >= (e.level or 1) end
     for _, id in ipairs(e.knownIds or e.ids or {}) do
@@ -1442,6 +1446,8 @@ end
 local function IsEnabled(e)
     -- Reagenzien: nur mit aktivem Experimental-Schalter (sonst keine Zeile, keine Mengenprüfung)
     if e.kind == "reagent" then return ExpOn("expReagents") and ReagentThreshold(e.item) > 0 end
+    -- Vorräte (Munition, Seelensplitter, Tierfutter, eigene Items): gleicher Schalter wie Reagenzien
+    if e.kind == "supply" then return ExpOn("expReagents") and Supply.Enabled(e) end
     -- Klassen-Verbrauchsgüter: nur mit aktivem Experimental-Schalter
     if e.kind == "conjure" and not ExpOn("expConsumables") then return false end
     -- Verfolgungs-Erinnerung: nur mit Experimental-Schalter und gewünschter Verfolgung
@@ -1828,6 +1834,7 @@ local function CheckMissing(e, scan)
     if e.kind == "conjure" then return Conjure.Missing(e) end
     if e.kind == "tracking" then return Tracking.Missing(e, scan) end
     if e.kind == "pet" then return Pet.Missing(e) end
+    if e.kind == "supply" then return Supply.Missing(e) end
     if e.kind == "elixir" then
         local pre = Elixir.Precheck(e)   -- nicht in den Taschen / Buff unbekannt -> keine Warnung
         if pre ~= nil then return pre end
@@ -2358,7 +2365,10 @@ end
 
 -- Welche Einträge können eine Ablauf-Zeile bekommen? (nicht: Reagenzien, Well-Rested)
 function Expiry.Eligible(e)
-    if e.kind == "reagent" or e.kind == "conjure" or e.kind == "tracking" or e.kind == "pet" then return false end
+    if e.kind == "reagent" or e.kind == "conjure" or e.kind == "tracking" or e.kind == "pet"
+        or e.kind == "supply" then
+        return false
+    end
     if e.general then
         return e.itemKind == "food" or e.itemKind == "flask" or e.itemKind == "elixir" or e.itemKind == "scroll"
             or e.weaponItems == true
@@ -3294,6 +3304,291 @@ function Pet.DemonText()
 end
 
 ---------------------------------------------------------------------------
+-- Vorräte (experimentell, Schalter expReagents – sichtbar "Vorratswarnung"), Reiter "Vorräte"
+-- Eine gemeinsame Liste mit den Reagenzien der Klasse (kind "reagent", Schwellen cdb.reagents) und
+-- Einträgen kind = "supply", supplyType:
+--   "ammo"    : Jäger; angelegte Munition (Ammo-Slot), Summe aller Stapel dieser Sorte in den Taschen;
+--               Mindestmenge cdb.ammoMin (Standard 200, 0-2000); keine Munition angelegt -> eigene Zeile
+--   "shards"  : Hexenmeister; Seelensplitter (6265), cdb.shardMin (Standard 5, 0-50)
+--   "petfood" : Jäger; Summe aller Items, die das Tier fressen kann (Pet.Food), cdb.petFoodMin
+--               (Standard 20, 0-200); eigener Schalter cdb.buffs.supply_petfood (Standard aus)
+--   "item"    : eigene Items pro Charakter, cdb.supplies[itemID] = Mindestmenge (1-999, Standard 10),
+--               höchstens Supply.MAX_ITEMS
+-- Gezählt werden nur die Taschen. Keine Klick-Aktion (die Taste "Oberste Warnung" übergeht sie).
+---------------------------------------------------------------------------
+Supply.MAX_ITEMS, Supply.ITEM_DEFAULT = 20, 10
+Supply.DEFS = {
+    HUNTER = {
+        { key = "supply_ammo", supplyType = "ammo", field = "ammoMin", def = 200, max = 2000 },
+        { key = "supply_petfood", supplyType = "petfood", field = "petFoodMin", def = 20, max = 200,
+          defaultOff = true },
+    },
+    WARLOCK = {
+        { key = "supply_shards", supplyType = "shards", item = Pet.SOUL_SHARD, field = "shardMin", def = 5, max = 50 },
+    },
+}
+Supply.AMMO_ICON = "Interface\\Icons\\INV_Ammo_Arrow_01"
+Supply.items = {}     -- Item-ID -> Eintrag (eigene Items)
+Supply.classEntries = {}   -- Munition/Seelensplitter/Tierfutter der eigenen Klasse
+
+-- PLAYER_LOGIN: Einträge der Klasse und der eigenen Items anlegen
+function Supply.Setup(class)
+    for _, d in ipairs(Supply.DEFS[class] or {}) do
+        local e = { kind = "supply" }
+        for k, v in pairs(d) do e[k] = v end
+        PrepareEntry(e)
+        Supply.classEntries[#Supply.classEntries + 1] = e
+        entries[#entries + 1] = e
+        if e.item then ItemName(e.item) end   -- Item-Daten vorladen
+    end
+    Supply.ready = true
+    for id in pairs(cdb.supplies) do Supply.Ensure(id) end
+end
+
+-- Eintrag eines eigenen Items (einmal pro Item-ID); nil vor PLAYER_LOGIN
+function Supply.Ensure(id)
+    if not Supply.ready then return nil end
+    local e = Supply.items[id]
+    if e then return e end
+    e = { key = "supply_item_" .. id, kind = "supply", supplyType = "item", item = id }
+    PrepareEntry(e)
+    Supply.items[id] = e
+    entries[#entries + 1] = e
+    knownCache[e.key] = true
+    ItemName(id)   -- Name/Icon nachladen (GET_ITEM_INFO_RECEIVED)
+    Supply.dirty = true   -- Einstellungen: Liste neu aufbauen
+    return e
+end
+
+-- Ein Item gilt als gültig, wenn der Client es kennt (GetItemInfoInstant)
+function Supply.ValidItem(id)
+    local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if type(fn) ~= "function" then return true end
+    local ok, v = pcall(fn, id)
+    return ok and v ~= nil
+end
+
+-- Eigenes Item hinzufügen (Feld "Item hinzufügen": Shift-Klick, Ziehen, Item-ID + Enter)
+function Supply.AddItem(id)
+    if type(id) ~= "number" or IsSecret(id) or id <= 0 or not cdb then return end
+    id = math.floor(id)
+    -- Shift-Klick kann mehrere Hooks auslösen: dasselbe Item kurz hintereinander nur einmal
+    local now = GetTime()
+    if Supply.lastAdd and Supply.lastAdd.id == id and now - Supply.lastAdd.t < 0.5 then return end
+    Supply.lastAdd = { id = id, t = now }
+    if cdb.supplies[id] then Print(L.SUPPLY_EXISTS:format(ItemName(id))); return end
+    if CountKeys(cdb.supplies) >= Supply.MAX_ITEMS then Print(L.SUPPLY_MAX:format(Supply.MAX_ITEMS)); return end
+    if not Supply.ValidItem(id) then Print(L.SUPPLY_INVALID:format(tostring(id))); return end
+    cdb.supplies[id] = Supply.ITEM_DEFAULT
+    Supply.Ensure(id)
+    Print(L.SUPPLY_ADDED:format(ItemName(id)))
+    NoteDeferred()
+    Evaluate()
+    RefreshConfig()
+end
+
+-- Eigenes Item entfernen (Knopf in der Liste)
+function Supply.RemoveItem(id)
+    local e = Supply.items[id]
+    cdb.supplies[id] = nil
+    if not e then return end
+    Supply.items[id] = nil
+    for i = #entries, 1, -1 do
+        if entries[i] == e then table.remove(entries, i) end
+    end
+    missing[e.key], missingSince[e.key], muted[e.key], knownCache[e.key] = nil, nil, nil, nil
+    Supply.dirty = true
+    NoteDeferred()
+    Evaluate()
+    RefreshConfig()
+end
+
+-- Eigene Items sortiert nach Name (Einstellungen)
+function Supply.List()
+    local list = {}
+    for _, e in pairs(Supply.items) do list[#list + 1] = e end
+    table.sort(list, function(a, b)
+        local na, nb = ItemName(a.item), ItemName(b.item)
+        if na ~= nb then return na < nb end
+        return a.item < b.item
+    end)
+    return list
+end
+
+-- Item-Link aus Shift-Klick (Taschen, Bank, Chat): nur wenn das Feld "Item hinzufügen" den Fokus hat
+function Supply.OnLink(link)
+    local box = Supply.addBox
+    if not (box and box:IsVisible() and box:HasFocus()) then return end
+    if type(link) ~= "string" or IsSecret(link) then return end
+    local id = tonumber(link:match("item:(%d+)"))
+    if id then
+        Supply.AddItem(id)
+        box:SetText("")
+    end
+end
+
+-- Shift-Klick auf Items abfangen (einmal, beim Aufbau der Einstellungen); nur vorhandene Funktionen
+function Supply.HookLinks()
+    if Supply.hooked or type(hooksecurefunc) ~= "function" then return end
+    Supply.hooked = true
+    if type(ChatEdit_InsertLink) == "function" then pcall(hooksecurefunc, "ChatEdit_InsertLink", Supply.OnLink) end
+    if type(HandleModifiedItemClick) == "function" then
+        pcall(hooksecurefunc, "HandleModifiedItemClick", Supply.OnLink)
+    end
+end
+
+-- Item auf das Feld gezogen (OnReceiveDrag/OnMouseUp): Item vom Mauszeiger übernehmen
+function Supply.OnDrop()
+    if type(GetCursorInfo) ~= "function" then return end
+    local ok, kind, id = pcall(GetCursorInfo)
+    if not ok or IsSecret(kind) or kind ~= "item" or IsSecret(id) or type(id) ~= "number" then return end
+    Supply.AddItem(id)
+    if type(ClearCursor) == "function" then pcall(ClearCursor) end
+end
+
+-- Ammo-Slot (GetInventorySlotInfo "AmmoSlot", Rückfall 0)
+function Supply.AmmoSlot()
+    if Supply.ammoSlot then return Supply.ammoSlot end
+    local slot = 0
+    if type(GetInventorySlotInfo) == "function" then
+        local ok, s = pcall(GetInventorySlotInfo, "AmmoSlot")
+        if ok and type(s) == "number" and not IsSecret(s) then slot = s end
+    end
+    Supply.ammoSlot = slot
+    return slot
+end
+
+-- Angelegte Munition: Item-ID, false = keine angelegt, nil = nicht lesbar
+function Supply.AmmoItem()
+    if type(GetInventoryItemID) ~= "function" then return nil end
+    local ok, id = pcall(GetInventoryItemID, "player", Supply.AmmoSlot())
+    if not ok or IsSecret(id) then return nil end
+    if type(id) ~= "number" then return false end
+    return id
+end
+
+-- Mindestmenge und Grenzen (min, max, Ziffern) eines Vorrats-Eintrags (auch Reagenzien)
+function Supply.Range(e)
+    if e.kind == "reagent" then return 0, 50 end
+    if e.supplyType == "item" then return 1, 999 end
+    return 0, e.max
+end
+
+function Supply.Threshold(e)
+    if e.kind == "reagent" then return ReagentThreshold(e.item) end
+    local v
+    if e.supplyType == "item" then v = cdb.supplies[e.item] or Supply.ITEM_DEFAULT else v = cdb[e.field] or e.def end
+    local lo, hi = Supply.Range(e)
+    return math.max(lo, math.min(hi, math.floor(tonumber(v) or e.def or Supply.ITEM_DEFAULT)))
+end
+
+function Supply.SetThreshold(e, n)
+    local lo, hi = Supply.Range(e)
+    n = math.max(lo, math.min(hi, math.floor(n)))
+    if e.kind == "reagent" then
+        cdb.reagents[e.item] = n
+    elseif e.supplyType == "item" then
+        cdb.supplies[e.item] = n
+    else
+        cdb[e.field] = n
+    end
+end
+
+-- Aktiv? (Schwelle > 0; Tierfutter zusätzlich eigener Schalter, Standard aus)
+function Supply.Enabled(e)
+    if e.supplyType == "petfood" and cdb.buffs[e.key] ~= true then return false end
+    return Supply.Threshold(e) > 0
+end
+
+-- Anzahl in den Taschen; nil = nicht lesbar (Tierfutter: kein Jägertier da / Daten fehlen noch)
+function Supply.Count(e)
+    if e.kind == "reagent" then return ItemCount(e.item) end
+    local t = e.supplyType
+    if t == "ammo" then
+        local id = Supply.AmmoItem()
+        if not id then return nil end
+        return ItemCount(id)
+    end
+    if t == "petfood" then
+        if Pet.Guid() == nil or Pet.IsHunterPet() ~= true then return nil end
+        local f = Pet.Food()
+        if f.unknown or (f.pending and f.total == 0) then return nil end
+        return f.total
+    end
+    return ItemCount(e.item)
+end
+
+-- true = zu wenig (bzw. keine Munition angelegt), false = genug, nil = nicht lesbar
+function Supply.Missing(e)
+    e.noAmmo = nil
+    if e.supplyType == "ammo" then
+        local id = Supply.AmmoItem()
+        if id == nil then return nil end
+        if id == false then
+            e.noAmmo, e.count = true, 0
+            return true
+        end
+    end
+    local n = Supply.Count(e)
+    if n == nil then return nil end
+    e.count = n
+    return n < Supply.Threshold(e)
+end
+
+function Supply.Label(e)
+    local t = e.supplyType
+    if t == "ammo" then
+        local id = Supply.AmmoItem()
+        return id and ItemName(id) or L.SUPPLY_AMMO
+    end
+    if t == "petfood" then return L.SUPPLY_PETFOOD end
+    return ItemName(e.item)
+end
+
+function Supply.Icon(e)
+    local t = e.supplyType
+    if t == "ammo" then
+        local id = Supply.AmmoItem()
+        return (id and ItemIcon(id)) or Supply.AMMO_ICON
+    end
+    if t == "petfood" then return SpellIcon(Pet.FEED) or FALLBACK_ICON end
+    return ItemIcon(e.item) or FALLBACK_ICON
+end
+
+-- Zeilentext ("Name: 3 übrig" bzw. "Keine Munition angelegt")
+function Supply.Text(e)
+    if e.noAmmo then return L.SUPPLY_NOAMMO end
+    return L.REAGENT_LOW:format(Supply.Label(e), e.count or 0)
+end
+
+function Supply.ChatText(e)
+    if e.noAmmo then return L.ALERT_CHAT:format(L.SUPPLY_NOAMMO) end
+    return L.SUPPLY_CHAT:format(Supply.Label(e), e.count or 0)
+end
+
+-- Warnzeile füllen (aus Display.ShowRows; nur außerhalb des Kampfes): ohne Klick-Aktion
+function Supply.FillRow(r, e, st)
+    Display.SetRowLines(r, false)
+    Display.SetRowAction(r, nil)
+    Display.SetRowStatus(r, e.noAmmo and "missing" or "low")
+    if st.rightText and not e.noAmmo then
+        r.text:SetText(Supply.Label(e))
+        r.right:SetText(tostring(e.count or 0))
+    else
+        r.text:SetText(Supply.Text(e))
+    end
+    Display.SetRowHint(r, e.supplyType == "ammo" and L.HINT_VENDOR or L.HINT_MUTE)
+end
+
+-- GET_ITEM_INFO_RECEIVED: Name/Icon eines eigenen Items bzw. der Munition nachgeladen
+function Supply.OnItemInfo(id)
+    if not (Supply.items[id] or id == Pet.SOUL_SHARD) then return false end
+    Evaluate()
+    if not ready then RefreshConfig() end   -- Evaluate tut vor ready nichts
+    return true
+end
+
+---------------------------------------------------------------------------
 -- Stile (Warnanzeige + Rechtsklick-Menü)
 -- Alle Farben, Größen und Abstände stehen hier; ein neuer Stil = neuer Eintrag in
 -- STYLES + Name in STYLE_ORDER + Text STYLE_NAME_<KEY> in Locales/enUS.lua. Farben: { r, g, b [, a] }.
@@ -4024,6 +4319,9 @@ function Display.ShowRows(list, dragMode, expFrom)
         elseif e.kind == "pet" then
             r.entry = e
             Pet.FillRow(r, e)
+        elseif e.kind == "supply" then
+            r.entry = e
+            Supply.FillRow(r, e, st)
         elseif e.groupActive then
             -- Gruppen-Zeile: Anzahl, Namen, Gruppen-/Einzel-Klick auf den ersten Spieler ohne Buff
             r.entry = e
@@ -4804,6 +5102,8 @@ function Menu.LayoutMenu(e)
         sub = Group.MissingNames(e)
     elseif e.kind == "reagent" then
         sub = L.REAGENT_LOW:format(EntryLabel(e), e.count or 0)
+    elseif e.kind == "supply" then
+        sub = Supply.Text(e)
     elseif e.kind == "conjure" then
         sub = Conjure.Text(e)
     elseif withItems then
@@ -5194,6 +5494,8 @@ function Evaluate()
                         Print(L.CONJURE_CHAT:format(Conjure.Text(e)))
                     elseif e.kind == "pet" then
                         Print(L.ALERT_CHAT:format(Pet.Text(e)))
+                    elseif e.kind == "supply" then
+                        Print(Supply.ChatText(e))
                     elseif e.groupActive then
                         Print(L.GROUP_CHAT:format(EntryLabel(e), #(e.groupMissing or {})))
                     else
@@ -5254,7 +5556,8 @@ end
 ---------------------------------------------------------------------------
 local config
 Cfg.configRows = {}
-Cfg.reagentRows = {}
+Cfg.reagentRows = {}       -- feste Vorrats-Zeilen (Reagenzien, Munition, Seelensplitter, Tierfutter)
+Cfg.supplyItemRows = {}    -- Item-ID -> Zeile eines eigenen Vorrats-Items (ausgeblendet nach Entfernen)
 
 function Cfg.FormatMute(left)
     if left == math.huge then return L.SESSION end
@@ -5344,35 +5647,14 @@ function RefreshConfig()
         end
     end
     local expReag = ExpOn("expReagents")
-    for _, w in ipairs(Cfg.reagentRows) do
-        local e = w.entry
-        w.icon:SetTexture(EntryIcon(e))
-        w.name:SetText(EntryLabel(e))
-        if not w.edit:HasFocus() then w.edit:SetText(tostring(ReagentThreshold(e.item))) end
-        if knownCache[e.key] then
-            w.icon:SetDesaturated(false)
-            w.name:SetTextColor(1, 1, 1)
-            local left = MuteRemaining(e.key)
-            if left then
-                w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
-                w.status:SetTextColor(1, 0.4, 0.3)
-            else
-                w.status:SetText(L.IN_BAGS:format(ItemCount(e.item) or 0))
-                w.status:SetTextColor(0.6, 0.6, 0.6)
-            end
-        else
-            w.icon:SetDesaturated(true)
-            w.name:SetTextColor(0.5, 0.5, 0.5)
-            w.status:SetText(L.NOT_LEARNED)
-            w.status:SetTextColor(0.5, 0.5, 0.5)
-        end
-        -- Experimental-Schalter aus: Zeile ausgrauen, Eingabe sperren
-        Cfg.SetEditEnabled(w.edit, expReag)
-        if not expReag then
-            w.icon:SetDesaturated(true)
-            w.name:SetTextColor(0.5, 0.5, 0.5)
-            w.status:SetTextColor(0.5, 0.5, 0.5)
-        end
+    if Supply.dirty then Cfg.LayoutSupplies() end
+    for _, w in ipairs(Cfg.reagentRows) do Cfg.RefreshSupplyRow(w, expReag) end
+    for _, w in pairs(Cfg.supplyItemRows) do
+        if w.icon:IsShown() then Cfg.RefreshSupplyRow(w, expReag) end
+    end
+    if config.supplyMax then
+        if CountKeys(cdb.supplies) >= Supply.MAX_ITEMS then config.supplyMax:Show() else config.supplyMax:Hide() end
+        Cfg.SetEditEnabled(Supply.addBox, expReag)
     end
     config.enabledCB:SetChecked(db.enabled)
     config.instCB:SetChecked(db.instanceOnly)
@@ -5510,42 +5792,135 @@ function Cfg.MakeEntryRow(parent, e, y)
     return w
 end
 
--- Reagenz-Zeile: Icon, Name, Eingabefeld für die Schwelle (0-50), Status
-function Cfg.MakeReagentRow(parent, e, y)
-    local w = { entry = e }
+-- Vorrats-Zeile (Reagenzien, Munition, Seelensplitter, Tierfutter, eigene Items): Icon, Name,
+-- Eingabefeld für die Mindestmenge (Grenzen: Supply.Range), Anzahl in den Taschen.
+--   opts.check : Häkchen vorn (Tierfutter: eigener Schalter, cdb.buffs[e.key], Standard aus)
+--   opts.remove: Knopf zum Entfernen (eigene Items)
+-- list: Cfg.reagentRows (feste Zeilen) oder nil (eigene Items, Cfg.supplyItemRows)
+function Cfg.MakeSupplyRow(parent, e, y, opts)
+    local w = { entry = e, parent = parent, check = opts.check, removable = opts.remove }
+    if opts.check then
+        w.cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+        w.cb:SetSize(24, 24)
+        w.cb:SetScript("OnClick", function(self)
+            cdb.buffs[e.key] = self:GetChecked() and true or false
+            NoteDeferred()
+            Evaluate()
+        end)
+    end
     w.icon = parent:CreateTexture(nil, "ARTWORK")
     w.icon:SetSize(20, 20)
-    w.icon:SetPoint("TOPLEFT", 22, y - 2)
     w.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     w.name = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     w.name:SetPoint("LEFT", w.icon, "RIGHT", 8, 0)
-    w.name:SetWidth(190)
+    w.name:SetWidth(opts.check and 166 or 188)
     w.name:SetJustifyH("LEFT")
     w.name:SetWordWrap(false)
+    local _, hi = Supply.Range(e)
     w.edit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    w.edit:SetSize(30, 20)
-    w.edit:SetPoint("TOPLEFT", 266, y - 2)
+    w.edit:SetSize(40, 20)
     w.edit:SetAutoFocus(false)
     w.edit:SetNumeric(true)
-    w.edit:SetMaxLetters(2)
+    w.edit:SetMaxLetters(#tostring(hi))
     w.edit:SetJustifyH("CENTER")
-    -- Übernehmen bei Enter/Fokusverlust (auf 0-50 begrenzt), ESC verwirft die Eingabe
+    -- Übernehmen bei Enter/Fokusverlust (auf die Grenzen begrenzt), ESC verwirft die Eingabe
     w.edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     w.edit:SetScript("OnEscapePressed", function(self) self.cancel = true; self:ClearFocus() end)
     w.edit:SetScript("OnEditFocusLost", function(self)
         local n = not self.cancel and tonumber(self:GetText())
         self.cancel = nil
-        if n then
-            cdb.reagents[e.item] = math.max(0, math.min(50, math.floor(n)))
+        if n and (e.kind == "reagent" or Supply.items[e.item] or e.supplyType ~= "item") then
+            Supply.SetThreshold(e, n)
             NoteDeferred()
             Evaluate()
         end
-        self:SetText(tostring(ReagentThreshold(e.item)))
+        self:SetText(tostring(Supply.Threshold(e)))
     end)
     w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    w.status:SetPoint("RIGHT", parent, "TOPLEFT", 424, y - 12)
     w.status:SetJustifyH("RIGHT")
-    Cfg.reagentRows[#Cfg.reagentRows + 1] = w
+    if opts.remove then
+        w.remove = Cfg.MakeButton(parent, "x", 22)
+        w.remove:SetScript("OnClick", function() Supply.RemoveItem(e.item) end)
+        w.remove:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(L.SUPPLY_REMOVE, 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        w.remove:SetScript("OnLeave", function(self)
+            if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+        end)
+    end
+    Cfg.PlaceSupplyRow(w, y)
+    if not opts.remove then Cfg.reagentRows[#Cfg.reagentRows + 1] = w end
+    return w
+end
+
+-- Zeile an Höhe y setzen (eigene Items werden bei jeder Änderung der Liste neu angeordnet)
+function Cfg.PlaceSupplyRow(w, y)
+    local p = w.parent
+    if w.cb then
+        w.cb:ClearAllPoints()
+        w.cb:SetPoint("TOPLEFT", 16, y)
+    end
+    w.icon:ClearAllPoints()
+    w.icon:SetPoint("TOPLEFT", w.check and 44 or 22, y - 2)
+    w.edit:ClearAllPoints()
+    w.edit:SetPoint("TOPLEFT", 262, y - 2)
+    w.status:ClearAllPoints()
+    w.status:SetPoint("RIGHT", p, "TOPLEFT", w.removable and 396 or 424, y - 12)
+    if w.remove then
+        w.remove:ClearAllPoints()
+        w.remove:SetPoint("TOPLEFT", 402, y - 1)
+    end
+end
+
+function Cfg.ShowSupplyRow(w, show)
+    for _, obj in ipairs({ w.cb or false, w.icon, w.name, w.edit, w.status, w.remove or false }) do
+        if obj then
+            if show then obj:Show() else obj:Hide() end
+        end
+    end
+end
+
+-- Zeile in RefreshConfig: Name, Icon, Mindestmenge, Anzahl bzw. Stummschaltung; ausgegraut, solange
+-- der Schalter aus ist (Tierfutter: auch, solange sein Häkchen aus ist)
+function Cfg.RefreshSupplyRow(w, expReag)
+    local e = w.entry
+    w.icon:SetTexture(EntryIcon(e))
+    w.name:SetText(EntryLabel(e))
+    if not w.edit:HasFocus() then w.edit:SetText(tostring(Supply.Threshold(e))) end
+    local active = expReag
+    if w.cb then
+        w.cb:SetChecked(cdb.buffs[e.key] == true)
+        if expReag then w.cb:Enable() else w.cb:Disable() end
+        active = expReag and cdb.buffs[e.key] == true
+    end
+    local known = knownCache[e.key] ~= false
+    local left = MuteRemaining(e.key)
+    if not known then
+        w.status:SetText(L.NOT_LEARNED)
+    elseif left then
+        w.status:SetText(L.MUTED:format(Cfg.FormatMute(left)))
+    elseif e.supplyType == "ammo" and Supply.AmmoItem() == false then
+        w.status:SetText(L.SUPPLY_NOAMMO)
+    else
+        local n = Supply.Count(e)
+        w.status:SetText(n and L.IN_BAGS:format(n) or "")
+    end
+    local lit = known and active
+    w.icon:SetDesaturated(not lit)
+    if lit then w.name:SetTextColor(1, 1, 1) else w.name:SetTextColor(0.5, 0.5, 0.5) end
+    if lit and left then
+        w.status:SetTextColor(1, 0.4, 0.3)
+    elseif lit then
+        w.status:SetTextColor(0.6, 0.6, 0.6)
+    else
+        w.status:SetTextColor(0.5, 0.5, 0.5)
+    end
+    Cfg.SetEditEnabled(w.edit, expReag)
+    if w.remove then
+        if expReag then w.remove:Enable() else w.remove:Disable() end
+    end
 end
 
 function Cfg.MakeButton(parent, text, width)
@@ -6491,35 +6866,126 @@ function Cfg.BuildSuppliesTab()
         end)
     end
 
-    -- Reagenzien-Warnung; Schwellenwerte nur für die Reagenzien der eigenen Klasse (eingeklappt,
-    -- solange der Schalter aus ist)
+    -- Vorratswarnung (intern weiter expReagents): gemeinsame Liste aus Reagenzien der Klasse,
+    -- Munition, Seelensplitter und Tierfutter; darunter eigene Items mit Feld "Item hinzufügen".
+    -- Beides eingeklappt, solange der Schalter aus ist.
     f = Cfg.NewSection("supplies", 24)
-    config.expReagCB = Cfg.MakeBetaCheck(f, L.EXP_REAGENTS, 16, 0, function(self)
+    config.expReagCB = Cfg.MakeBetaCheck(f, L.EXP_SUPPLIES, 16, 0, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
-    if #reagentEntries > 0 then
-        f = Cfg.NewSection("supplies", 18 + 26 * #reagentEntries, function() return ExpOn("expReagents") end)
-        config.reagentHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        config.reagentHint:SetPoint("TOPRIGHT", f, "TOPLEFT", 424, -2)
-        config.reagentHint:SetJustifyH("RIGHT")
-        config.reagentHint:SetText(L.REAGENT_HINT)
-        for i, e in ipairs(reagentEntries) do
-            Cfg.MakeReagentRow(f, e, -18 - (i - 1) * 26)
-        end
+    local function on() return ExpOn("expReagents") end
+    local fixed = #reagentEntries + #Supply.classEntries
+    f = Cfg.NewSection("supplies", 18 + 26 * fixed, on)
+    config.reagentHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    config.reagentHint:SetPoint("TOPRIGHT", f, "TOPLEFT", 424, -2)
+    config.reagentHint:SetJustifyH("RIGHT")
+    config.reagentHint:SetText(L.REAGENT_HINT)
+    local y = -18
+    for _, e in ipairs(reagentEntries) do
+        Cfg.MakeSupplyRow(f, e, y, {})
+        y = y - 26
+    end
+    for _, e in ipairs(Supply.classEntries) do
+        Cfg.MakeSupplyRow(f, e, y, { check = e.supplyType == "petfood" })
+        y = y - 26
     end
 
-    -- Hinweis: weitere Vorräte folgen
-    f = Cfg.NewSection("supplies", 30)
-    local later = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    later:SetPoint("TOPLEFT", 20, -4)
-    later:SetWidth(Cfg.WIDTH - 40)
-    later:SetJustifyH("LEFT")
-    later:SetText(L.SUPPLIES_LATER)
+    -- eigene Items (Liste nach Name; Cfg.LayoutSupplies ordnet sie samt Eingabefeld an)
+    f = Cfg.NewSection("supplies", 80, on)
+    Cfg.supplySection = f
+    local head = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    head:SetPoint("TOPLEFT", 22, 0)
+    head:SetText(L.SUPPLY_OWN)
+    config.supplyEmpty = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    config.supplyEmpty:SetText(L.SUPPLY_EMPTY)
+    config.supplyAddLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    config.supplyAddLabel:SetText(L.SUPPLY_ADD)
+    local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    box:SetSize(150, 20)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(60)
+    -- Enter: Item-ID oder Item-Link aus dem Feld übernehmen; Esc: Feld verlassen
+    box:SetScript("OnEnterPressed", function(self)
+        local text = self:GetText() or ""
+        local id = tonumber(text:match("item:(%d+)") or text:match("^%s*(%d+)%s*$"))
+        if id then Supply.AddItem(id) end
+        self:SetText("")
+        self:ClearFocus()
+    end)
+    box:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+    -- Item auf das Feld ziehen
+    box:SetScript("OnReceiveDrag", Supply.OnDrop)
+    box:SetScript("OnMouseUp", Supply.OnDrop)
+    Supply.addBox = box
+    Supply.HookLinks()   -- Shift-Klick auf Items (nur wirksam, solange das Feld den Fokus hat)
+    config.supplyAddHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    config.supplyAddHint:SetWidth(Cfg.WIDTH - 60)
+    config.supplyAddHint:SetJustifyH("LEFT")
+    config.supplyAddHint:SetText(L.SUPPLY_ADD_HINT:format(Supply.MAX_ITEMS))
+    config.supplyMax = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    config.supplyMax:SetTextColor(1, 0.4, 0.3)
+    config.supplyMax:SetText(L.SUPPLY_MAX:format(Supply.MAX_ITEMS))
+
+    -- Hinweis: gezählt werden nur die Taschen
+    f = Cfg.NewSection("supplies", 22, on)
+    local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    note:SetPoint("TOPLEFT", 22, -4)
+    note:SetWidth(Cfg.WIDTH - 40)
+    note:SetJustifyH("LEFT")
+    note:SetText(L.SUPPLY_BAGS_ONLY)
+    Cfg.LayoutSupplies()
 
     Cfg.FooterSection("supplies")
+    Cfg.LayoutTab("supplies")
+end
+
+-- Eigene Vorrats-Items (nach Name) im eigenen Abschnitt anordnen, darunter das Feld "Item
+-- hinzufügen" mit Hinweis; Abschnittshöhe und Tab folgen
+function Cfg.LayoutSupplies()
+    local f = Cfg.supplySection
+    if not f then return end
+    local y = -18
+    local list = Supply.List()
+    local shown = {}
+    for _, e in ipairs(list) do
+        local w = Cfg.supplyItemRows[e.item]
+        if not w then
+            w = Cfg.MakeSupplyRow(f, e, y, { remove = true })
+            Cfg.supplyItemRows[e.item] = w
+        end
+        w.entry = e
+        Cfg.PlaceSupplyRow(w, y)
+        Cfg.ShowSupplyRow(w, true)
+        shown[e.item] = true
+        y = y - 26
+    end
+    for id, w in pairs(Cfg.supplyItemRows) do
+        if not shown[id] then Cfg.ShowSupplyRow(w, false) end
+    end
+    if #list == 0 then
+        config.supplyEmpty:ClearAllPoints()
+        config.supplyEmpty:SetPoint("TOPLEFT", 44, y - 2)
+        config.supplyEmpty:Show()
+        y = y - 18
+    else
+        config.supplyEmpty:Hide()
+    end
+    y = y - 4
+    config.supplyAddLabel:ClearAllPoints()
+    config.supplyAddLabel:SetPoint("TOPLEFT", 22, y - 5)
+    Supply.addBox:ClearAllPoints()
+    Supply.addBox:SetPoint("TOPLEFT", 140, y)
+    config.supplyMax:ClearAllPoints()
+    config.supplyMax:SetPoint("LEFT", Supply.addBox, "RIGHT", 8, 0)
+    y = y - 24
+    config.supplyAddHint:ClearAllPoints()
+    config.supplyAddHint:SetPoint("TOPLEFT", 22, y)
+    y = y - 16
+    f:SetHeight(-y)
+    Supply.dirty = false
     Cfg.LayoutTab("supplies")
 end
 
@@ -6803,6 +7269,8 @@ Demo.ROWS = {
     { key = "petmissing", spell = 883, label = "PET_MISSING", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },   -- Tier rufen
     { key = "petfeed",  spell = 6991, label = "PET_FEED", plain = true, pet = true, hintItem = 4599 },   -- Tier füttern: Gepökeltes Schinkensteak
     { key = "demon",    spell = 697, label = "PET_DEMON", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },  -- Leerwandler beschwören
+    { key = "ammo",     item = 2515, count = 57, hint = "HINT_VENDOR" },                       -- Scharfer Pfeil (Munition knapp)
+    { key = "supply",   item = 1645, count = 4, hint = "HINT_MUTE" },                          -- Mondbeerensaft (eigenes Item knapp)
 }
 Demo.FOOD = {
     { id = 13931, count = 12, cat = "SpellDamage", xp = true, fav = true },
@@ -7429,6 +7897,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         cdb.reagents = cdb.reagents or {}         -- Reagenz-Item-ID -> Warnschwelle (0 = aus)
         cdb.favorites = cdb.favorites or {}       -- Item-ID -> true: Favorit (Essen/Fläschchen)
         cdb.petFavorites = cdb.petFavorites or {} -- Item-ID -> true: Tierfutter-Favorit (getrennt)
+        cdb.supplies = cdb.supplies or {}         -- eigene Vorrats-Items: Item-ID -> Mindestmenge
         if not Style.STYLES[db.style] then db.style = DEFAULTS.style end
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
@@ -7508,6 +7977,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 end
             end
         end
+        Supply.Setup(class)   -- Vorräte: Munition, Seelensplitter, Tierfutter, eigene Items
         RefreshKnown()
         Style.SyncFromLib()   -- Stil "Pardona" aus LP.Style (jetzt ist die höchste Lib-MINOR aktiv)
         ApplyLayout()
@@ -7538,6 +8008,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             Evaluate()
             return
         end
+        if Supply.OnItemInfo(arg1) then return end   -- eigene Vorrats-Items, Seelensplitter
         for _, e in ipairs(reagentEntries) do
             if e.item == arg1 then
                 Evaluate()
@@ -7767,6 +8238,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         db.expElixirs, db.expScrolls, db.expPet = nil, nil, nil
         cdb.trackWanted = nil                     -- Verfolgung wieder automatisch
         cdb.petUnhappyOnly, cdb.petNoFoodWarn, cdb.demon = nil, nil, nil   -- Tier: Vorgaben
+        cdb.ammoMin, cdb.shardMin, cdb.petFoodMin = nil, nil, nil   -- Vorräte: Standard-Mindestmengen
         RefreshKnown()
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
