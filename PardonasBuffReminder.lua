@@ -5605,6 +5605,40 @@ local function PardonaStatus()
     return L.STATUS_MANY:format(warnCount)
 end
 
+-- Ist mindestens eine Warnung stummgeschaltet (noch nicht abgelaufen)?
+function Cfg.AnyMuted()
+    local now = GetTime()
+    for _, untilT in pairs(muted) do
+        if untilT > now then return true end
+    end
+    return false
+end
+
+-- Einträge im Pardona-Menü (info.menu; bei jedem Öffnen neu ausgewertet): Anzeige verschieben/
+-- sperren, Test, Stummschaltungen aufheben. Gleiches Verhalten wie /br move, lock, test, unmute.
+function Cfg.PardonaMenu()
+    local combatTip = function() return InCombatLockdown() and L.MENU_NOT_IN_COMBAT or nil end
+    return {
+        {
+            text = function() return unlocked and L.MENU_LOCK or L.MENU_MOVE end,
+            disabled = function() return InCombatLockdown() end,
+            tooltip = combatTip,
+            onClick = function() Cfg.SetMoveMode(not unlocked) end,
+        },
+        {
+            text = L.TEST,
+            disabled = function() return InCombatLockdown() end,
+            tooltip = combatTip,
+            onClick = function() StartTest() end,
+        },
+        {
+            text = L.UNMUTE,
+            disabled = function() return not Cfg.AnyMuted() end,
+            onClick = function() wipe(muted); Print(L.UNMUTED); NoteDeferred(); Evaluate() end,
+        },
+    }
+end
+
 -- Erst nach ADDON_LOADED aufrufen (db muss geladen sein)
 local function RegisterPardona()
     if not LP then return end
@@ -5616,6 +5650,8 @@ local function RegisterPardona()
         db      = db.pardona,
         onClick = function() ToggleConfig() end,
         status  = PardonaStatus,
+        -- Schnellaktionen im Pardona-Menü (nur Libs mit Menüeinträgen, MINOR >= 6)
+        menu    = LP.MENU_VERSION and Cfg.PardonaMenu or nil,
         -- einmalig: Position/Sichtbarkeit des früheren eigenen Minimap-Buttons übernehmen
         -- (die alten Felder minimapAngle/minimapHide bleiben in der DB stehen)
         migrate = function(pdb)
