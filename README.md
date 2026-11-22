@@ -71,11 +71,12 @@ Built for **WoW Forever** (Interface `16001`).
 
 ## Settings
 
-The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or `/br`) is split into tabs that sit on a dark inset panel; each tab scrolls on its own. `/br` opens the tab you used last.
+The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or `/br`) is split into five tabs (Display, Class Buffs, Other Buffs, Consumables, Group) that sit on a dark inset panel in one row; with long translations the tab labels are shortened instead of wrapping. Each tab scrolls on its own. `/br` opens the tab you used last (an unknown saved tab falls back to Display).
 
 - **Display** – buttons Move/Lock, Test and Unmute all; Addon enabled; Left-click casts buff; Style and Icons only; growth direction; sound; the keybinding (current key and where to set it); Expiry warning (beta) with its threshold and opacity sliders.
 - **Class Buffs** – your class's buffs with on/off checkboxes (spells not learned yet are greyed out with the level or talent they need); Variant menu on right-click (beta).
-- **Other Buffs** – Well Fed, Flask, Well-Rested and the main-hand/off-hand weapon enhancements, plus "Other buffs only in instances"; Stones, oils, poisons by click (beta); Class consumables (beta) with the food/water threshold; Low reagent warning (beta) with the reagent list and thresholds; Tracking reminder (beta) with the "Track: …" button; Scrolls (beta) with one checkbox per scroll type; Elixirs (beta) with the list of known elixirs (tick the ones you want).
+- **Other Buffs** – Well Fed, Flask, Well-Rested and the main-hand/off-hand weapon enhancements, plus "Other buffs only in instances"; Stones, oils, poisons by click (beta); Tracking reminder (beta) with the "Track: …" button.
+- **Consumables** – a short note that "Other buffs only in instances" also applies to scrolls and elixirs; Class consumables (beta) with the food/water threshold; Low reagent warning (beta) with the reagent list and thresholds; Scrolls (beta) with one checkbox per scroll type; Elixirs (beta) with the list of known elixirs (tick the ones you want).
 - **Group** (only for classes with group buffs: Priest, Mage, Druid, Paladin) – Group buffs (beta), Check group buffs, Check in: …; for Paladins also Paladin blessings in group buffs (beta) with the Pally Power note.
 
 Experimental switches carry an orange "(beta)" tag in their tab (muted while a parent switch is off); their detail settings sit directly below and are greyed out while the switch is off. A footer in each tab with such switches explains: "(beta) = experimental: on in beta builds, off by default in releases".
@@ -111,7 +112,7 @@ All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one 
 
 ## Experimental features (opt-in)
 
-These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings. Each switch sits in the tab it belongs to (see [Settings](#settings)) and is marked "(beta)": Expiry warning on the Display tab, Variant menu on the Class Buffs tab, Stones/oils/poisons, Class consumables, Low reagent warning, Tracking reminder, Scrolls and Elixirs on the Other Buffs tab, Group buffs and Paladin blessings on the Group tab. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
+These features are not fully tested yet. They are **off by default in release versions** and can be turned on in the settings. Each switch sits in the tab it belongs to (see [Settings](#settings)) and is marked "(beta)": Expiry warning on the Display tab, Variant menu on the Class Buffs tab, Stones/oils/poisons and Tracking reminder on the Other Buffs tab, Class consumables, Low reagent warning, Scrolls and Elixirs on the Consumables tab, Group buffs and Paladin blessings on the Group tab. In beta, alpha and development builds they are on by default. Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the build default.
 
 While a feature is off, it does nothing at all: no group lines, no group scans, no reagent lines and no reagent count checks; your own reminders work as usual. The detail settings below each checkbox are greyed out while it is off. Changes take effect immediately (in combat: when combat ends).
 
@@ -146,15 +147,28 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - Applies everywhere ("Other buffs only in instances" does not affect it), but not while dead, on a flight path or in a vehicle. No expiry warning.
 - **Elixirs (beta)** – reminds you of the elixirs you want on this character.
   - **Stacking rules:** it is not confirmed whether WoW Forever uses the original rules (elixirs for different stats stack, flasks and elixirs work together) or the later rule (one battle and one guardian elixir, no elixirs with a flask). The addon therefore has no fixed battle/guardian slots. You pick the elixirs you want per character, and elixir reminders are independent of the flask reminder.
-  - Every elixir that has been in your bags is remembered per character and listed below the "Elixirs" checkbox on the Other Buffs tab: checkbox, icon, name (from the game client) and the count in your bags. Ticked = wanted. Until an elixir has been in your bags, the list says "Elixirs you carry appear here.".
+  - Every elixir that has been in your bags is remembered per character and listed below the "Elixirs" checkbox on the Consumables tab: checkbox, icon, name (from the game client) and the count in your bags. Ticked = wanted. Until an elixir has been in your bags, the list says "Elixirs you carry appear here.".
   - Elixirs are recognized by item type (consumable, subtype elixir); flasks stay with the Flask reminder. The buff is the elixir's item spell, matched by spell ID, then by name; the mapping is remembered account-wide.
   - Each wanted elixir gets its own line when its buff is missing **and** the elixir is in your bags, e.g. "Elixir of the Mongoose missing". Left-click uses it; right-click opens the usual menu (mute, move display) – there is no item list, since one line is one elixir.
   - "Other buffs only in instances", the expiry warning, sound, chat message, mute and the "Use top warning" key work as for food and flasks.
 - **Scrolls (beta)** – reminds you to read a scroll you carry: Agility, Strength, Intellect, Spirit, Stamina and Protection.
   - Scrolls are recognized by item ID (ranks I–IV); other scrolls by item type (consumable, subtype scroll) when their item spell belongs to one of the six types.
-  - One line per type when a scroll of that type is in your bags and its buff is missing. Intellect, Spirit and Stamina are skipped while a class buff already gives the stat: Arcane Intellect / Arcane Brilliance, Divine Spirit / Prayer of Spirit, Power Word: Fortitude / Prayer of Fortitude (all ranks, from any caster).
-  - Left-click reads the highest scroll of that type in your bags; right-click opens the item menu with the scrolls of that type (favorites, "best choice", mute, move display).
-  - Below the "Scrolls" checkbox, one checkbox per type (on by default, saved per character); names come from the game client (the rank IV scroll).
+  - **Usable ranks only:** a scroll counts only if its required level (from the game's item data, loaded on demand) is at or below your level. Left-click, "best choice" and the reminder use the best usable scroll: favorites first, then the highest usable rank. If only scrolls above your level are in your bags, there is no reminder. Your level is re-checked on level-up.
+  - One line per type when a usable scroll of that type is in your bags and its buff (any rank) is missing. The line is labeled with the scroll left-click would use, e.g. "Scroll of Intellect missing" when you only carry rank I.
+  - **Class buffs with values:** Intellect, Spirit and Stamina are skipped only while a class buff gives **at least as much** of the stat as the scroll left-click would use: Arcane Intellect / Arcane Brilliance, Divine Spirit / Prayer of Spirit, Power Word: Fortitude / Prayer of Fortitude (any caster). Example: Power Word: Fortitude rank 1 (+3 Stamina) is active and Scroll of Stamina IV (+16) is in your bags → the Stamina scroll reminder appears; with Fortitude rank 4 (+32) it does not. The class buff's value comes from the aura data when the client reveals it, otherwise from the original values (Fortitude 3/8/20/32/43/54, Prayer of Fortitude 43/54, Arcane Intellect 2/7/15/22/31, Arcane Brilliance 31, Divine Spirit 17/23/33/40, Prayer of Spirit 40); scroll values: Stamina and Intellect 4/8/12/16, Spirit 3/7/11/15. If a value cannot be determined, the reminder stays off (better none than a wrong one).
+  - Left-click reads the best usable scroll; right-click opens the item menu with **all** scrolls of that type in your bags (favorites, "best choice", mute, move display). Scrolls above your level are greyed out, marked "Requires level N" and cannot be clicked.
+  - Below the "Scrolls" checkbox (Consumables tab), one checkbox per type, labeled neutrally with the stat name from the game client (e.g. "Scroll: Intellect"), the rank I scroll's icon and the count of all ranks in your bags.
+  - **Default per class** (saved per character once you tick or untick a type; `/br reset` returns to the class default):
+
+    | Class | Scroll types on by default |
+    |---|---|
+    | Warrior, Rogue, Death Knight | Agility, Strength, Stamina, Protection |
+    | Hunter | Agility, Intellect, Stamina, Protection |
+    | Paladin, Shaman | Strength, Agility, Intellect, Stamina, Protection |
+    | Druid | all six |
+    | Priest, Mage, Warlock | Intellect, Spirit, Stamina, Protection |
+
+    Types you had turned off in an earlier beta stay off.
   - "Other buffs only in instances" and the expiry warning apply as for food and flasks.
 - **Low reagent warning** – warns when a reagent in your bags (bank not counted) drops below a threshold, e.g. "Holy Candle: 3 left". A reagent is only checked if you have learned at least one spell that uses it; for ranked spells the highest rank you know decides which reagent counts (e.g. Prayer of Fortitude rank 1 uses Holy Candle, rank 2 uses Sacred Candle; Rebirth uses a different seed per rank).
   - Priest: Holy Candle, Sacred Candle (Prayer of Fortitude / Spirit / Shadow Protection), Light Feather (Levitate)
