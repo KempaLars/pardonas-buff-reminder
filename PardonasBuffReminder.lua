@@ -3436,6 +3436,8 @@ function Display.GetRow(i)
     r:SetScript("PostClick", function(self, button, down)
         if not Display.IsActionPhase(down) then return end
         if button == "LeftButton" then
+            -- benutzte Zeile für die Taste kurz sperren (auch im Kampf merken; nicht beim Verschieben)
+            if not unlocked then Keybind.MarkUsed(self) end
             -- Verfolgungs-Zeile: Verfolgung einschalten (nur außerhalb des Kampfes)
             if self.entry and self.entry.kind == "tracking" and not unlocked and Tracking.Activate(self) then
                 return
@@ -3710,8 +3712,9 @@ end
 -- jeder Änderung der Liste (ShowRows) die Linksklick-Attribute der am Bildschirm obersten
 -- Fehlt-Zeile mit Aktion (Zauber, Item, Makro, Verfolgung); Ablauf-Zeilen und "isst gerade"
 -- werden übergangen. Keine passende Zeile oder Verschiebe-Modus: Attribute leer (Taste tut nichts).
--- Nach einer Benutzung außerhalb des Kampfes: Attribute sofort leer, 1,5 Sek. keine neue Belegung
--- (kein doppelter Item-Verbrauch, solange Taschen/Auren nachziehen).
+-- Eine eben benutzte Zeile (per Taste oder Linksklick, Keybind.recent) wird 1,5 Sek. übergangen
+-- (kein doppelter Item-Verbrauch, solange Taschen/Auren nachziehen); außerhalb des Kampfes zeigt
+-- die Taste sofort auf die nächste passende Fehlt-Zeile.
 -- Im Kampf bleibt die Belegung vom Kampfbeginn; ein Secure-Wrapper leert sie nach einem Item oder
 -- Makro (Einmal-Sperre), Zauber und Verfolgung bleiben wiederholbar. Nach dem Kampf belegen
 -- Evaluate und Keybind.Update (PLAYER_REGEN_ENABLED) neu. Auch per Makro: /click PardonasBuffReminderKeyButton
@@ -3740,16 +3743,30 @@ Keybind.button:SetScript("PostClick", function(self, button, down)
     if self.useItem and self.entry and self.entry.itemKind == "flask" and cdb then cdb.lastFlask = self.useItem end
     -- Verfolgungs-Zeile oben: Verfolgung einschalten wie beim Linksklick
     if self.entry and self.entry.kind == "tracking" then Tracking.Activate(self) end
-    -- außerhalb des Kampfes: sofort leeren und kurz sperren (Keybind.Retry belegt danach neu)
-    if not InCombatLockdown() then
-        Display.SetRowAction(self, nil)
-        self:SetAttribute("pbr-oneshot", nil)
-        Keybind.lockUntil = GetTime() + Keybind.LOCK_TIME
-        Keybind.Retry()
-    end
+    -- benutzte Zeile kurz sperren; außerhalb des Kampfes zeigt die Taste sofort auf die nächste
+    Keybind.MarkUsed(self)
 end)
 
-Keybind.LOCK_TIME = 1.5   -- Sek. ohne neue Belegung nach einer Benutzung
+Keybind.LOCK_TIME = 1.5   -- Sek., die eine eben benutzte Zeile übergangen wird
+Keybind.recent = {}       -- entry.key -> Ablaufzeit (GetTime) der Sperre nach einer Benutzung
+
+-- Benutzung einer Zeile merken (Taste oder Linksklick auf die Warnzeile), nur wenn der Button
+-- eine Aktion hatte; außerhalb des Kampfes sofort neu belegen (im Kampf wirkt der Eintrag bei der
+-- nächsten Belegung nach dem Kampf)
+function Keybind.MarkUsed(btn)
+    local e, a = btn.entry, btn.action
+    if not (e and e.key and a and (a.spell or a.item or a.macro or a.trackIndex)) then return end
+    Keybind.recent[e.key] = GetTime() + Keybind.LOCK_TIME
+    if not InCombatLockdown() then Keybind.Update() end
+end
+
+-- Zeile gerade gesperrt? Abgelaufene Einträge werden entfernt.
+function Keybind.IsRecent(key)
+    local t = Keybind.recent[key]
+    if not t then return false end
+    if GetTime() >= t then Keybind.recent[key] = nil; return false end
+    return true
+end
 
 -- Einmal-Sperre im Kampf: Secure-Wrapper um OnClick. Der Post-Body leert in der Aktionsphase
 -- type1/item1/macrotext1, wenn "pbr-oneshot" gesetzt ist (Item oder Makro). Die Aktionsphase steht
@@ -3796,13 +3813,13 @@ function Display.ScreenOrder(n)
     return list
 end
 
--- Oberste Fehlt-Zeile mit Aktion (keine Ablauf-Zeile, nicht "isst gerade"); nil = keine
+-- Oberste Fehlt-Zeile mit Aktion (keine Ablauf-Zeile, nicht "isst gerade", nicht eben benutzt); nil = keine
 function Keybind.PickRow(n)
     if unlocked then return nil end   -- Verschiebe-Modus
     for _, i in ipairs(Display.ScreenOrder(n)) do
         local r = rows[i]
         local e, a = r and r.entry, r and r.action
-        if e and r:IsShown() and not r.expiryRow and not e.eatStart and a
+        if e and r:IsShown() and not r.expiryRow and not e.eatStart and not Keybind.IsRecent(e.key) and a
             and (a.spell or a.item or a.macro or a.trackIndex) then
             return r
         end
@@ -3811,11 +3828,10 @@ function Keybind.PickRow(n)
 end
 
 -- Attribute der gewählten Zeile übernehmen (nur außerhalb des Kampfes; n = Anzahl angezeigter
--- Zeilen, nil = zuletzt bekannte). Während der Sperre nach einer Benutzung: später erneut.
+-- Zeilen, nil = zuletzt bekannte). Eben benutzte Zeilen (Keybind.recent) werden übergangen.
 function Keybind.Update(n)
     if n then Keybind.lastN = n end
     if InCombatLockdown() then return end
-    if Keybind.lockUntil and GetTime() < Keybind.lockUntil then Keybind.Retry(); return end
     local b = Keybind.button
     local r = Keybind.PickRow(Keybind.lastN or 0)
     local a = r and r.action or nil
@@ -3824,13 +3840,23 @@ function Keybind.Update(n)
     Display.SetRowAction(b, a)
     b:SetAttribute("pbr-oneshot", (a and not a.spell and (a.item or a.macro)) and true or nil)
     b:SetAttribute("pbr-keydown", Display.GetCVarFlag("ActionButtonUseKeyDown") and true or false)
+    Keybind.Retry()
 end
 
--- Neue Belegung nach Ablauf der Sperre (ein Timer; im Kampf übernimmt PLAYER_REGEN_ENABLED)
+-- Neue Belegung, sobald die früheste Zeilen-Sperre abläuft (ein Timer; im Kampf übernimmt
+-- PLAYER_REGEN_ENABLED)
 function Keybind.Retry()
     if Keybind.retryPending then return end
+    local first
+    for key in pairs(Keybind.recent) do
+        if Keybind.IsRecent(key) then
+            local t = Keybind.recent[key]
+            if not first or t < first then first = t end
+        end
+    end
+    if not first then return end
     Keybind.retryPending = true
-    C_Timer.After(math.max(0.05, (Keybind.lockUntil or 0) - GetTime() + 0.05), function()
+    C_Timer.After(math.max(0.05, first - GetTime() + 0.05), function()
         Keybind.retryPending = false
         if not InCombatLockdown() then Keybind.Update() end
     end)

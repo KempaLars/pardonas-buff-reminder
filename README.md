@@ -106,7 +106,7 @@ Right-clicking a reminder opens one window in the selected style:
 
 Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warning** you can bind a key. All Pardona addons share the "Pardona's Addons" section. Pressing the key does the same as a left-click on the topmost **missing** reminder on screen: cast the buff, eat, drink a flask, read a scroll, imbue the weapon, turn on tracking, or the group action of a group buff line. Expiry warnings and the "eating" line are skipped, as are reminders without a click action (e.g. reagent warnings). "Topmost" follows the screen: with "New warnings appear: above" the list grows upwards, so the most recently added reminder is checked first; with Compact "Icons only" the top row is checked left to right. If no buff is missing, the key does nothing (also in move mode).
 
-- After each use out of combat the key is blocked for 1.5 seconds, so an item is not used twice while bags and buffs update; then it follows the list again.
+- A reminder you just used (by key or by click) is skipped for 1.5 seconds, so an item is not used twice while bags and buffs update; the key moves on to the next missing reminder right away.
 - In combat the key keeps the action it had when combat started. Items – food, flasks, elixirs, scrolls and weapon items – work only once per combat, spells can be used repeatedly. When combat ends, the key follows the list again.
 - The settings (Display tab) show the current key (or "not bound") and where to set it.
 - Macro alternative: `/click PardonasBuffReminderKeyButton`. If your client casts on key down ("Cast action keybinds on key down" on) and this macro does nothing, use `/click PardonasBuffReminderKeyButton LeftButton 1` instead.
