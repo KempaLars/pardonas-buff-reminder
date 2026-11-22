@@ -44,6 +44,8 @@ read_globals = {
     "UIDropDownMenu_EnableDropDown",
     "UIDropDownMenu_DisableDropDown",
     "CloseDropDownMenus",
+    -- secure handler (keybinding one-shot; checked at runtime)
+    "SecureHandlerWrapScript",
     "Enum",
     "GameTooltip",
     "LibStub",

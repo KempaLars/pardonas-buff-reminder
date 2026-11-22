@@ -3707,9 +3707,14 @@ end
 ---------------------------------------------------------------------------
 -- Tastenbelegung "Oberste Warnung auslösen" (Bindings.xml: CLICK PardonasBuffReminderKeyButton:LeftButton)
 -- Unsichtbarer Secure Button ohne Parent und ohne Maus. Außerhalb des Kampfes übernimmt er bei
--- jeder Änderung der Liste (ShowRows) die Linksklick-Attribute der obersten Zeile am Bildschirm;
--- ohne Warnung werden sie geleert. Im Kampf bleibt die Belegung vom Kampfbeginn, nach dem Kampf
--- zieht Evaluate (PLAYER_REGEN_ENABLED) sie nach. Auch per Makro: /click PardonasBuffReminderKeyButton
+-- jeder Änderung der Liste (ShowRows) die Linksklick-Attribute der am Bildschirm obersten
+-- Fehlt-Zeile mit Aktion (Zauber, Item, Makro, Verfolgung); Ablauf-Zeilen und "isst gerade"
+-- werden übergangen. Keine passende Zeile oder Verschiebe-Modus: Attribute leer (Taste tut nichts).
+-- Nach einer Benutzung außerhalb des Kampfes: Attribute sofort leer, 1,5 Sek. keine neue Belegung
+-- (kein doppelter Item-Verbrauch, solange Taschen/Auren nachziehen).
+-- Im Kampf bleibt die Belegung vom Kampfbeginn; ein Secure-Wrapper leert sie nach einem Item oder
+-- Makro (Einmal-Sperre), Zauber und Verfolgung bleiben wiederholbar. Nach dem Kampf belegen
+-- Evaluate und Keybind.Update (PLAYER_REGEN_ENABLED) neu. Auch per Makro: /click PardonasBuffReminderKeyButton
 ---------------------------------------------------------------------------
 Keybind.BINDING = "CLICK PardonasBuffReminderKeyButton:LeftButton"
 -- Kategorie "Pardona's Addons" steht wörtlich in Bindings.xml (category); darin die Kopfzeile
@@ -3735,27 +3740,100 @@ Keybind.button:SetScript("PostClick", function(self, button, down)
     if self.useItem and self.entry and self.entry.itemKind == "flask" and cdb then cdb.lastFlask = self.useItem end
     -- Verfolgungs-Zeile oben: Verfolgung einschalten wie beim Linksklick
     if self.entry and self.entry.kind == "tracking" then Tracking.Activate(self) end
+    -- außerhalb des Kampfes: sofort leeren und kurz sperren (Keybind.Retry belegt danach neu)
+    if not InCombatLockdown() then
+        Display.SetRowAction(self, nil)
+        self:SetAttribute("pbr-oneshot", nil)
+        Keybind.lockUntil = GetTime() + Keybind.LOCK_TIME
+        Keybind.Retry()
+    end
 end)
 
--- Index der Zeile, die am Bildschirm ganz oben steht (n = Anzahl angezeigter Zeilen):
--- nach unten: Zeile 1; nach oben: die letzte Zeile; "Nur Icons" nach oben: erstes (linkes)
--- Icon der obersten Reihe
-function Display.TopRowIndex(n)
-    if not Display.GrowUp() then return 1 end
+Keybind.LOCK_TIME = 1.5   -- Sek. ohne neue Belegung nach einer Benutzung
+
+-- Einmal-Sperre im Kampf: Secure-Wrapper um OnClick. Der Post-Body leert in der Aktionsphase
+-- type1/item1/macrotext1, wenn "pbr-oneshot" gesetzt ist (Item oder Makro). Die Aktionsphase steht
+-- in "pbr-keydown" (CVar ActionButtonUseKeyDown; GetCVar gibt es im Restricted-Code nicht).
+-- Beide Attribute setzt Keybind.Update außerhalb des Kampfes. Fehlen Wrapper-API oder Vorlage:
+-- Taste wie bisher, nur ohne Einmal-Sperre.
+Keybind.ONESHOT_PRE = [[ return button, "pbr" ]]
+Keybind.ONESHOT_POST = [[
+    if button == "LeftButton" and self:GetAttribute("pbr-oneshot")
+        and ((down and true or false) == (self:GetAttribute("pbr-keydown") and true or false)) then
+        self:SetAttribute("type1", nil)
+        self:SetAttribute("item1", nil)
+        self:SetAttribute("macrotext1", nil)
+        self:SetAttribute("pbr-oneshot", nil)
+    end
+]]
+function Keybind.SetupOneShot()
+    if type(SecureHandlerWrapScript) ~= "function" then return end
+    local ok, header = pcall(CreateFrame, "Frame", nil, nil, "SecureHandlerBaseTemplate")
+    if not ok or not header then return end
+    Keybind.wrapped = pcall(SecureHandlerWrapScript, Keybind.button, "OnClick", header,
+        Keybind.ONESHOT_PRE, Keybind.ONESHOT_POST) and true or false
+end
+Keybind.SetupOneShot()
+
+-- Indizes der angezeigten Zeilen (n) in Bildschirmreihenfolge von oben nach unten, in einer
+-- Reihe von links nach rechts: nach unten wachsend 1..n; nach oben n..1; "Nur Icons" in Reihen
+-- zu ICONS_PER_LINE (nach oben: die letzte Reihe steht oben)
+function Display.ScreenOrder(n)
+    local list = {}
+    local up = Display.GrowUp()
     if Style.IconsOnly(Style.CurrentStyle()) then
         local per = Display.ICONS_PER_LINE
-        return math.floor((n - 1) / per) * per + 1
+        local lines = math.ceil(n / per)
+        for k = 1, lines do
+            local line = up and (lines - k + 1) or k
+            for i = (line - 1) * per + 1, math.min(line * per, n) do list[#list + 1] = i end
+        end
+    elseif up then
+        for i = n, 1, -1 do list[#list + 1] = i end
+    else
+        for i = 1, n do list[#list + 1] = i end
     end
-    return n
+    return list
 end
 
--- Attribute der obersten Warnzeile übernehmen (nur außerhalb des Kampfes)
+-- Oberste Fehlt-Zeile mit Aktion (keine Ablauf-Zeile, nicht "isst gerade"); nil = keine
+function Keybind.PickRow(n)
+    if unlocked then return nil end   -- Verschiebe-Modus
+    for _, i in ipairs(Display.ScreenOrder(n)) do
+        local r = rows[i]
+        local e, a = r and r.entry, r and r.action
+        if e and r:IsShown() and not r.expiryRow and not e.eatStart and a
+            and (a.spell or a.item or a.macro or a.trackIndex) then
+            return r
+        end
+    end
+    return nil
+end
+
+-- Attribute der gewählten Zeile übernehmen (nur außerhalb des Kampfes; n = Anzahl angezeigter
+-- Zeilen, nil = zuletzt bekannte). Während der Sperre nach einer Benutzung: später erneut.
 function Keybind.Update(n)
+    if n then Keybind.lastN = n end
     if InCombatLockdown() then return end
-    local r = n > 0 and rows[Display.TopRowIndex(n)] or nil
-    local e = r and r.entry or nil   -- Verschiebe-Modus: keine Aktion
-    Keybind.button.entry = e
-    Display.SetRowAction(Keybind.button, e and r.action or nil)
+    if Keybind.lockUntil and GetTime() < Keybind.lockUntil then Keybind.Retry(); return end
+    local b = Keybind.button
+    local r = Keybind.PickRow(Keybind.lastN or 0)
+    local a = r and r.action or nil
+    b.entry = r and r.entry or nil
+    b.actionSig = nil   -- neu setzen, auch wenn der Wrapper die Attribute im Kampf geleert hat
+    Display.SetRowAction(b, a)
+    b:SetAttribute("pbr-oneshot", (a and not a.spell and (a.item or a.macro)) and true or nil)
+    b:SetAttribute("pbr-keydown", Display.GetCVarFlag("ActionButtonUseKeyDown") and true or false)
+end
+
+-- Neue Belegung nach Ablauf der Sperre (ein Timer; im Kampf übernimmt PLAYER_REGEN_ENABLED)
+function Keybind.Retry()
+    if Keybind.retryPending then return end
+    Keybind.retryPending = true
+    C_Timer.After(math.max(0.05, (Keybind.lockUntil or 0) - GetTime() + 0.05), function()
+        Keybind.retryPending = false
+        if not InCombatLockdown() then Keybind.Update() end
+    end)
 end
 
 -- Aktuelle Taste als Text; nil = nicht belegt bzw. nicht lesbar
@@ -6870,6 +6948,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if Demo.restorePending then Demo.Restore() end
         if GroupFeatureOn() then Group.groupDirty = true end
         Evaluate()
+        Keybind.Update()   -- Taste neu belegen (Einmal-Sperre aus dem Kampf aufheben)
         RefreshPardonaStatus()
         return
     end
