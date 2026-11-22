@@ -5580,7 +5580,7 @@ Demo.ROWS = {
     { key = "tracking", spell = 2580, track = true, hint = "HINT_TRACK" },                      -- Mineraliensuche
     { key = "expiry",   spell = 1126, expiry = "1:45", hint = "HINT_CAST" },                    -- Mal der Wildnis
     { key = "elixir",   item = 13452, hint = "HINT_USE" },                                      -- Elixier des Mungos
-    { key = "scroll",   item = 10309, hintItem = 10309 },                                       -- Rolle der Beweglichkeit IV
+    { key = "scroll",   item = 955, hintItem = 955 },                                           -- Rolle der Intelligenz (Rang I)
 }
 Demo.FOOD = {
     { id = 13931, count = 12, cat = "SpellDamage", xp = true, fav = true },
@@ -5589,7 +5589,7 @@ Demo.FOOD = {
     { id = 3729,  count = 9,  cat = "Stamina" },
 }
 Demo.VARIANT_LAST = "ice"   -- im Variantenmenü als "zuletzt genutzt" markiert
-Demo.LOAD_WAIT = 3          -- höchstens so lange auf Item-/Spell-Daten warten (Sek.)
+Demo.LOAD_WAIT = 5          -- höchstens so lange auf Item-/Spell-Daten warten (Sek.; GET_ITEM_INFO_RECEIVED prüft sofort)
 Demo.SHOT_DELAY = 1.5       -- Wartezeit vor jedem Bild (Sek.)
 Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
     { "pardona", false, "pardona" }, { "classic", false, "classic" },
@@ -5717,6 +5717,7 @@ function Demo.DataReady(spells, items)
 end
 
 -- Item-/Spell-Daten anfordern; done() sobald alles da ist, spätestens nach LOAD_WAIT Sek.
+-- Geprüft wird alle 0,2 Sek. und bei jedem GET_ITEM_INFO_RECEIVED (Demo.OnItemInfo).
 function Demo.Preload(done)
     local spells, items = Demo.Ids()
     for _, id in ipairs(items) do
@@ -5726,12 +5727,34 @@ function Demo.Preload(done)
         if C_Spell and C_Spell.RequestLoadSpellData then pcall(C_Spell.RequestLoadSpellData, id) end
     end
     local t0 = GetTime()
+    -- true = fertig (done ist gelaufen oder Demo beendet)
+    local function check()
+        if not Demo.active or Demo.loadCheck ~= check then return true end
+        if Demo.DataReady(spells, items) or GetTime() - t0 >= Demo.LOAD_WAIT then
+            Demo.loadCheck = nil
+            done()
+            return true
+        end
+        return false
+    end
+    Demo.loadCheck = check
     local function poll()
-        if not Demo.active then return end
-        if Demo.DataReady(spells, items) or GetTime() - t0 >= Demo.LOAD_WAIT then done(); return end
-        C_Timer.After(0.2, poll)
+        if not check() then C_Timer.After(0.2, poll) end
     end
     poll()
+end
+
+-- GET_ITEM_INFO_RECEIVED im Demo-Modus: Vorladen sofort prüfen; danach nachgeladene Motive
+-- ergänzen (nicht während eines Screenshot-Laufs, der zeigt die Zeilen je Bild neu)
+function Demo.OnItemInfo(id)
+    if Demo.loadCheck then
+        Demo.loadCheck()
+    elseif Demo.active and not Demo.run and not InCombatLockdown() then
+        local _, items = Demo.Ids()
+        for _, item in ipairs(items) do
+            if item == id then Demo.Show(); return end
+        end
+    end
 end
 
 -- Beispielzeilen zeigen (Ablaufzeilen zuletzt, wie bei echten Warnungen)
@@ -5779,6 +5802,7 @@ function Demo.Stop(quiet)
     if not Demo.active and not Demo.run then return end
     Demo.run = nil      -- laufende Timer verfallen
     Demo.active = false
+    Demo.loadCheck = nil
     Demo.Restore()
     if not InCombatLockdown() then
         if menu:IsShown() then menu:Hide() end
@@ -5948,12 +5972,17 @@ function Demo.OpenMenu(which)
     end
 end
 
--- Tab der Einstellungen zeigen und nach oben scrollen; false = Tab gibt es nicht (Bild entfällt)
+-- Tab der Einstellungen zeigen und nach oben scrollen; false = Tab gibt es nicht (Bild entfällt).
+-- Tab-Wechsel (samt RefreshConfig) und Scrollen laufen per pcall: Ein Fehler darin hat früher den
+-- Timer-Callback und damit den ganzen Lauf stumm beendet (Bilder ab "settings-other-buffs" fehlten,
+-- kein Zurücksetzen). Jetzt: Fehler im Chat melden, Bild trotzdem aufnehmen.
 function Demo.ShowTab(key)
     local t = Cfg.tabs[key]
     if not t then return false end
-    Cfg.SelectTab(key)
-    t.scroll:SetVerticalScroll(0)
+    local ok, err = pcall(Cfg.SelectTab, key)
+    if not ok then Print(L.DEMO_TAB_ERROR:format(key, tostring(err))) end
+    ok, err = pcall(t.scroll.SetVerticalScroll, t.scroll, 0)
+    if not ok then Print(L.DEMO_TAB_ERROR:format(key, tostring(err))) end
     return true
 end
 
@@ -6055,7 +6084,9 @@ function Demo.Capture(i)
     local run, s = Demo.run, Demo.SHOTS[i]
     if not run then return end
     run.result, run.waiting = nil, true
-    run.crop = Demo.CropOf(Demo.ShotFrames(s))   -- vor dem Bild, Stand wie auf dem Bild
+    -- Zuschnitt vor dem Bild (Stand wie auf dem Bild); Fehler -> ganzes Bild statt Abbruch des Laufs
+    local okCrop, crop = pcall(function() return Demo.CropOf(Demo.ShotFrames(s)) end)
+    run.crop = okCrop and crop or nil
     if run.manual then
         Print(L.DEMO_PRINT)
     elseif not (type(Screenshot) == "function" and pcall(Screenshot)) then
@@ -6266,6 +6297,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- arg1 = Item-ID; nur eigene Reagenzien interessieren (lokalisierter Name nachgeladen)
         -- bzw. Essen/Fläschchen in den Taschen (Name, Stufe, Tooltip jetzt verfügbar)
         if IsSecret(arg1) then return end
+        if Demo.active then Demo.OnItemInfo(arg1) end   -- Demo: Vorladen fertig? Motive ergänzen
         if Eat.eatPending[arg1] then Eat.ResolveEatSpell(arg1, true) end   -- Ess-Aura jetzt ermittelbar
         if Items.bagCounts[arg1] then
             Items.LearnItem(arg1)
