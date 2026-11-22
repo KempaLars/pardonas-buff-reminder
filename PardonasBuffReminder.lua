@@ -3338,6 +3338,7 @@ function Supply.Setup(class)
         for k, v in pairs(d) do e[k] = v end
         PrepareEntry(e)
         Supply.classEntries[#Supply.classEntries + 1] = e
+        if e.supplyType == "ammo" then Supply.ammoEntry = e end
         entries[#entries + 1] = e
         if e.item then ItemName(e.item) end   -- Item-Daten vorladen
     end
@@ -3566,18 +3567,171 @@ function Supply.ChatText(e)
     return L.SUPPLY_CHAT:format(Supply.Label(e), e.count or 0)
 end
 
--- Warnzeile füllen (aus Display.ShowRows; nur außerhalb des Kampfes): ohne Klick-Aktion
-function Supply.FillRow(r, e, st)
-    Display.SetRowLines(r, false)
-    Display.SetRowAction(r, nil)
-    Display.SetRowStatus(r, e.noAmmo and "missing" or "low")
+---------------------------------------------------------------------------
+-- Vorräte mit Ortsbezug ("bis zur nächsten Stadt") und kritischer Grenze
+--   Linksklick auf eine Vorratszeile (Reagenz oder Vorrat) außerhalb eines Ruhebereichs stellt den
+--   Eintrag zurück: cdb.supplySnooze[key] = true (pro Charakter). Die Zeile verschwindet (im Kampf
+--   erst danach). Aufgehoben für alle Einträge im Ruhebereich (IsResting), bei offenem Händler oder
+--   offener Bank; wieder erscheinende Einträge meldet eine gemeinsame Chatzeile (Supply.Unsnooze),
+--   ohne Einzelmeldung und Ton (Supply.returning). Im Ruhebereich / bei Händler oder Bank tut der
+--   Linksklick (noch) nichts.
+--   Kritische Grenze pro Eintrag (cdb.supplyCritical[key]; Standard Munition 50, Seelensplitter 1,
+--   sonst 0 = aus; immer < Mindestmenge): darunter gilt die Zurückstellung nicht.
+--   Munition im Kampf: sichtbare Zeile zählt live mit (Display.TickSupplies); fällt sie unter die
+--   kritische Grenze, einmal eine rote Meldung in der Bildschirmmitte + Warnton (Supply.AmmoAlert).
+---------------------------------------------------------------------------
+Supply.returning = {}   -- Key -> true: kommt nach Aufheben der Zurückstellung wieder (keine Einzelmeldung)
+Supply.EVENTS = {
+    PLAYER_UPDATE_RESTING = true, MERCHANT_SHOW = true, MERCHANT_CLOSED = true,
+    BANKFRAME_OPENED = true, BANKFRAME_CLOSED = true,
+    PLAYER_INTERACTION_MANAGER_FRAME_SHOW = true, PLAYER_INTERACTION_MANAGER_FRAME_HIDE = true,
+}
+
+function Supply.IsSupply(e)
+    return e ~= nil and (e.kind == "reagent" or e.kind == "supply")
+end
+
+function Supply.Resting()
+    if type(IsResting) ~= "function" then return false end
+    local ok, r = pcall(IsResting)
+    return ok and not IsSecret(r) and r == true
+end
+
+-- Ruhebereich oder Händler/Bank offen: hier wird aufgefüllt statt zurückgestellt
+function Supply.InTown()
+    return Supply.atVendor == true or Supply.Resting()
+end
+
+function Supply.CriticalDefault(e)
+    if e.supplyType == "ammo" then return 50 end
+    if e.supplyType == "shards" then return 1 end
+    return 0
+end
+
+-- Kritische Grenze (0 = aus), höchstens Mindestmenge - 1
+function Supply.Critical(e)
+    local v = cdb and cdb.supplyCritical[e.key]
+    if v == nil then v = Supply.CriticalDefault(e) end
+    v = math.floor(tonumber(v) or 0)
+    return math.max(0, math.min(v, Supply.Threshold(e) - 1))
+end
+
+function Supply.SetCritical(e, n)
+    cdb.supplyCritical[e.key] = math.max(0, math.min(math.floor(n), Supply.Threshold(e) - 1))
+end
+
+function Supply.BelowCritical(e)
+    local c = Supply.Critical(e)
+    return c > 0 and (e.count or 0) < c
+end
+
+-- Zeile ausblenden? (zurückgestellt und nicht unter der kritischen Grenze)
+function Supply.Hidden(e)
+    return Supply.IsSupply(e) and cdb.supplySnooze[e.key] == true and not Supply.BelowCritical(e)
+end
+
+-- Neue Zeile ohne Chatzeile und Ton? (zurückgestellt bzw. gerade aus der Zurückstellung zurück)
+function Supply.Quiet(e)
+    if not Supply.IsSupply(e) then return false end
+    if Supply.returning[e.key] then
+        Supply.returning[e.key] = nil
+        return true
+    end
+    return cdb.supplySnooze[e.key] == true
+end
+
+-- Linksklick (PostClick, Aktionsphase): außerhalb der Stadt zurückstellen; in der Stadt nichts
+function Supply.OnClick(e)
+    if Supply.InTown() then return end
+    cdb.supplySnooze[e.key] = true
+    if not InCombatLockdown() then Evaluate() end   -- im Kampf wirkt es nach dem Kampf
+end
+
+-- Zurückstellung für alle aufheben; wieder fällige Einträge in einer Chatzeile melden
+function Supply.Unsnooze()
+    if not (ready and cdb and next(cdb.supplySnooze)) then return end
+    local parts = {}
+    for _, e in ipairs(entries) do
+        if cdb.supplySnooze[e.key] and Supply.IsSupply(e) and not shownKeys[e.key] and knownCache[e.key]
+            and IsEnabled(e) and not MuteRemaining(e.key) and CheckMissing(e) == true then
+            Supply.returning[e.key] = true
+            parts[#parts + 1] = e.noAmmo and L.SUPPLY_NOAMMO
+                or ("%s %d/%d"):format(EntryLabel(e), e.count or 0, Supply.Threshold(e))
+        end
+    end
+    wipe(cdb.supplySnooze)
+    if #parts > 0 then Print(L.SUPPLY_BACK:format(table.concat(parts, ", "))) end
+end
+
+-- PLAYER_LOGIN: Ruhebereich-, Händler- und Bank-Events (reg = SafeRegisterEvent)
+function Supply.RegisterEvents(frame, reg)
+    for event in pairs(Supply.EVENTS) do reg(frame, event) end
+end
+
+-- Ruhebereich betreten/verlassen, Händler/Bank geöffnet/geschlossen (danach Evaluate)
+function Supply.OnEvent(event, kind)
+    if event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" or event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
+        local t = Enum and Enum.PlayerInteractionType
+        if type(t) ~= "table" or type(kind) ~= "number" or IsSecret(kind)
+            or (kind ~= t.Merchant and kind ~= t.Banker) then
+            return
+        end
+        event = event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and "MERCHANT_SHOW" or "MERCHANT_CLOSED"
+    end
+    if event == "MERCHANT_SHOW" or event == "BANKFRAME_OPENED" then
+        Supply.atVendor = true
+        Supply.Unsnooze()
+    elseif event == "MERCHANT_CLOSED" or event == "BANKFRAME_CLOSED" then
+        Supply.atVendor = false
+    elseif Supply.Resting() then
+        Supply.Unsnooze()
+    end
+end
+
+-- Was der Linksklick gerade tut (Tooltip)
+function Supply.ClickText()
+    return Supply.InTown() and L.SUPPLY_RESTOCK or L.LEFTCLICK_SNOOZE
+end
+
+-- Text der Zeile (auch im Kampf: nur FontStrings)
+function Supply.SetRowText(r, e, st)
     if st.rightText and not e.noAmmo then
         r.text:SetText(Supply.Label(e))
         r.right:SetText(tostring(e.count or 0))
     else
         r.text:SetText(Supply.Text(e))
     end
-    Display.SetRowHint(r, e.supplyType == "ammo" and L.HINT_VENDOR or L.HINT_MUTE)
+end
+
+-- Warnzeile füllen (aus Display.ShowRows; nur außerhalb des Kampfes): keine Secure-Aktion, der
+-- Linksklick läuft über PostClick (Supply.OnClick)
+function Supply.FillRow(r, e, st)
+    Display.SetRowLines(r, false)
+    Display.SetRowAction(r, nil)
+    Display.SetRowStatus(r, e.noAmmo and "missing" or "low")
+    Supply.SetRowText(r, e, st)
+    Display.SetRowHint(r, Supply.InTown() and L.HINT_RESTOCK or L.HINT_SNOOZE)
+end
+
+-- Munition unter der kritischen Grenze: im Kampf einmal rote Meldung + Warnton; erst wieder,
+-- nachdem die Menge zwischendurch darüber lag. Außerhalb des Kampfes nur der Zustand.
+function Supply.AmmoAlert(combat)
+    local e = Supply.ammoEntry
+    if not e or not knownCache[e.key] or not IsEnabled(e) or MuteRemaining(e.key) or e.count == nil then return end
+    local crit = Supply.Critical(e)
+    if not (crit > 0 and e.count < crit) then
+        Supply.ammoAlerted = false
+        return
+    end
+    if Supply.ammoAlerted then return end
+    Supply.ammoAlerted = true
+    if not combat then return end
+    local text = L.SUPPLY_AMMO_CRITICAL:format(Supply.Label(e), e.count)
+    local f = UIErrorsFrame
+    if not (type(f) == "table" and type(f.AddMessage) == "function" and pcall(f.AddMessage, f, text, 1, 0.1, 0.1)) then
+        Print(text)
+    end
+    Sound.Play(db.sound)
 end
 
 -- GET_ITEM_INFO_RECEIVED: Name/Icon eines eigenen Items bzw. der Munition nachgeladen
@@ -4204,6 +4358,11 @@ function Display.GetRow(i)
         if button == "LeftButton" then
             -- benutzte Zeile für die Taste kurz sperren (auch im Kampf merken; nicht beim Verschieben)
             if not unlocked then Keybind.MarkUsed(self) end
+            -- Vorratszeile: bis zur nächsten Stadt zurückstellen (keine Secure-Aktion)
+            if Supply.IsSupply(self.entry) and not unlocked then
+                Supply.OnClick(self.entry)
+                return
+            end
             -- Verfolgungs-Zeile: Verfolgung einschalten (nur außerhalb des Kampfes)
             if self.entry and self.entry.kind == "tracking" and not unlocked and Tracking.Activate(self) then
                 return
@@ -4252,6 +4411,12 @@ function Display.GetRow(i)
         end
         if self.entry.kind == "pet" then
             Pet.AddTooltip(self)   -- Laune, Ernährung, Klick-Hinweise
+            GameTooltip:Show()
+            return
+        end
+        if Supply.IsSupply(self.entry) then
+            GameTooltip:AddLine(Supply.ClickText(), 0.8, 0.8, 0.8)
+            GameTooltip:AddLine(L.RIGHTCLICK, 0.8, 0.8, 0.8)
             GameTooltip:Show()
             return
         end
@@ -4319,7 +4484,7 @@ function Display.ShowRows(list, dragMode, expFrom)
         elseif e.kind == "pet" then
             r.entry = e
             Pet.FillRow(r, e)
-        elseif e.kind == "supply" then
+        elseif Supply.IsSupply(e) then
             r.entry = e
             Supply.FillRow(r, e, st)
         elseif e.groupActive then
@@ -4480,6 +4645,19 @@ function Display.TickExpiry()
         if r:IsShown() and r.expiryRow and r.entry and r.entry.expiryEnd then
             r.text:SetText(Expiry.Text(r.entry))
         end
+    end
+end
+
+-- Munition im Kampf: Text der sichtbaren Munitionszeile live aktualisieren (nur FontStrings;
+-- höchstens alle 0,2 Sek.; die Anzahl setzt Evaluate über CheckMissing)
+function Display.TickSupplies()
+    local now = GetTime()
+    if Display.supplyTick and now - Display.supplyTick < 0.2 then return end
+    Display.supplyTick = now
+    local st = Style.CurrentStyle()
+    for _, r in ipairs(rows) do
+        local e = r:IsShown() and r.entry
+        if e and e.supplyType == "ammo" then Supply.SetRowText(r, e, st) end
     end
 end
 
@@ -5391,6 +5569,8 @@ end
 function Evaluate()
     if not db or not ready then return end
     if Demo.active then return end   -- Demo-Modus: Anzeige gehört der Demo; Ende wertet neu aus
+    -- Vorräte: im Ruhebereich Zurückstellungen aufheben (Händler/Bank: per Event)
+    if Supply.Resting() then Supply.Unsnooze() end
     -- Im Kampf wird nur der Zustand aktualisiert; die Warnliste (Secure Buttons)
     -- bleibt unverändert und wird bei PLAYER_REGEN_ENABLED neu aufgebaut.
     local combat = InCombatLockdown()
@@ -5464,6 +5644,7 @@ function Evaluate()
                     end
                 elseif m == false then
                     missingSince[e.key] = nil
+                    Supply.returning[e.key] = nil
                 end
             else
                 missing[e.key] = false
@@ -5484,9 +5665,11 @@ function Evaluate()
             -- Chatmeldung, kein Ton). Da sie danach in shownKeys steht, bleibt auch die normale
             -- Warnung nach dem Aufstehen (Ess-Aura weg, kein Well Fed) ohne erneute Meldung.
             local eating = e.eatStart ~= nil
-            if missing[e.key] and (confirmed or eating) and not MuteRemaining(e.key) then
+            -- Vorräte: zurückgestellte Einträge (nicht kritisch) bis zur nächsten Stadt ausblenden;
+            -- zurückgestellte bzw. gerade zurückgekehrte ohne Chatzeile und Ton (Supply.Quiet)
+            if missing[e.key] and (confirmed or eating) and not MuteRemaining(e.key) and not Supply.Hidden(e) then
                 list[#list + 1] = e
-                if not combat and not shownKeys[e.key] and not eating then
+                if not combat and not shownKeys[e.key] and not eating and not Supply.Quiet(e) then
                     newOnes = true
                     if e.kind == "reagent" then
                         Print(L.REAGENT_CHAT:format(EntryLabel(e), e.count or 0))
@@ -5514,11 +5697,13 @@ function Evaluate()
                 end
             end
         end
+        Supply.AmmoAlert(combat)   -- Munition unter der kritischen Grenze: im Kampf rote Meldung + Ton
     end
 
     if combat then
         -- Meldung, Ton und Anzeige folgen nach dem Kampf; Restzeit vorhandener Ablauf-Zeilen läuft weiter
         Display.TickExpiry()
+        Display.TickSupplies()   -- Munition: sichtbare Zeile zählt live mit
         if RefreshConfig then RefreshConfig() end
         return
     end
@@ -5558,6 +5743,7 @@ local config
 Cfg.configRows = {}
 Cfg.reagentRows = {}       -- feste Vorrats-Zeilen (Reagenzien, Munition, Seelensplitter, Tierfutter)
 Cfg.supplyItemRows = {}    -- Item-ID -> Zeile eines eigenen Vorrats-Items (ausgeblendet nach Entfernen)
+Cfg.SUPPLY_MIN_X, Cfg.SUPPLY_CRIT_X = 216, 266   -- Felder "Min." und "Kritisch" der Vorrats-Zeilen
 
 function Cfg.FormatMute(left)
     if left == math.huge then return L.SESSION end
@@ -5662,7 +5848,7 @@ function RefreshConfig()
     local expGroup = ExpOn("expGroup")
     if config.expGroupCB then config.expGroupCB:SetChecked(expGroup) end
     config.expReagCB:SetChecked(expReag)
-    if config.reagentHint then config.reagentHint:SetAlpha(expReag and 1 or 0.5) end
+    for _, fs in ipairs(config.supplyCols or {}) do fs:SetAlpha(expReag and 1 or 0.5) end
     if config.groupCB then
         config.groupCB:SetChecked(db.groupCheck)
         Cfg.SetCheckEnabled(config.groupCB, expGroup)
@@ -5792,8 +5978,33 @@ function Cfg.MakeEntryRow(parent, e, y)
     return w
 end
 
+-- Zahlenfeld einer Vorrats-Zeile: Übernehmen bei Enter/Fokusverlust (set begrenzt), ESC verwirft
+function Cfg.MakeSupplyEdit(parent, e, letters, get, set)
+    local edit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    edit:SetSize(40, 20)
+    edit:SetAutoFocus(false)
+    edit:SetNumeric(true)
+    edit:SetMaxLetters(letters)
+    edit:SetJustifyH("CENTER")
+    edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    edit:SetScript("OnEscapePressed", function(self) self.cancel = true; self:ClearFocus() end)
+    edit:SetScript("OnEditFocusLost", function(self)
+        local n = not self.cancel and tonumber(self:GetText())
+        self.cancel = nil
+        -- entfernte eigene Items nicht mehr speichern
+        if n and (e.kind == "reagent" or Supply.items[e.item] or e.supplyType ~= "item") then
+            set(n)
+            NoteDeferred()
+            Evaluate()
+            RefreshConfig()   -- kritische Grenze folgt einer kleineren Mindestmenge
+        end
+        self:SetText(tostring(get()))
+    end)
+    return edit
+end
+
 -- Vorrats-Zeile (Reagenzien, Munition, Seelensplitter, Tierfutter, eigene Items): Icon, Name,
--- Eingabefeld für die Mindestmenge (Grenzen: Supply.Range), Anzahl in den Taschen.
+-- Felder "Min." (Grenzen: Supply.Range) und "Kritisch" (Supply.Critical), Anzahl in den Taschen.
 --   opts.check : Häkchen vorn (Tierfutter: eigener Schalter, cdb.buffs[e.key], Standard aus)
 --   opts.remove: Knopf zum Entfernen (eigene Items)
 -- list: Cfg.reagentRows (feste Zeilen) oder nil (eigene Items, Cfg.supplyItemRows)
@@ -5813,29 +6024,14 @@ function Cfg.MakeSupplyRow(parent, e, y, opts)
     w.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     w.name = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     w.name:SetPoint("LEFT", w.icon, "RIGHT", 8, 0)
-    w.name:SetWidth(opts.check and 166 or 188)
+    w.name:SetWidth(opts.check and 124 or 146)
     w.name:SetJustifyH("LEFT")
     w.name:SetWordWrap(false)
     local _, hi = Supply.Range(e)
-    w.edit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    w.edit:SetSize(40, 20)
-    w.edit:SetAutoFocus(false)
-    w.edit:SetNumeric(true)
-    w.edit:SetMaxLetters(#tostring(hi))
-    w.edit:SetJustifyH("CENTER")
-    -- Übernehmen bei Enter/Fokusverlust (auf die Grenzen begrenzt), ESC verwirft die Eingabe
-    w.edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    w.edit:SetScript("OnEscapePressed", function(self) self.cancel = true; self:ClearFocus() end)
-    w.edit:SetScript("OnEditFocusLost", function(self)
-        local n = not self.cancel and tonumber(self:GetText())
-        self.cancel = nil
-        if n and (e.kind == "reagent" or Supply.items[e.item] or e.supplyType ~= "item") then
-            Supply.SetThreshold(e, n)
-            NoteDeferred()
-            Evaluate()
-        end
-        self:SetText(tostring(Supply.Threshold(e)))
-    end)
+    w.edit = Cfg.MakeSupplyEdit(parent, e, #tostring(hi), function() return Supply.Threshold(e) end,
+        function(n) Supply.SetThreshold(e, n) end)
+    w.crit = Cfg.MakeSupplyEdit(parent, e, #tostring(hi), function() return Supply.Critical(e) end,
+        function(n) Supply.SetCritical(e, n) end)
     w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     w.status:SetJustifyH("RIGHT")
     if opts.remove then
@@ -5865,7 +6061,9 @@ function Cfg.PlaceSupplyRow(w, y)
     w.icon:ClearAllPoints()
     w.icon:SetPoint("TOPLEFT", w.check and 44 or 22, y - 2)
     w.edit:ClearAllPoints()
-    w.edit:SetPoint("TOPLEFT", 262, y - 2)
+    w.edit:SetPoint("TOPLEFT", Cfg.SUPPLY_MIN_X, y - 2)
+    w.crit:ClearAllPoints()
+    w.crit:SetPoint("TOPLEFT", Cfg.SUPPLY_CRIT_X, y - 2)
     w.status:ClearAllPoints()
     w.status:SetPoint("RIGHT", p, "TOPLEFT", w.removable and 396 or 424, y - 12)
     if w.remove then
@@ -5875,7 +6073,7 @@ function Cfg.PlaceSupplyRow(w, y)
 end
 
 function Cfg.ShowSupplyRow(w, show)
-    for _, obj in ipairs({ w.cb or false, w.icon, w.name, w.edit, w.status, w.remove or false }) do
+    for _, obj in ipairs({ w.cb or false, w.icon, w.name, w.edit, w.crit, w.status, w.remove or false }) do
         if obj then
             if show then obj:Show() else obj:Hide() end
         end
@@ -5889,6 +6087,7 @@ function Cfg.RefreshSupplyRow(w, expReag)
     w.icon:SetTexture(EntryIcon(e))
     w.name:SetText(EntryLabel(e))
     if not w.edit:HasFocus() then w.edit:SetText(tostring(Supply.Threshold(e))) end
+    if not w.crit:HasFocus() then w.crit:SetText(tostring(Supply.Critical(e))) end
     local active = expReag
     if w.cb then
         w.cb:SetChecked(cdb.buffs[e.key] == true)
@@ -5918,6 +6117,7 @@ function Cfg.RefreshSupplyRow(w, expReag)
         w.status:SetTextColor(0.5, 0.5, 0.5)
     end
     Cfg.SetEditEnabled(w.edit, expReag)
+    Cfg.SetEditEnabled(w.crit, expReag)
     if w.remove then
         if expReag then w.remove:Enable() else w.remove:Disable() end
     end
@@ -6869,20 +7069,30 @@ function Cfg.BuildSuppliesTab()
     -- Vorratswarnung (intern weiter expReagents): gemeinsame Liste aus Reagenzien der Klasse,
     -- Munition, Seelensplitter und Tierfutter; darunter eigene Items mit Feld "Item hinzufügen".
     -- Beides eingeklappt, solange der Schalter aus ist.
-    f = Cfg.NewSection("supplies", 24)
+    f = Cfg.NewSection("supplies", 52)
     config.expReagCB = Cfg.MakeBetaCheck(f, L.EXP_SUPPLIES, 16, 0, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
         RefreshConfig()
     end)
+    -- Hinweis: Linksklick auf eine Vorratswarnung = bis zur nächsten Stadt zurückstellen
+    local snoozeNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    snoozeNote:SetPoint("TOPLEFT", 44, -26)
+    snoozeNote:SetWidth(Cfg.WIDTH - 60)
+    snoozeNote:SetJustifyH("LEFT")
+    snoozeNote:SetText(L.SUPPLY_SNOOZE_NOTE)
     local function on() return ExpOn("expReagents") end
     local fixed = #reagentEntries + #Supply.classEntries
     f = Cfg.NewSection("supplies", 18 + 26 * fixed, on)
-    config.reagentHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    config.reagentHint:SetPoint("TOPRIGHT", f, "TOPLEFT", 424, -2)
-    config.reagentHint:SetJustifyH("RIGHT")
-    config.reagentHint:SetText(L.REAGENT_HINT)
+    -- Spaltenköpfe über den Feldern "Min." und "Kritisch" (0 = aus)
+    config.supplyCols = {}
+    for i, spec in ipairs({ { Cfg.SUPPLY_MIN_X, L.SUPPLY_COL_MIN }, { Cfg.SUPPLY_CRIT_X, L.SUPPLY_COL_CRIT } }) do
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOP", f, "TOPLEFT", spec[1] + 17, -2)
+        fs:SetText(spec[2])
+        config.supplyCols[i] = fs
+    end
     local y = -18
     for _, e in ipairs(reagentEntries) do
         Cfg.MakeSupplyRow(f, e, y, {})
@@ -7261,7 +7471,7 @@ Demo.ROWS = {
     { key = "flask",    item = 13510, label = "FLASK", hintItem = 13510 },                      -- Fläschchen der Titanen
     { key = "weapon",   item = 20749, label = "WEAPON_MH", plain = true, hintItem = 20749 },    -- Brillantes Zauberöl
     { key = "group",    spell = 1243, group = 3, hint = "HINT_GROUP" },                         -- Machtwort: Seelenstärke
-    { key = "reagent",  item = 17028, count = 3, hint = "HINT_MUTE" },                          -- Heilige Kerze
+    { key = "reagent",  item = 17028, count = 3, hint = "HINT_SNOOZE" },                          -- Heilige Kerze
     { key = "tracking", spell = 2580, track = true, hint = "HINT_TRACK" },                      -- Mineraliensuche
     { key = "expiry",   spell = 1126, expiry = "1:45", hint = "HINT_CAST" },                    -- Mal der Wildnis
     { key = "elixir",   item = 13452, hint = "HINT_USE" },                                      -- Elixier des Mungos
@@ -7269,8 +7479,8 @@ Demo.ROWS = {
     { key = "petmissing", spell = 883, label = "PET_MISSING", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },   -- Tier rufen
     { key = "petfeed",  spell = 6991, label = "PET_FEED", plain = true, pet = true, hintItem = 4599 },   -- Tier füttern: Gepökeltes Schinkensteak
     { key = "demon",    spell = 697, label = "PET_DEMON", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },  -- Leerwandler beschwören
-    { key = "ammo",     item = 2515, count = 57, hint = "HINT_VENDOR" },                       -- Scharfer Pfeil (Munition knapp)
-    { key = "supply",   item = 1645, count = 4, hint = "HINT_MUTE" },                          -- Mondbeerensaft (eigenes Item knapp)
+    { key = "ammo",     item = 2515, count = 57, hint = "HINT_SNOOZE" },                       -- Scharfer Pfeil (Munition knapp)
+    { key = "supply",   item = 1645, count = 4, hint = "HINT_SNOOZE" },                          -- Mondbeerensaft (eigenes Item knapp)
 }
 Demo.FOOD = {
     { id = 13931, count = 12, cat = "SpellDamage", xp = true, fav = true },
@@ -7898,6 +8108,8 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         cdb.favorites = cdb.favorites or {}       -- Item-ID -> true: Favorit (Essen/Fläschchen)
         cdb.petFavorites = cdb.petFavorites or {} -- Item-ID -> true: Tierfutter-Favorit (getrennt)
         cdb.supplies = cdb.supplies or {}         -- eigene Vorrats-Items: Item-ID -> Mindestmenge
+        cdb.supplySnooze = cdb.supplySnooze or {}     -- Vorrat-Key -> true: bis zur nächsten Stadt zurückgestellt
+        cdb.supplyCritical = cdb.supplyCritical or {} -- Vorrat-Key -> kritische Grenze
         if not Style.STYLES[db.style] then db.style = DEFAULTS.style end
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
         db.iconCache = db.iconCache or {}         -- allgemeiner Buff -> zuletzt gesehenes Aura-Icon
@@ -7991,6 +8203,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         SafeRegisterEvent(self, "UNIT_SPELLCAST_SENT")
         SafeRegisterEvent(self, "UI_ERROR_MESSAGE")
         Pet.RegisterEvents(self, SafeRegisterEvent)   -- Tier: UNIT_PET, Laune (nur Jäger)
+        Supply.RegisterEvents(self, SafeRegisterEvent)   -- Vorräte: Ruhebereich, Händler, Bank
         C_Timer.NewTicker(1, Evaluate)
         return
     end
@@ -8016,6 +8229,12 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
                 return
             end
         end
+        return
+    end
+
+    if Supply.EVENTS[event] then
+        Supply.OnEvent(event, arg1)
+        Evaluate()
         return
     end
 
@@ -8239,6 +8458,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         cdb.trackWanted = nil                     -- Verfolgung wieder automatisch
         cdb.petUnhappyOnly, cdb.petNoFoodWarn, cdb.demon = nil, nil, nil   -- Tier: Vorgaben
         cdb.ammoMin, cdb.shardMin, cdb.petFoodMin = nil, nil, nil   -- Vorräte: Standard-Mindestmengen
+        wipe(cdb.supplyCritical)                  -- Vorräte: kritische Grenzen wieder Standard
         RefreshKnown()
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)
