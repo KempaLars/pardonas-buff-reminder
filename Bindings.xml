@@ -1,8 +1,8 @@
 <Bindings>
 	<!-- Use top warning: clicks the hidden secure button PardonasBuffReminderKeyButton, which mirrors the
-	     left-click action of the topmost "missing" reminder on screen that has an action (expiry warnings
-	     and "eating" lines are skipped; no such reminder: the key does nothing). A reminder just used
-	     (by key or click) is skipped for 1.5 s; in combat items and macros (scrolls, weapon items) work once,
+	     left-click action of the topmost "missing" reminder on screen that has an action ("eating" lines
+	     are skipped); if nothing is missing, the topmost expiry warning with an action (refresh); otherwise
+	     the key does nothing. A reminder just used (by key or click) is skipped for 1.5 s; in combat items and macros (scrolls, weapon items) work once,
 	     spells can be repeated (secure wrapper on OnClick).
 	     category is the literal section title "Pardona's Addons", shared by all Pardona addons: they have
 	     no common Lua place for a global category string, so every Pardona addon uses this same text.

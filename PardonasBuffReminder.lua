@@ -3710,11 +3710,12 @@ end
 -- Tastenbelegung "Oberste Warnung auslösen" (Bindings.xml: CLICK PardonasBuffReminderKeyButton:LeftButton)
 -- Unsichtbarer Secure Button ohne Parent und ohne Maus. Außerhalb des Kampfes übernimmt er bei
 -- jeder Änderung der Liste (ShowRows) die Linksklick-Attribute der am Bildschirm obersten
--- Fehlt-Zeile mit Aktion (Zauber, Item, Makro, Verfolgung); Ablauf-Zeilen und "isst gerade"
--- werden übergangen. Keine passende Zeile oder Verschiebe-Modus: Attribute leer (Taste tut nichts).
+-- Fehlt-Zeile mit Aktion (Zauber, Item, Makro, Verfolgung); "isst gerade" wird übergangen. Gibt es
+-- keine, nimmt er die oberste Ablauf-Zeile mit Aktion (Buff auffrischen). Sonst oder im
+-- Verschiebe-Modus: Attribute leer (Taste tut nichts).
 -- Eine eben benutzte Zeile (per Taste oder Linksklick, Keybind.recent) wird 1,5 Sek. übergangen
 -- (kein doppelter Item-Verbrauch, solange Taschen/Auren nachziehen); außerhalb des Kampfes zeigt
--- die Taste sofort auf die nächste passende Fehlt-Zeile.
+-- die Taste sofort auf die nächste passende Zeile.
 -- Im Kampf bleibt die Belegung vom Kampfbeginn; ein Secure-Wrapper leert sie nach einem Item oder
 -- Makro (Einmal-Sperre), Zauber und Verfolgung bleiben wiederholbar. Nach dem Kampf belegen
 -- Evaluate und Keybind.Update (PLAYER_REGEN_ENABLED) neu. Auch per Makro: /click PardonasBuffReminderKeyButton
@@ -3813,15 +3814,21 @@ function Display.ScreenOrder(n)
     return list
 end
 
--- Oberste Fehlt-Zeile mit Aktion (keine Ablauf-Zeile, nicht "isst gerade", nicht eben benutzt); nil = keine
+-- Zeile für die Taste: zuerst die oberste Fehlt-Zeile mit Aktion (nicht "isst gerade", nicht eben
+-- benutzt); gibt es keine, die oberste Ablauf-Zeile mit Aktion (nicht eben benutzt); sonst nil
 function Keybind.PickRow(n)
     if unlocked then return nil end   -- Verschiebe-Modus
-    for _, i in ipairs(Display.ScreenOrder(n)) do
-        local r = rows[i]
-        local e, a = r and r.entry, r and r.action
-        if e and r:IsShown() and not r.expiryRow and not e.eatStart and not Keybind.IsRecent(e.key) and a
-            and (a.spell or a.item or a.macro or a.trackIndex) then
-            return r
+    local order = Display.ScreenOrder(n)
+    for pass = 1, 2 do
+        local wantExpiry = pass == 2
+        for _, i in ipairs(order) do
+            local r = rows[i]
+            local e, a = r and r.entry, r and r.action
+            if e and r:IsShown() and (r.expiryRow and true or false) == wantExpiry
+                and (wantExpiry or not e.eatStart) and not Keybind.IsRecent(e.key) and a
+                and (a.spell or a.item or a.macro or a.trackIndex) then
+                return r
+            end
         end
     end
     return nil

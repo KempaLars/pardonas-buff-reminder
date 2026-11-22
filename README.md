@@ -4,7 +4,7 @@
 
 # Pardona's Buff Reminder
 
-A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) other buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, wanted elixirs and scrolls, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items, one-click weapon stones, oils and poisons, a right-click menu to pick a buff variant, Paladin blessings in group buffs and a tracking reminder (herbs, minerals, fish). Missing buffs show up as a pulsing, movable list on screen (growing downwards or upwards) together with a chat message and an optional sound; a keybinding uses the topmost missing reminder.
+A lightweight World of Warcraft addon that reminds you when your class buffs, weapon imbues or poisons, or (optionally) other buffs such as food or flasks are missing. Experimental opt-in features add group buff checks, wanted elixirs and scrolls, low reagent warnings, warnings for buffs that are about to expire, reminders for mage and warlock conjured items, one-click weapon stones, oils and poisons, a right-click menu to pick a buff variant, Paladin blessings in group buffs and a tracking reminder (herbs, minerals, fish). Missing buffs show up as a pulsing, movable list on screen (growing downwards or upwards) together with a chat message and an optional sound; a keybinding rebuffs the most urgent reminder.
 
 Available on CurseForge and Wago.
 
@@ -67,7 +67,7 @@ Built for **WoW Forever** (Interface `16001`).
   - **Pardona** (default) – dark purple gradient, gold border with rounded corners, colored status stripe on the left (red = missing, orange = low reagent, green = eating), icon with gold frame, golden title, grey-purple hint line. Its colors, border and fonts come from the shared library LibPardona-1.0 (shared with all Pardona addons); if the library does not provide them, the addon uses its own built-in values.
   - **Classic** – stone/brown background, square gold frame, title in WoW yellow, beige hint line.
   - **Compact** – slim dark bars with a status stripe on the left and "missing" on the right; hints only in the tooltip. The extra option **Icons only** (only available with Compact) shows just the icons side by side; name and hints are in the tooltip.
-- **Keybinding (beta)** – one key for the topmost missing reminder, see [Keybinding](#keybinding-beta).
+- **Keybinding (beta)** – one key that rebuffs the most urgent reminder, see [Keybinding](#keybinding-beta).
 - **Pardona's Addons entry point (beta)** – see [below](#pardonas-addons-beta).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – English and German, picked automatically from the game client language; more languages through CurseForge, see [Localization](#localization).
@@ -104,7 +104,7 @@ Right-clicking a reminder opens one window in the selected style:
 
 ## Keybinding (beta)
 
-Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warning** you can bind a key. All Pardona addons share the "Pardona's Addons" section. Pressing the key does the same as a left-click on the topmost **missing** reminder on screen: cast the buff, eat, drink a flask, read a scroll, imbue the weapon, turn on tracking, or the group action of a group buff line. Expiry warnings and the "eating" line are skipped, as are reminders without a click action (e.g. reagent warnings). "Topmost" follows the screen: with "New warnings appear: above" the list grows upwards, so the most recently added reminder is checked first; with Compact "Icons only" the top row is checked left to right. If no buff is missing, the key does nothing (also in move mode).
+Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warning** you can bind a key. All Pardona addons share the "Pardona's Addons" section. Pressing the key does the same as a left-click on the topmost **missing** reminder on screen: cast the buff, eat, drink a flask, read a scroll, imbue the weapon, turn on tracking, or the group action of a group buff line. If nothing is missing, it refreshes the topmost buff that is about to expire (expiry warning). The "eating" line and reminders without a click action (e.g. reagent warnings) are skipped. "Topmost" follows the screen: with "New warnings appear: above" the list grows upwards, so the most recently added reminder is checked first; with Compact "Icons only" the top row is checked left to right. If there is nothing to do, the key does nothing (also in move mode).
 
 - A reminder you just used (by key or by click) is skipped for 1.5 seconds, so an item is not used twice while bags and buffs update; the key moves on to the next missing reminder right away.
 - In combat the key keeps the action it had when combat started. Items – food, flasks, elixirs, scrolls and weapon items – work only once per combat, spells can be used repeatedly. When combat ends, the key follows the list again.
