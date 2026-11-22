@@ -92,6 +92,7 @@ read_globals = {
     "PanelTemplates_SelectTab",
     "PanelTemplates_TabResize",
     "PlaySound",
+    "PlaySoundFile",
     "SetTracking",
     "tinsert",
     "UnitBuff",

@@ -582,12 +582,26 @@ for _, lines in pairs(REAGENT_SPELLS) do
     end
 end
 
-local SOUNDS = {
-    ping   = (SOUNDKIT and SOUNDKIT.TELL_MESSAGE)          or 3081,
-    glocke = (SOUNDKIT and SOUNDKIT.ALARM_CLOCK_WARNING_3) or 12889,
-    alarm  = (SOUNDKIT and SOUNDKIT.RAID_WARNING)          or 8959,
+-- Töne für neue Warnungen (db.sound): Blizzard-Töne über SOUNDKIT-Konstanten (nur angeboten,
+-- wenn der Client die Konstante kennt; die drei alten haben eine feste ID als Rückfall),
+-- "aus" = kein Ton, "lsm:<Name>" = Ton aus LibSharedMedia-3.0 (falls ein anderes Addon die Lib
+-- lädt). Fehlt ein gespeicherter Ton, klingt Bell. Abgespielt wird über den Kanal "Master".
+--   { Key (Text SOUND_<KEY>), SOUNDKIT-Name, Rückfall-ID }
+local Sound = {}
+Sound.BUILTIN = {
+    { "ping", "TELL_MESSAGE", 3081 },
+    { "glocke", "ALARM_CLOCK_WARNING_3", 12889 },
+    { "alarm", "RAID_WARNING", 8959 },
+    { "readycheck", "READY_CHECK" },
+    { "quest", "IG_QUEST_LIST_COMPLETE" },
+    { "mapping", "MAP_PING" },
+    { "coins", "LOOT_WINDOW_COIN_SOUND" },
+    { "invite", "IG_PLAYER_INVITE" },
+    { "clock", "ALARM_CLOCK_WARNING_2" },
+    { "bossemote", "RAID_BOSS_EMOTE_WARNING" },
 }
-local SOUND_ORDER = { "ping", "glocke", "alarm", "aus" }
+Sound.FALLBACK = "glocke"
+Sound.LSM_PREFIX = "lsm:"
 
 local DEFAULTS = {
     enabled      = true,
@@ -3708,9 +3722,79 @@ anchor:SetScript("OnUpdate", function(self, el)
     end
 end)
 
+-- Sound-Kit-ID eines eingebauten Tons; nil = Client kennt die Konstante nicht (und kein Rückfall)
+function Sound.KitId(key)
+    for _, def in ipairs(Sound.BUILTIN) do
+        if def[1] == key then
+            local id = type(SOUNDKIT) == "table" and SOUNDKIT[def[2]] or nil
+            if type(id) == "number" and not IsSecret(id) then return id end
+            return def[3]
+        end
+    end
+    return nil
+end
+
+-- LibSharedMedia-3.0, falls ein anderes Addon sie geladen hat (nie eingebettet)
+function Sound.LSM()
+    if not LibStub then return nil end
+    local ok, lsm = pcall(LibStub.GetLibrary, LibStub, "LibSharedMedia-3.0", true)
+    return ok and lsm or nil
+end
+
+-- Pfad eines LibSharedMedia-Tons; nil = nicht (mehr) vorhanden
+function Sound.LSMPath(name)
+    local lsm = Sound.LSM()
+    if not lsm then return nil end
+    local ok, path = pcall(lsm.Fetch, lsm, "sound", name, true)
+    if ok and (type(path) == "string" or type(path) == "number") then return path end
+    return nil
+end
+
+-- Auswahl für das Dropdown: verfügbare Blizzard-Töne, "Aus", dann LibSharedMedia-Töne
+function Sound.Options()
+    local list = {}
+    for _, def in ipairs(Sound.BUILTIN) do
+        if Sound.KitId(def[1]) then list[#list + 1] = { value = def[1], text = Cfg.ValueText("SOUND_", def[1]) } end
+    end
+    list[#list + 1] = { value = "aus", text = L.SOUND_AUS }
+    local lsm = Sound.LSM()
+    local ok, names = false, nil
+    if lsm then ok, names = pcall(lsm.List, lsm, "sound") end
+    if ok and type(names) == "table" then
+        local extra = {}
+        for _, n in ipairs(names) do
+            if type(n) == "string" and n ~= "None" then extra[#extra + 1] = n end
+        end
+        if #extra > 0 then
+            list[#list + 1] = { title = "LibSharedMedia" }
+            for _, n in ipairs(extra) do list[#list + 1] = { value = Sound.LSM_PREFIX .. n, text = n } end
+        end
+    end
+    return list
+end
+
+-- Angezeigter Name eines gespeicherten Tons
+function Sound.Label(key)
+    key = tostring(key)
+    if key:sub(1, #Sound.LSM_PREFIX) == Sound.LSM_PREFIX then return key:sub(#Sound.LSM_PREFIX + 1) end
+    return Cfg.ValueText("SOUND_", key)
+end
+
+-- Ton abspielen (Kanal "Master"); fehlender Ton -> Bell, nie ein Fehler
+function Sound.Play(key)
+    if key == "aus" then return end
+    key = tostring(key)
+    if key:sub(1, #Sound.LSM_PREFIX) == Sound.LSM_PREFIX then
+        local path = Sound.LSMPath(key:sub(#Sound.LSM_PREFIX + 1))
+        if path and type(PlaySoundFile) == "function" and pcall(PlaySoundFile, path, "Master") then return end
+        key = Sound.FALLBACK
+    end
+    local id = Sound.KitId(key) or Sound.KitId(Sound.FALLBACK)
+    if id and type(PlaySound) == "function" then pcall(PlaySound, id, "Master") end
+end
+
 local function PlayAlertSound()
-    if db.sound == "aus" then return end
-    PlaySound(SOUNDS[db.sound] or SOUNDS.ping, "Master")
+    Sound.Play(db.sound)
 end
 
 ---------------------------------------------------------------------------
@@ -5274,16 +5358,13 @@ function Cfg.BuildDisplayTab()
     -- Ton bei neuer Warnung; Auswahl spielt ihn einmal zur Probe
     config.soundDD = Cfg.MakeDropdown(p, 20, y, {
         label = L.SOUND_LABEL, width = 180,
-        options = function()
-            local list = {}
-            for _, k in ipairs(SOUND_ORDER) do list[#list + 1] = { value = k, text = Cfg.ValueText("SOUND_", k) } end
-            return list
-        end,
+        options = Sound.Options,
         get = function() return db.sound end,
         set = function(v)
             db.sound = v
-            PlayAlertSound()
+            PlayAlertSound()   -- Vorhören
         end,
+        text = function() return Sound.Label(db.sound) end,
     })
     y = y - 34
 
