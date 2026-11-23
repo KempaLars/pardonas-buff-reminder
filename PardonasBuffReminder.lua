@@ -624,6 +624,7 @@ local DEFAULTS = {
     expiryPct    = 10,          -- Warnung vor Ablauf: Restdauer <= x % der Gesamtdauer (5-50)
     expiryAlpha  = 0.5,         -- Warnung vor Ablauf: Zeilen-Transparenz (0.2-1)
     conjureThreshold = 20,      -- Magier: Warnung, wenn gezaubertes Essen/Wasser < x (0 = aus, max. 60)
+    restockAbove = false,       -- Auffüllen beim Händler: auch über Min. anbieten (alles unter "Auffüllen auf")
 }
 
 local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -4031,7 +4032,8 @@ end
 ---------------------------------------------------------------------------
 -- Auffüllen beim Händler (experimentell, Schalter expRestock; wirkt nur mit der Vorratswarnung)
 --   Zielmenge je Vorrats-Eintrag: Spalte "Auffüllen auf" (Supply.Refill; nicht für Tierfutter).
---   Passend ist ein Eintrag, wenn sein Bestand unter Min. liegt und der offene Händler genau sein
+--   Passend ist ein Eintrag, wenn sein Bestand unter Min. liegt (mit "Auch oberhalb der Mindestmenge
+--   auffüllen", db.restockAbove: unter "Auffüllen auf") und der offene Händler genau sein
 --   Item verkauft (Munition: angelegte Sorte; Reagenzien, Seelensplitter, eigene Items: Item-ID).
 --   Nie angeboten: Waren mit Sonderkosten (Marken/Items), nicht kaufbare oder ausverkaufte Waren.
 --   Das Fenster "Auffüllen" (rechts am Händlerfenster, im gewählten Stil) erscheint beim Öffnen
@@ -4121,16 +4123,19 @@ function Restock.ItemOf(e)
     return e.item
 end
 
--- Passende Einträge beim offenen Händler (Reihenfolge wie in der Vorratsliste)
+-- Passende Einträge beim offenen Händler (Reihenfolge wie in der Vorratsliste). Angeboten wird ein
+-- Eintrag unter Min., mit "Auch oberhalb der Mindestmenge auffüllen" (db.restockAbove) jeder unter
+-- "Auffüllen auf"; gekauft wird in beiden Fällen bis "Auffüllen auf".
 function Restock.Collect()
     local offers, list, seen = Restock.ReadMerchant(), {}, {}
+    local above = db.restockAbove == true
     for _, e in ipairs(entries) do
         local id = Supply.IsSupply(e) and knownCache[e.key] and IsEnabled(e) and Restock.ItemOf(e)
         local o = id and not seen[id] and offers[id]
         local count = o and Supply.Count(e)
-        if count and count < Supply.Threshold(e) then
+        local target = count and Supply.Refill(e)
+        if count and count < (above and target or Supply.Threshold(e)) then
             seen[id] = true
-            local target = Supply.Refill(e)
             local want = math.ceil((target - count) / o.bundle) * o.bundle
             if o.avail then want = math.min(want, o.avail * o.bundle) end
             if want > 0 then
@@ -4457,7 +4462,8 @@ function Restock.Open(auto)
         if not auto then Print(L.RESTOCK_NONE) end
         return
     end
-    Restock.demo, Restock.dismissed = nil, nil
+    if auto and Restock.dismissed then return end   -- selbst geschlossen: erst beim nächsten Besuch
+    Restock.demo, Restock.dismissed, Restock.shownVisit = nil, nil, true
     Restock.Show(list)
 end
 
@@ -4565,7 +4571,7 @@ function Restock.OnEvent(event, kind)
     end
     if event == "MERCHANT_SHOW" then
         if Restock.atMerchant then return end   -- beide Events eines Händlerbesuchs
-        Restock.atMerchant, Restock.dismissed = true, nil
+        Restock.atMerchant, Restock.dismissed, Restock.shownVisit = true, nil, nil
         wipe(Restock.unchecked)
         Restock.Open(true)
     elseif event == "MERCHANT_CLOSED" then
@@ -4574,8 +4580,9 @@ function Restock.OnEvent(event, kind)
         if Restock.frame and Restock.frame:IsShown() and not Restock.demo then Restock.frame:Hide() end
         wipe(Restock.unchecked)
     elseif event == "MERCHANT_UPDATE" and not (Restock.frame and Restock.frame:IsShown()) then
-        -- Händlerliste kam erst nach MERCHANT_SHOW: jetzt öffnen (nicht, wenn der Spieler schloss)
-        if Restock.atMerchant and not Restock.dismissed then Restock.Open(true) end
+        -- Händlerliste kam erst nach MERCHANT_SHOW: jetzt öffnen – nur, wenn das Fenster bei diesem
+        -- Besuch noch nicht offen war (nie wieder öffnen, nachdem es geschlossen wurde)
+        if Restock.atMerchant and not Restock.dismissed and not Restock.shownVisit then Restock.Open(true) end
     elseif Supply.EVENTS[event] == nil then
         Restock.Refresh()
     end
@@ -6703,6 +6710,8 @@ function RefreshConfig()
     local expRestock = ExpOn("expRestock")
     config.restockCB:SetChecked(expRestock)
     Cfg.SetCheckEnabled(config.restockCB, expReag)
+    config.restockAboveCB:SetChecked(db.restockAbove == true)
+    Cfg.SetCheckEnabled(config.restockAboveCB, expReag and expRestock)
     for i, fs in ipairs(config.supplyCols or {}) do
         local on = expReag and (i < 3 or expRestock)   -- Spalte 3 "Auffüllen auf": nur mit Auffüllen
         fs:SetAlpha(on and 1 or 0.5)
@@ -8018,7 +8027,7 @@ function Cfg.BuildSuppliesTab()
     -- Vorratswarnung (intern weiter expReagents): gemeinsame Liste aus Reagenzien der Klasse,
     -- Munition, Seelensplitter und Tierfutter; darunter eigene Items mit Feld "Item hinzufügen".
     -- Beides eingeklappt, solange der Schalter aus ist.
-    f = Cfg.NewSection("supplies", 78)
+    f = Cfg.NewSection("supplies", 102)
     config.expReagCB = Cfg.MakeBetaCheck(f, L.EXP_SUPPLIES, 16, 0, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
@@ -8034,9 +8043,25 @@ function Cfg.BuildSuppliesTab()
         Restock.Refresh()
         RefreshConfig()
     end)
+    -- Auch oberhalb der Mindestmenge auffüllen (account-weit, Standard aus): angeboten wird dann
+    -- alles unter "Auffüllen auf" statt nur unter Min.
+    config.restockAboveCB = Cfg.MakeCheck(f, L.RESTOCK_ABOVE, 64, -48, function(self)
+        db.restockAbove = self:GetChecked() and true or false
+        Restock.Refresh()
+        RefreshConfig()
+    end)
+    config.restockAboveCB:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L.RESTOCK_ABOVE, 1, 1, 1)
+        GameTooltip:AddLine(L.RESTOCK_ABOVE_TIP, 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    config.restockAboveCB:SetScript("OnLeave", function(self)
+        if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+    end)
     -- Hinweis: Linksklick auf eine Vorratswarnung = bis zur nächsten Stadt zurückstellen
     local snoozeNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    snoozeNote:SetPoint("TOPLEFT", 44, -52)
+    snoozeNote:SetPoint("TOPLEFT", 44, -76)
     snoozeNote:SetWidth(Cfg.WIDTH - 60)
     snoozeNote:SetJustifyH("LEFT")
     snoozeNote:SetText(L.SUPPLY_SNOOZE_NOTE)
