@@ -26,6 +26,7 @@ local Elixir = {}    -- Wunsch-Elixiere pro Charakter (experimentell)
 local Scroll = {}    -- Rollen (experimentell)
 local Pet = {}       -- Tier-Erinnerung: Jäger-Tier (fehlt/tot/füttern), Hexenmeister-Dämon (experimentell)
 local Supply = {}    -- Vorräte: Munition, Seelensplitter, Tierfutter, eigene Items (experimentell)
+local Restock = {}   -- Auffüllen beim Händler: Fenster "Auffüllen" (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -3881,6 +3882,25 @@ function Supply.SetCritical(e, n)
     cdb.supplyCritical[e.key] = math.max(0, math.min(math.floor(n), Supply.Threshold(e) - 1))
 end
 
+-- Zielmenge "Auffüllen auf" (Fenster "Auffüllen"; nicht für Tierfutter): cdb.supplyRefill[key],
+-- Standard doppelte Mindestmenge (Munition Restock.AMMO_TARGET); mindestens Min., höchstens
+-- Restock.MAX_TARGET
+function Supply.RefillDefault(e)
+    if e.supplyType == "ammo" then return Restock.AMMO_TARGET end
+    return Supply.Threshold(e) * 2
+end
+
+function Supply.Refill(e)
+    local v = cdb and cdb.supplyRefill[e.key]
+    if v == nil then v = Supply.RefillDefault(e) end
+    v = math.floor(tonumber(v) or 0)
+    return math.max(Supply.Threshold(e), math.min(Restock.MAX_TARGET, v))
+end
+
+function Supply.SetRefill(e, n)
+    cdb.supplyRefill[e.key] = math.max(Supply.Threshold(e), math.min(Restock.MAX_TARGET, math.floor(n)))
+end
+
 function Supply.BelowCritical(e)
     local c = Supply.Critical(e)
     return c > 0 and (e.count or 0) < c
@@ -3901,8 +3921,10 @@ function Supply.Quiet(e)
     return cdb.supplySnooze[e.key] == true
 end
 
--- Linksklick (PostClick, Aktionsphase): außerhalb der Stadt zurückstellen; in der Stadt nichts
+-- Linksklick (PostClick, Aktionsphase): Händler offen und Auffüllen an -> Fenster "Auffüllen";
+-- sonst außerhalb der Stadt zurückstellen; in der Stadt nichts
 function Supply.OnClick(e)
+    if Restock.Available() then Restock.Open(false); return end
     if Supply.InTown() then return end
     cdb.supplySnooze[e.key] = true
     if not InCombatLockdown() then Evaluate() end   -- im Kampf wirkt es nach dem Kampf
@@ -3951,6 +3973,7 @@ end
 
 -- Was der Linksklick gerade tut (Tooltip)
 function Supply.ClickText()
+    if Restock.Available() then return L.LEFTCLICK_RESTOCK end
     return Supply.InTown() and L.SUPPLY_RESTOCK or L.LEFTCLICK_SNOOZE
 end
 
@@ -3971,7 +3994,9 @@ function Supply.FillRow(r, e, st)
     Display.SetRowAction(r, nil)
     Display.SetRowStatus(r, e.noAmmo and "missing" or "low")
     Supply.SetRowText(r, e, st)
-    Display.SetRowHint(r, Supply.InTown() and L.HINT_RESTOCK or L.HINT_SNOOZE)
+    local hint = Supply.InTown() and L.HINT_RESTOCK or L.HINT_SNOOZE
+    if Restock.Available() then hint = L.HINT_RESTOCK_CLICK end
+    Display.SetRowHint(r, hint)
 end
 
 -- Munition unter der kritischen Grenze: im Kampf einmal rote Meldung + Warnton; erst wieder,
@@ -4001,6 +4026,559 @@ function Supply.OnItemInfo(id)
     Evaluate()
     if not ready then RefreshConfig() end   -- Evaluate tut vor ready nichts
     return true
+end
+
+---------------------------------------------------------------------------
+-- Auffüllen beim Händler (experimentell, Schalter expRestock; wirkt nur mit der Vorratswarnung)
+--   Zielmenge je Vorrats-Eintrag: Spalte "Auffüllen auf" (Supply.Refill; nicht für Tierfutter).
+--   Passend ist ein Eintrag, wenn sein Bestand unter Min. liegt und der offene Händler genau sein
+--   Item verkauft (Munition: angelegte Sorte; Reagenzien, Seelensplitter, eigene Items: Item-ID).
+--   Nie angeboten: Waren mit Sonderkosten (Marken/Items), nicht kaufbare oder ausverkaufte Waren.
+--   Das Fenster "Auffüllen" (rechts am Händlerfenster, im gewählten Stil) erscheint beim Öffnen
+--   eines Händlers, wenn mindestens ein Eintrag passt, und per Linksklick auf eine Vorratszeile,
+--   solange ein Händler offen ist. Je Zeile: Häkchen, Icon, Name, Bestand/Ziel, Kaufmenge, Preis.
+--   Kaufmenge = Ziel - Bestand, aufgerundet auf die Bündelgröße des Händlers; begrenzt durch den
+--   Vorrat des Händlers und den geschätzten freien Taschenplatz (Köcher/Munitionsbeutel/Seelen-
+--   beutel nur für passende Items). Gekauft wird nur per Knopf (nie automatisch, nie im Kampf),
+--   in Schritten bis zur maximalen Stapelgröße alle Restock.STEP Sek. Keine Bank (zurückgestellt).
+--   Schließt der Spieler das Fenster, öffnet es sich bis zum nächsten Händlerbesuch nicht von selbst.
+---------------------------------------------------------------------------
+Restock.STEP = 0.2            -- Abstand zwischen zwei Käufen (Sek.)
+Restock.MAX_TARGET = 9999
+Restock.AMMO_TARGET = 1000
+Restock.WIDTH, Restock.ROW_H = 420, 22
+Restock.unchecked = {}        -- Item-ID -> true: Häkchen abgewählt (bis der Händler schließt)
+Restock.EVENTS = { MERCHANT_UPDATE = true, PLAYER_MONEY = true }
+-- Demo-Fenster (Screenshots, ohne Händler): { Item-ID, Bestand, Ziel, Bündel, Preis je Bündel }
+Restock.DEMO = { { 2515, 200, 1000, 200, 100 }, { 17028, 3, 20, 1, 2500 } }
+Restock.DEMO_GOLD = 523050
+
+function Restock.On()
+    return ExpOn("expRestock") and ExpOn("expReagents")
+end
+
+-- Händler offen und Auffüllen an? (dann öffnet der Linksklick auf eine Vorratszeile das Fenster)
+function Restock.Available()
+    return Restock.atMerchant == true and Restock.On()
+end
+
+-- Zahl, die kein Secret-Wert ist, sonst nil
+function Restock.Num(v)
+    if type(v) ~= "number" or IsSecret(v) then return nil end
+    return v
+end
+
+-- Client-Funktion geschützt aufrufen (fehlt sie oder schlägt sie fehl: nil)
+function Restock.Call(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local res = { pcall(fn, ...) }
+    if not res[1] then return nil end
+    return unpack(res, 2, table.maxn(res))
+end
+
+-- Ware an Platz i des Händlers; nil = nicht lesbar oder nicht anzubieten
+function Restock.MerchantItem(i)
+    local id = Restock.Num(Restock.Call(GetMerchantItemID, i))
+    if not id then
+        local link = Restock.Call(GetMerchantItemLink, i)
+        if type(link) == "string" and not IsSecret(link) then id = tonumber(link:match("item:(%d+)")) end
+    end
+    if not id then return nil end
+    local price, bundle, avail, buyable, extended
+    local info = C_MerchantFrame and Restock.Call(C_MerchantFrame.GetItemInfo, i)
+    if type(info) == "table" and not IsSecret(info) then
+        price, bundle = Style.LibField(info, "price"), Style.LibField(info, "stackCount")
+        avail, buyable = Style.LibField(info, "numAvailable"), Style.LibField(info, "isPurchasable")
+        extended = Style.LibField(info, "hasExtendedCost")
+    else
+        local _, _, p, q, n, b, _, ext = Restock.Call(GetMerchantItemInfo, i)
+        price, bundle, avail, buyable, extended = p, q, n, b, ext
+    end
+    price, bundle, avail = Restock.Num(price), Restock.Num(bundle), Restock.Num(avail)
+    if IsSecret(buyable) or IsSecret(extended) or extended or buyable == false then return nil end
+    if not price or price <= 0 or avail == 0 then return nil end   -- avail -1 = unbegrenzt
+    bundle = (bundle and bundle >= 1) and math.floor(bundle) or 1
+    local maxStack = Restock.Num(Restock.Call(GetMerchantItemMaxStack, i))
+    return { index = i, id = id, price = price, bundle = bundle,
+        avail = (avail and avail > 0) and avail or nil, maxStack = maxStack and math.floor(maxStack) or bundle }
+end
+
+-- Angebot des offenen Händlers: Item-ID -> Ware (erste passende Stelle)
+function Restock.ReadMerchant()
+    local offers = {}
+    local n = Restock.Num(Restock.Call(GetMerchantNumItems)) or 0
+    for i = 1, math.min(n, 500) do
+        local o = Restock.MerchantItem(i)
+        if o and not offers[o.id] then offers[o.id] = o end
+    end
+    return offers
+end
+
+-- Item, das für einen Vorrats-Eintrag gekauft wird (nil: Tierfutter, keine Munition angelegt)
+function Restock.ItemOf(e)
+    if e.supplyType == "petfood" then return nil end
+    if e.supplyType == "ammo" then return Supply.AmmoItem() or nil end
+    return e.item
+end
+
+-- Passende Einträge beim offenen Händler (Reihenfolge wie in der Vorratsliste)
+function Restock.Collect()
+    local offers, list, seen = Restock.ReadMerchant(), {}, {}
+    for _, e in ipairs(entries) do
+        local id = Supply.IsSupply(e) and knownCache[e.key] and IsEnabled(e) and Restock.ItemOf(e)
+        local o = id and not seen[id] and offers[id]
+        local count = o and Supply.Count(e)
+        if count and count < Supply.Threshold(e) then
+            seen[id] = true
+            local target = Supply.Refill(e)
+            local want = math.ceil((target - count) / o.bundle) * o.bundle
+            if o.avail then want = math.min(want, o.avail * o.bundle) end
+            if want > 0 then
+                list[#list + 1] = { id = id, offer = o, count = count, target = target, want = want, qty = want,
+                    checked = not Restock.unchecked[id] }
+            end
+        end
+    end
+    return list
+end
+
+-- Stapelgröße eines Items in der Tasche (Rückfall: größte Kaufmenge beim Händler)
+function Restock.StackSize(id, offer)
+    local n = Restock.Num(Restock.Call(C_Item and C_Item.GetItemMaxStackSize, id))
+    if not n then n = Restock.Num(select(8, Restock.Call(GetItemInfo, id))) end
+    return math.max(1, math.floor(n or offer.maxStack or 1))
+end
+
+-- Taschenart eines Items (Bitmaske wie bei Taschen; 0 = keine besondere)
+function Restock.ItemFamily(id)
+    local fn = (C_Item and C_Item.GetItemFamily) or GetItemFamily
+    return Restock.Num(Restock.Call(fn, id)) or 0
+end
+
+-- Passt ein Item in eine Tasche dieser Art? (0 = normale Tasche, sonst nur passende Items)
+function Restock.Fits(bagFamily, itemFamily)
+    if bagFamily == 0 then return true end
+    if itemFamily == 0 then return false end
+    if type(bit) == "table" and type(bit.band) == "function" then return bit.band(bagFamily, itemFamily) ~= 0 end
+    return bagFamily == itemFamily
+end
+
+-- Freie Plätze je Tasche { free, family }, besondere Taschen zuerst; nil = nicht lesbar
+function Restock.FreeBags()
+    local fn = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
+    if type(fn) ~= "function" then return nil end
+    local bags = {}
+    for bag = 0, tonumber(NUM_BAG_SLOTS) or 4 do
+        local ok, n, fam = pcall(fn, bag)
+        n = ok and Restock.Num(n)
+        if n and n > 0 then
+            bags[#bags + 1] = { free = n, family = Restock.Num(fam) or 0 }
+        end
+    end
+    table.sort(bags, function(a, b) return a.family ~= 0 and b.family == 0 end)
+    return bags
+end
+
+-- Kaufmengen der angehakten Zeilen an den freien Taschenplatz anpassen (Schätzung: angebrochene
+-- Stapel + freie Plätze passender Taschen); Restock.bagShort = mindestens eine Zeile gekürzt
+function Restock.FitBags(list)
+    Restock.bagShort = false
+    for _, r in ipairs(list) do r.qty = r.want end
+    local bags = Restock.FreeBags()
+    if not bags then return end
+    for _, r in ipairs(list) do
+        if r.checked then
+            local stack, fam = Restock.StackSize(r.id, r.offer), Restock.ItemFamily(r.id)
+            local rest = r.count % stack
+            local partial = rest > 0 and (stack - rest) or 0
+            local slots = 0
+            for _, b in ipairs(bags) do
+                if Restock.Fits(b.family, fam) then slots = slots + b.free end
+            end
+            local cap = partial + slots * stack
+            if r.want > cap then
+                r.qty = math.floor(cap / r.offer.bundle) * r.offer.bundle
+                Restock.bagShort = true
+            end
+            local need = math.ceil(math.max(0, r.qty - partial) / stack)
+            for _, b in ipairs(bags) do
+                if need <= 0 then break end
+                if Restock.Fits(b.family, fam) then
+                    local take = math.min(need, b.free)
+                    b.free, need = b.free - take, need - take
+                end
+            end
+        end
+    end
+end
+
+function Restock.Cost(r)
+    return math.floor(r.offer.price * r.qty / r.offer.bundle + 0.5)
+end
+
+-- Eigenes Gold (Kupfer); nil = nicht lesbar
+function Restock.Money()
+    return Restock.Num(Restock.Call(GetMoney))
+end
+
+-- Betrag mit Münz-Symbolen (Client-Funktion), sonst "1g 2s 3c"
+function Restock.Coins(copper)
+    copper = math.max(0, math.floor(copper + 0.5))
+    local fn = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or GetCoinTextureString
+    local s = Restock.Call(fn, copper)
+    if type(s) == "string" and not IsSecret(s) and s ~= "" then return s end
+    local g, sv, c = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
+    local parts = {}
+    if g > 0 then parts[#parts + 1] = g .. "g" end
+    if sv > 0 then parts[#parts + 1] = sv .. "s" end
+    if c > 0 or #parts == 0 then parts[#parts + 1] = c .. "c" end
+    return table.concat(parts, " ")
+end
+
+-- Fenster (einmal, beim ersten Öffnen)
+function Restock.Frame()
+    local f = Restock.frame
+    if f then return f end
+    f = CreateFrame("Frame", "BuffReminderRestock", UIParent, "BackdropTemplate")
+    f:SetFrameStrata("HIGH")
+    f:SetClampedToScreen(true)
+    f:EnableMouse(true)
+    f:Hide()
+    tinsert(UISpecialFrames, "BuffReminderRestock")   -- Esc schließt
+    f.bg = f:CreateTexture(nil, "BACKGROUND")
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.title:SetJustifyH("LEFT")
+    f.seps = { f:CreateTexture(nil, "ARTWORK"), f:CreateTexture(nil, "ARTWORK") }
+    f.rows = {}
+    f.total = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.total:SetJustifyH("LEFT")
+    f.gold = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.gold:SetJustifyH("RIGHT")
+    f.note = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.note:SetJustifyH("LEFT")
+    f.note:SetTextColor(1, 0.4, 0.3)
+    f.buy = CreateFrame("Button", nil, f, "BackdropTemplate")
+    f.buy.bg = f.buy:CreateTexture(nil, "BACKGROUND")
+    f.buy:SetHighlightTexture(Style.HIGHLIGHT, "ADD")
+    f.buy.label = f.buy:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.buy.label:SetPoint("CENTER")
+    f.buy:SetScript("OnClick", function() Restock.Buy() end)
+    f.close = CreateFrame("Button", nil, f)
+    f.close:SetHighlightTexture(Style.HIGHLIGHT, "ADD")
+    f.close.label = f.close:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    f.close.label:SetPoint("CENTER")
+    f.close:SetScript("OnClick", function() f:Hide() end)
+    f:SetScript("OnHide", function()
+        if Restock.buying then Restock.Finish() end   -- Esc während des Kaufs: Rest verwerfen
+        if Restock.atMerchant and not Restock.demo then Restock.dismissed = true end
+        Restock.demo = nil
+    end)
+    Restock.frame = f
+    return f
+end
+
+-- Zeile i des Fensters (Häkchen, Icon, Name, Bestand/Ziel, Kaufmenge, Preis)
+function Restock.Row(i)
+    local f = Restock.Frame()
+    local w = f.rows[i]
+    if w then return w end
+    w = {}
+    w.cb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    w.cb:SetSize(22, 22)
+    w.cb:SetScript("OnClick", function(self) Restock.Toggle(self.itemID, self:GetChecked()) end)
+    w.icon = f:CreateTexture(nil, "ARTWORK")
+    w.icon:SetSize(18, 18)
+    w.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    w.name = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.name:SetJustifyH("LEFT")
+    w.name:SetWordWrap(false)
+    w.name:SetWidth(120)
+    w.have = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.have:SetJustifyH("RIGHT")
+    w.qty = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.qty:SetJustifyH("RIGHT")
+    w.price = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.price:SetJustifyH("RIGHT")
+    f.rows[i] = w
+    return w
+end
+
+function Restock.ShowRow(w, show)
+    for _, obj in ipairs({ w.cb, w.icon, w.name, w.have, w.qty, w.price }) do
+        if show then obj:Show() else obj:Hide() end
+    end
+end
+
+-- Häkchen einer Zeile geändert: Mengen, Summe und Knopf neu
+function Restock.Toggle(id, on)
+    if not id then return end
+    if Restock.demo then
+        for _, r in ipairs(Restock.list or {}) do
+            if r.id == id then r.checked = on and true or false end
+        end
+        Restock.Show(Restock.list, Restock.pos)
+        return
+    end
+    Restock.unchecked[id] = (not on) or nil
+    Restock.Refresh()
+end
+
+function Restock.Separator(t, ms, pad, y)
+    local c = ms.sepColor
+    t:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
+    t:SetHeight(1)
+    t:ClearAllPoints()
+    t:SetPoint("TOPLEFT", pad, y)
+    t:SetPoint("TOPRIGHT", -pad, y)
+end
+
+-- Fenster mit den Zeilen aus list aufbauen und zeigen; pos = { x, y } (Demo: links oben in
+-- Parent-Koordinaten), sonst rechts am Händlerfenster
+function Restock.Show(list, pos)
+    local f = Restock.Frame()
+    local st = Style.CurrentStyle()
+    local ms = st.menu
+    local demo = Restock.demo
+    local pad, width = ms.pad + st.inset, Restock.WIDTH
+    local inner = width - 2 * pad
+    if not demo then Restock.FitBags(list) end
+    Restock.list, Restock.pos = list, pos
+    Style.StyleFrame(f, st, f.bg)
+
+    local y = -pad
+    Style.SetFont(f.title, st.titleFont)
+    Style.SetColor(f.title, "SetTextColor", st.titleColor)
+    f.title:ClearAllPoints()
+    f.title:SetPoint("TOPLEFT", pad, y)
+    f.title:SetText(L.RESTOCK_TITLE)
+    y = y - 18
+    Restock.Separator(f.seps[1], ms, pad, y)
+    y = y - ms.gap
+
+    local total = 0
+    for i, r in ipairs(list) do
+        local w = Restock.Row(i)
+        w.cb:ClearAllPoints()
+        w.cb:SetPoint("TOPLEFT", pad - 3, y + 1)
+        w.cb.itemID = r.id
+        w.cb:SetChecked(r.checked)
+        w.icon:ClearAllPoints()
+        w.icon:SetPoint("TOPLEFT", pad + 22, y - 2)
+        w.icon:SetTexture(ItemIcon(r.id) or FALLBACK_ICON)
+        w.icon:SetDesaturated(not r.checked)
+        w.name:ClearAllPoints()
+        w.name:SetPoint("LEFT", w.icon, "RIGHT", 6, 0)
+        w.name:SetText(ItemName(r.id))
+        w.have:ClearAllPoints()
+        w.have:SetPoint("RIGHT", f, "TOPLEFT", pad + 250, y - 11)
+        w.have:SetText(("%d / %d"):format(r.count, r.target))
+        w.qty:ClearAllPoints()
+        w.qty:SetPoint("RIGHT", f, "TOPLEFT", pad + 300, y - 11)
+        w.qty:SetText(("×%d"):format(r.qty))
+        w.price:ClearAllPoints()
+        w.price:SetPoint("RIGHT", f, "TOPLEFT", pad + inner, y - 11)
+        local cost = Restock.Cost(r)
+        w.price:SetText(r.qty > 0 and Restock.Coins(cost) or "–")
+        local c = r.checked and ms.textColor or ms.subColor
+        for _, fs in ipairs({ w.name, w.have, w.qty, w.price }) do Style.SetColor(fs, "SetTextColor", c) end
+        if r.checked then total = total + cost end
+        Restock.ShowRow(w, true)
+        y = y - Restock.ROW_H
+    end
+    for i = #list + 1, #f.rows do Restock.ShowRow(f.rows[i], false) end
+    y = y - 4
+    Restock.Separator(f.seps[2], ms, pad, y)
+    y = y - ms.gap
+
+    -- Summe, eigenes Gold, Hinweise (Kampf, Gold, Taschenplatz)
+    local money = demo and Restock.DEMO_GOLD or Restock.Money()
+    f.total:ClearAllPoints()
+    f.total:SetPoint("TOPLEFT", pad, y)
+    f.total:SetText(L.RESTOCK_TOTAL:format(Restock.Coins(total)))
+    Style.SetColor(f.total, "SetTextColor", ms.textColor)
+    f.gold:ClearAllPoints()
+    f.gold:SetPoint("TOPRIGHT", -pad, y)
+    f.gold:SetText(L.RESTOCK_GOLD:format(money and Restock.Coins(money) or "?"))
+    Style.SetColor(f.gold, "SetTextColor", ms.subColor)
+    y = y - 16
+    local combat = InCombatLockdown()
+    local noGold = money ~= nil and total > money
+    local notes = {}
+    if combat then notes[#notes + 1] = L.COMBAT end
+    if noGold then notes[#notes + 1] = L.RESTOCK_NO_GOLD end
+    if Restock.bagShort and not demo then notes[#notes + 1] = L.RESTOCK_NO_SPACE end
+    if #notes > 0 then
+        f.note:ClearAllPoints()
+        f.note:SetPoint("TOPLEFT", pad, y)
+        f.note:SetText(table.concat(notes, " · "))
+        f.note:Show()
+        y = y - 16
+    else
+        f.note:Hide()
+    end
+    y = y - 4
+
+    -- Knöpfe "Kaufen" und "Schließen (Esc)"
+    local canBuy = not combat and not noGold and total > 0 and not Restock.buying
+    Restock.canBuy = canBuy and not demo
+    f.buy:SetSize(inner, 22)
+    f.buy:ClearAllPoints()
+    f.buy:SetPoint("TOPLEFT", pad, y)
+    Menu.StyleButton(f.buy, ms)
+    f.buy.label:SetText(L.RESTOCK_BUY)
+    if canBuy then f.buy:Enable() else f.buy:Disable() end
+    f.buy:SetAlpha(canBuy and 1 or 0.45)
+    y = y - 22 - ms.gap
+    f.close:SetSize(inner, 16)
+    f.close:ClearAllPoints()
+    f.close:SetPoint("TOPLEFT", pad, y + 2)
+    f.close.label:SetText(L.CLOSE_ESC)
+    Style.SetColor(f.close.label, "SetTextColor", ms.subColor)
+    y = y - 16
+    f:SetSize(width, -y + pad)
+
+    f:ClearAllPoints()
+    local mf = MerchantFrame
+    if pos then
+        f:SetPoint("TOPLEFT", f:GetParent() or UIParent, "BOTTOMLEFT", pos[1], pos[2])
+    elseif type(mf) == "table" and type(mf.IsShown) == "function" and mf:IsShown() then
+        f:SetPoint("TOPLEFT", mf, "TOPRIGHT", 4, 0)
+    else
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+    f:Show()
+end
+
+-- Fenster öffnen (auto: beim Öffnen des Händlers; sonst per Linksklick mit Hinweis, wenn nichts passt)
+function Restock.Open(auto)
+    if not Restock.Available() or Demo.active then return end
+    local list = Restock.Collect()
+    if #list == 0 then
+        if not auto then Print(L.RESTOCK_NONE) end
+        return
+    end
+    Restock.demo, Restock.dismissed = nil, nil
+    Restock.Show(list)
+end
+
+-- Offenes Fenster neu bewerten (Taschen, Gold, Händler, Kampf); nichts mehr offen -> schließen
+function Restock.Refresh()
+    local f = Restock.frame
+    if not (f and f:IsShown()) or Restock.demo or Restock.buying then return end
+    if not Restock.Available() then f:Hide(); return end
+    local list = Restock.Collect()
+    if #list == 0 then f:Hide(); return end
+    Restock.Show(list)
+end
+
+-- Knopf "Kaufen": genau die angezeigten Mengen, in Schritten bis zur größten Kaufmenge des Händlers
+function Restock.Buy()
+    if Restock.buying or not Restock.canBuy or Restock.demo or type(BuyMerchantItem) ~= "function" then return end
+    if InCombatLockdown() or not Restock.Available() then return end
+    local queue = {}
+    for _, r in ipairs(Restock.list or {}) do
+        if r.checked and r.qty > 0 then
+            local o = r.offer
+            local per = math.max(o.bundle, math.floor(math.max(o.maxStack, 1) / o.bundle) * o.bundle)
+            local left = r.qty
+            while left > 0 do
+                local n = math.min(per, left)
+                queue[#queue + 1] = { row = r, n = n }
+                left = left - n
+            end
+        end
+    end
+    if #queue == 0 then return end
+    Restock.buying = { queue = queue, pos = 1, bought = {}, order = {}, cost = 0 }
+    Restock.canBuy = false
+    Restock.frame.buy:Disable()
+    Restock.frame.buy:SetAlpha(0.45)
+    Restock.Step()
+end
+
+-- Ein Kaufschritt; Händler zu, Kampf oder geänderte Händlerliste beenden den Kauf
+function Restock.Step()
+    local b = Restock.buying
+    if not b or b.done then return end
+    local q = b.queue[b.pos]
+    if not q or InCombatLockdown() or not Restock.atMerchant then Restock.Finish(); return end
+    local r = q.row
+    local o = Restock.MerchantItem(r.offer.index)
+    if not o or o.id ~= r.id or o.price ~= r.offer.price or o.bundle ~= r.offer.bundle then
+        Restock.Finish()
+        return
+    end
+    if not pcall(BuyMerchantItem, r.offer.index, q.n) then Restock.Finish(); return end
+    if not b.bought[r.id] then
+        b.bought[r.id] = 0
+        b.order[#b.order + 1] = r.id
+    end
+    b.bought[r.id] = b.bought[r.id] + q.n
+    b.cost = b.cost + r.offer.price * q.n / r.offer.bundle
+    b.pos = b.pos + 1
+    if b.queue[b.pos] then C_Timer.After(Restock.STEP, Restock.Step) else Restock.Finish() end
+end
+
+-- Kauf beendet: Ergebnis im Chat; Fenster nach dem Nachziehen der Taschen neu bewerten
+function Restock.Finish()
+    local b = Restock.buying
+    if not b or b.done then return end
+    b.done = true
+    local parts = {}
+    for _, id in ipairs(b.order) do parts[#parts + 1] = ("%s ×%d"):format(ItemName(id), b.bought[id]) end
+    if #parts > 0 then Print(L.RESTOCK_BOUGHT:format(table.concat(parts, ", "), Restock.Coins(b.cost))) end
+    C_Timer.After(1, function()
+        if Restock.buying == b then Restock.buying = nil end
+        Restock.Refresh()
+    end)
+end
+
+-- Beispielfenster mit zwei Zeilen (Demo-Modus, ohne Händler); x, y wie beim Rechtsklick-Menü
+function Restock.ShowDemo(x, y)
+    local list = {}
+    for _, d in ipairs(Restock.DEMO) do
+        local want = d[3] - d[2]
+        list[#list + 1] = { id = d[1], offer = { price = d[5], bundle = d[4] }, count = d[2], target = d[3],
+            want = want, qty = want, checked = true }
+    end
+    Restock.demo = true
+    Restock.Show(list, { x, y })
+end
+
+function Restock.HideDemo()
+    if Restock.frame and Restock.demo then Restock.frame:Hide() end
+end
+
+-- PLAYER_LOGIN: Händler-Aktualisierung und Gold (reg = SafeRegisterEvent)
+function Restock.RegisterEvents(frame, reg)
+    for event in pairs(Restock.EVENTS) do reg(frame, event) end
+end
+
+-- Händler auf/zu (auch per PLAYER_INTERACTION_MANAGER_FRAME_*), Händlerliste, Gold, Taschen, Kampf
+function Restock.OnEvent(event, kind)
+    if event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" or event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
+        local t = Enum and Enum.PlayerInteractionType
+        if type(t) ~= "table" or t.Merchant == nil or type(kind) ~= "number" or IsSecret(kind) or kind ~= t.Merchant then
+            return
+        end
+        event = event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and "MERCHANT_SHOW" or "MERCHANT_CLOSED"
+    end
+    if event == "MERCHANT_SHOW" then
+        if Restock.atMerchant then return end   -- beide Events eines Händlerbesuchs
+        Restock.atMerchant, Restock.dismissed = true, nil
+        wipe(Restock.unchecked)
+        Restock.Open(true)
+    elseif event == "MERCHANT_CLOSED" then
+        Restock.atMerchant = false
+        if Restock.buying then Restock.Finish() end
+        if Restock.frame and Restock.frame:IsShown() and not Restock.demo then Restock.frame:Hide() end
+        wipe(Restock.unchecked)
+    elseif event == "MERCHANT_UPDATE" and not (Restock.frame and Restock.frame:IsShown()) then
+        -- Händlerliste kam erst nach MERCHANT_SHOW: jetzt öffnen (nicht, wenn der Spieler schloss)
+        if Restock.atMerchant and not Restock.dismissed then Restock.Open(true) end
+    elseif Supply.EVENTS[event] == nil then
+        Restock.Refresh()
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -6016,7 +6594,8 @@ local config
 Cfg.configRows = {}
 Cfg.reagentRows = {}       -- feste Vorrats-Zeilen (Reagenzien, Munition, Seelensplitter, Tierfutter)
 Cfg.supplyItemRows = {}    -- Item-ID -> Zeile eines eigenen Vorrats-Items (ausgeblendet nach Entfernen)
-Cfg.SUPPLY_MIN_X, Cfg.SUPPLY_CRIT_X = 216, 266   -- Felder "Min." und "Kritisch" der Vorrats-Zeilen
+-- Felder "Min.", "Kritisch" und "Auffüllen auf" der Vorrats-Zeilen
+Cfg.SUPPLY_MIN_X, Cfg.SUPPLY_CRIT_X, Cfg.SUPPLY_REFILL_X = 176, 226, 276
 
 function Cfg.FormatMute(left)
     if left == math.huge then return L.SESSION end
@@ -6121,7 +6700,13 @@ function RefreshConfig()
     local expGroup = ExpOn("expGroup")
     if config.expGroupCB then config.expGroupCB:SetChecked(expGroup) end
     config.expReagCB:SetChecked(expReag)
-    for _, fs in ipairs(config.supplyCols or {}) do fs:SetAlpha(expReag and 1 or 0.5) end
+    local expRestock = ExpOn("expRestock")
+    config.restockCB:SetChecked(expRestock)
+    Cfg.SetCheckEnabled(config.restockCB, expReag)
+    for i, fs in ipairs(config.supplyCols or {}) do
+        local on = expReag and (i < 3 or expRestock)   -- Spalte 3 "Auffüllen auf": nur mit Auffüllen
+        fs:SetAlpha(on and 1 or 0.5)
+    end
     if config.groupCB then
         config.groupCB:SetChecked(db.groupCheck)
         Cfg.SetCheckEnabled(config.groupCB, expGroup)
@@ -6276,7 +6861,8 @@ function Cfg.MakeSupplyEdit(parent, e, letters, get, set)
 end
 
 -- Vorrats-Zeile (Reagenzien, Munition, Seelensplitter, Tierfutter, eigene Items): Icon, Name,
--- Felder "Min." (Grenzen: Supply.Range) und "Kritisch" (Supply.Critical), Anzahl in den Taschen.
+-- Felder "Min." (Grenzen: Supply.Range), "Kritisch" (Supply.Critical) und "Auffüllen auf"
+-- (Supply.Refill; nicht bei Tierfutter), Anzahl in den Taschen.
 --   opts.check : Häkchen vorn (Tierfutter: eigener Schalter, cdb.buffs[e.key], Standard aus)
 --   opts.remove: Knopf zum Entfernen (eigene Items)
 -- list: Cfg.reagentRows (feste Zeilen) oder nil (eigene Items, Cfg.supplyItemRows)
@@ -6296,7 +6882,7 @@ function Cfg.MakeSupplyRow(parent, e, y, opts)
     w.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     w.name = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     w.name:SetPoint("LEFT", w.icon, "RIGHT", 8, 0)
-    w.name:SetWidth(opts.check and 124 or 146)
+    w.name:SetWidth(opts.check and 98 or 120)
     w.name:SetJustifyH("LEFT")
     w.name:SetWordWrap(false)
     local _, hi = Supply.Range(e)
@@ -6304,6 +6890,10 @@ function Cfg.MakeSupplyRow(parent, e, y, opts)
         function(n) Supply.SetThreshold(e, n) end)
     w.crit = Cfg.MakeSupplyEdit(parent, e, #tostring(hi), function() return Supply.Critical(e) end,
         function(n) Supply.SetCritical(e, n) end)
+    if e.supplyType ~= "petfood" then
+        w.refill = Cfg.MakeSupplyEdit(parent, e, #tostring(Restock.MAX_TARGET), function() return Supply.Refill(e) end,
+            function(n) Supply.SetRefill(e, n) end)
+    end
     w.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     w.status:SetJustifyH("RIGHT")
     if opts.remove then
@@ -6336,6 +6926,10 @@ function Cfg.PlaceSupplyRow(w, y)
     w.edit:SetPoint("TOPLEFT", Cfg.SUPPLY_MIN_X, y - 2)
     w.crit:ClearAllPoints()
     w.crit:SetPoint("TOPLEFT", Cfg.SUPPLY_CRIT_X, y - 2)
+    if w.refill then
+        w.refill:ClearAllPoints()
+        w.refill:SetPoint("TOPLEFT", Cfg.SUPPLY_REFILL_X, y - 2)
+    end
     w.status:ClearAllPoints()
     w.status:SetPoint("RIGHT", p, "TOPLEFT", w.removable and 396 or 424, y - 12)
     if w.remove then
@@ -6345,7 +6939,7 @@ function Cfg.PlaceSupplyRow(w, y)
 end
 
 function Cfg.ShowSupplyRow(w, show)
-    for _, obj in ipairs({ w.cb or false, w.icon, w.name, w.edit, w.crit, w.status, w.remove or false }) do
+    for _, obj in ipairs({ w.cb or false, w.icon, w.name, w.edit, w.crit, w.refill or false, w.status, w.remove or false }) do
         if obj then
             if show then obj:Show() else obj:Hide() end
         end
@@ -6360,6 +6954,10 @@ function Cfg.RefreshSupplyRow(w, expReag)
     w.name:SetText(EntryLabel(e))
     if not w.edit:HasFocus() then w.edit:SetText(tostring(Supply.Threshold(e))) end
     if not w.crit:HasFocus() then w.crit:SetText(tostring(Supply.Critical(e))) end
+    if w.refill then
+        if not w.refill:HasFocus() then w.refill:SetText(tostring(Supply.Refill(e))) end
+        Cfg.SetEditEnabled(w.refill, expReag and ExpOn("expRestock"))   -- nur mit "Auffüllen beim Händler"
+    end
     local active = expReag
     if w.cb then
         w.cb:SetChecked(cdb.buffs[e.key] == true)
@@ -7420,25 +8018,35 @@ function Cfg.BuildSuppliesTab()
     -- Vorratswarnung (intern weiter expReagents): gemeinsame Liste aus Reagenzien der Klasse,
     -- Munition, Seelensplitter und Tierfutter; darunter eigene Items mit Feld "Item hinzufügen".
     -- Beides eingeklappt, solange der Schalter aus ist.
-    f = Cfg.NewSection("supplies", 52)
+    f = Cfg.NewSection("supplies", 78)
     config.expReagCB = Cfg.MakeBetaCheck(f, L.EXP_SUPPLIES, 16, 0, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
+        Restock.Refresh()
+        RefreshConfig()
+    end)
+    -- Auffüllen beim Händler (eigener Schalter; nur wirksam mit der Vorratswarnung)
+    config.restockCB = Cfg.MakeBetaCheck(f, L.EXP_RESTOCK, 40, -24, function(self)
+        db.expRestock = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()   -- Hinweis der Vorratszeilen beim Händler
+        Restock.Refresh()
         RefreshConfig()
     end)
     -- Hinweis: Linksklick auf eine Vorratswarnung = bis zur nächsten Stadt zurückstellen
     local snoozeNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    snoozeNote:SetPoint("TOPLEFT", 44, -26)
+    snoozeNote:SetPoint("TOPLEFT", 44, -52)
     snoozeNote:SetWidth(Cfg.WIDTH - 60)
     snoozeNote:SetJustifyH("LEFT")
     snoozeNote:SetText(L.SUPPLY_SNOOZE_NOTE)
     local function on() return ExpOn("expReagents") end
     local fixed = #reagentEntries + #Supply.classEntries
     f = Cfg.NewSection("supplies", 18 + 26 * fixed, on)
-    -- Spaltenköpfe über den Feldern "Min." und "Kritisch" (0 = aus)
+    -- Spaltenköpfe über den Feldern "Min.", "Kritisch" (0 = aus) und "Auffüllen auf"
     config.supplyCols = {}
-    for i, spec in ipairs({ { Cfg.SUPPLY_MIN_X, L.SUPPLY_COL_MIN }, { Cfg.SUPPLY_CRIT_X, L.SUPPLY_COL_CRIT } }) do
+    for i, spec in ipairs({ { Cfg.SUPPLY_MIN_X, L.SUPPLY_COL_MIN }, { Cfg.SUPPLY_CRIT_X, L.SUPPLY_COL_CRIT },
+        { Cfg.SUPPLY_REFILL_X, L.SUPPLY_COL_REFILL } }) do
         local fs = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         fs:SetPoint("TOP", f, "TOPLEFT", spec[1] + 17, -2)
         fs:SetText(spec[2])
@@ -7830,7 +8438,7 @@ Demo.ROWS = {
     { key = "petmissing", spell = 883, label = "PET_MISSING", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },   -- Tier rufen
     { key = "petfeed",  spell = 6991, label = "PET_FEED", plain = true, pet = true, hintItem = 4599 },   -- Tier füttern: Gepökeltes Schinkensteak
     { key = "demon",    spell = 697, label = "PET_DEMON", plain = true, pet = true, hint = "HINT_CAST_CHOOSE" },  -- Leerwandler beschwören
-    { key = "ammo",     item = 2515, count = 57, hint = "HINT_SNOOZE" },                       -- Scharfer Pfeil (Munition knapp)
+    { key = "ammo",     item = 2515, count = 57, hint = "HINT_SNOOZE", menu = "restock" },     -- Scharfer Pfeil (Munition knapp; Motiv "Auffüllen")
     { key = "supply",   item = 1645, count = 4, hint = "HINT_SNOOZE" },                          -- Mondbeerensaft (eigenes Item knapp)
 }
 Demo.FOOD = {
@@ -7846,7 +8454,7 @@ Demo.SHOT_STYLES = {        -- { Stil, Nur Icons, Name im Dateinamen }
     { "pardona", false, "pardona" }, { "classic", false, "classic" },
     { "compact", false, "compact" }, { "compact", true, "compact-icons" },
 }
-Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" } }
+Demo.SHOT_MENUS = { { "list" }, { "food-menu", "food" }, { "variant-menu", "variant" }, { "restock", "restock" } }
 Demo.SETTINGS_TABS = {      -- { Tab-Key (Cfg.TAB_ORDER), Name im Dateinamen }
     { "display", "display" }, { "class", "class-buffs" }, { "pet", "pet" }, { "other", "other-buffs" },
     { "supplies", "supplies" }, { "group", "group" },
@@ -8059,6 +8667,7 @@ function Demo.Stop(quiet)
     Demo.run = nil      -- laufende Timer verfallen
     Demo.active = false
     Demo.loadCheck = nil
+    Restock.HideDemo()       -- Beispielfenster "Auffüllen" (nicht geschützt, auch im Kampf)
     Display.neutral = nil    -- Größe und Deckkraft des Spielers wieder anwenden
     Demo.Restore()
     Cfg.UpdateTabs()         -- Reiter "Tier" wieder nur für Jäger/Hexenmeister
@@ -8083,6 +8692,13 @@ function Demo.Command(sub)
         Demo.Stop()
     elseif sub == "shot" then
         Demo.StartShot()
+    elseif sub == "restock" then
+        -- Beispielfenster "Auffüllen" (zwei Zeilen, ohne Händler); erneut = schließen
+        if Restock.demo and Restock.frame:IsShown() then
+            Restock.HideDemo()
+        else
+            Demo.Start(function() Demo.OpenMenu("restock") end)
+        end
     elseif Demo.active then
         Demo.Stop()
     else
@@ -8205,6 +8821,7 @@ function Demo.BeginRun()
     Demo.ToWorld(anchor, true)
     Demo.ToWorld(menu)
     Demo.ToWorld(itemPanel)
+    Demo.ToWorld(Restock.Frame())
     Demo.RunShot(1)
 end
 
@@ -8224,6 +8841,8 @@ function Demo.OpenMenu(which)
                 local k = r:GetEffectiveScale() / menu:GetEffectiveScale()
                 menu.x, menu.y = right * k + 12, top * k
             end
+            -- Fenster "Auffüllen" (Beispiel ohne Händler) an derselben Stelle wie das Menü
+            if which == "restock" then Restock.ShowDemo(menu.x, menu.y); return end
             Menu.LayoutMenu(e)
             menu.away = 0
             menu:Show()
@@ -8259,6 +8878,7 @@ function Demo.RunShot(i)
         -- Einstellungsbilder mit sichtbarem Interface, ohne Beispielzeilen, im echten Stil
         -- (Stand vor dem Lauf), damit die Einstellungen den tatsächlichen Stand zeigen
         if menu:IsShown() then menu:Hide() end
+        Restock.HideDemo()
         Display.ShowRows({})
         if Demo.saved and (db.style ~= Demo.saved.style or db.iconsOnly ~= Demo.saved.iconsOnly) then
             db.style, db.iconsOnly = Demo.saved.style, Demo.saved.iconsOnly
@@ -8273,6 +8893,7 @@ function Demo.RunShot(i)
     end
     db.style, db.iconsOnly = s.style, s.icons
     Display.ApplyStyle()   -- schließt auch ein offenes Menü
+    Restock.HideDemo()     -- Beispielfenster "Auffüllen" nur im eigenen Motiv
     Demo.Show()
     if s.menu then Demo.OpenMenu(s.menu) end
     Demo.After(Demo.SHOT_DELAY, function() Demo.Capture(i) end)
@@ -8336,6 +8957,7 @@ function Demo.ShotFrames(s)
         if r:IsShown() then list[#list + 1] = r end
     end
     if menu:IsShown() then list[#list + 1] = menu end
+    if Restock.frame and Restock.frame:IsShown() then list[#list + 1] = Restock.frame end
     if itemPanel:IsShown() then list[#list + 1] = itemPanel end
     return list
 end
@@ -8465,6 +9087,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         cdb.supplies = cdb.supplies or {}         -- eigene Vorrats-Items: Item-ID -> Mindestmenge
         cdb.supplySnooze = cdb.supplySnooze or {}     -- Vorrat-Key -> true: bis zur nächsten Stadt zurückgestellt
         cdb.supplyCritical = cdb.supplyCritical or {} -- Vorrat-Key -> kritische Grenze
+        cdb.supplyRefill = cdb.supplyRefill or {}     -- Vorrat-Key -> Zielmenge "Auffüllen auf"
         Tracking.Migrate()                        -- frühere Einzelwahl -> cdb.trackSet
         if not Style.STYLES[db.style] then db.style = DEFAULTS.style end
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
@@ -8560,6 +9183,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         SafeRegisterEvent(self, "UI_ERROR_MESSAGE")
         Pet.RegisterEvents(self, SafeRegisterEvent)   -- Tier: UNIT_PET, Laune (nur Jäger)
         Supply.RegisterEvents(self, SafeRegisterEvent)   -- Vorräte: Ruhebereich, Händler, Bank
+        Restock.RegisterEvents(self, SafeRegisterEvent)  -- Auffüllen: Händlerliste, Gold
         C_Timer.NewTicker(1, Evaluate)
         return
     end
@@ -8600,7 +9224,13 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
 
     if Supply.EVENTS[event] then
         Supply.OnEvent(event, arg1)
+        Restock.OnEvent(event, arg1)   -- vor Evaluate: Hinweis der Vorratszeilen ("Linksklick: auffüllen")
         Evaluate()
+        return
+    end
+
+    if Restock.EVENTS[event] then
+        Restock.OnEvent(event, arg1)   -- Händlerliste, Gold
         return
     end
 
@@ -8618,11 +9248,13 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         Items.ScanBags()
         Menu.RefreshItemPanel()   -- im Kampf nicht offen; Zeilen-Attribute folgen per Evaluate nach dem Kampf
         Evaluate()
+        Restock.OnEvent(event)    -- Fenster "Auffüllen": Bestände neu
         return
     end
 
     if event == "PLAYER_REGEN_DISABLED" then
         Menu.CloseItemPanelForCombat()
+        Restock.OnEvent(event)   -- Fenster "Auffüllen": Knopf grau, Hinweis
         Demo.Abort()   -- Demo/Screenshot-Lauf sofort beenden (Zurücksetzen ggf. nach dem Kampf)
         RefreshPardonaStatus()   -- im Kampf kein Kurzstatus
         return
@@ -8690,6 +9322,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if GroupFeatureOn() then Group.groupDirty = true end
         Evaluate()
         Keybind.Update()   -- Taste neu belegen (Einmal-Sperre aus dem Kampf aufheben)
+        Restock.OnEvent(event)   -- Fenster "Auffüllen": Knopf wieder frei
         RefreshPardonaStatus()
         return
     end
@@ -8821,11 +9454,12 @@ SlashCmdList.BUFFREMINDER = function(msg)
         -- Experimental-Schalter: wieder Build-abhängig
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
         db.expVariantMenu, db.expBlessings, db.expTracking = nil, nil, nil
-        db.expElixirs, db.expScrolls, db.expPet = nil, nil, nil
+        db.expElixirs, db.expScrolls, db.expPet, db.expRestock = nil, nil, nil, nil
         cdb.trackSet = nil                        -- Verfolgungen wieder Vorgabe
         cdb.petUnhappyOnly, cdb.petNoFoodWarn, cdb.demon = nil, nil, nil   -- Tier: Vorgaben
         cdb.ammoMin, cdb.shardMin, cdb.petFoodMin = nil, nil, nil   -- Vorräte: Standard-Mindestmengen
         wipe(cdb.supplyCritical)                  -- Vorräte: kritische Grenzen wieder Standard
+        wipe(cdb.supplyRefill)                    -- Vorräte: Zielmengen "Auffüllen auf" wieder Standard
         RefreshKnown()
         ApplyDefaults(db, DEFAULTS)
         wipe(cdb.buffs)

@@ -126,6 +126,21 @@ read_globals = {
     "UnitOnTaxi",
     "WorldFrame",
     "Screenshot",
+    -- vendor restock (all calls checked at runtime)
+    "bit",
+    "BuyMerchantItem",
+    "C_CurrencyInfo",
+    "C_MerchantFrame",
+    "GetCoinTextureString",
+    "GetContainerNumFreeSlots",
+    "GetItemFamily",
+    "GetMerchantItemID",
+    "GetMerchantItemInfo",
+    "GetMerchantItemLink",
+    "GetMerchantItemMaxStack",
+    "GetMerchantNumItems",
+    "GetMoney",
+    "MerchantFrame",
     "wipe",
 }
 
