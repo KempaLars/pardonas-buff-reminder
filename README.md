@@ -118,7 +118,7 @@ Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warni
 
 ## Pardona's Addons (beta)
 
-All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one entry point, provided by the embedded library [LibPardona-1.0](https://github.com/KempaLars/lib-pardona). With several Pardona addons installed you still get only one minimap button and one settings category.
+All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one entry point, provided by the embedded library [LibPardona-1.0](https://github.com/Pardonas-addons/lib-pardona). With several Pardona addons installed you still get only one minimap button and one settings category.
 
 - **Settings** – Options → AddOns → **Pardona's Addons** → **Buff Reminder**. The overview page "Pardona's Addons" lists every installed Pardona addon with its version, a short status and an *Open* button, plus a *Show minimap button* checkbox. `/br` opens the Buff Reminder page directly. If the client has no Settings API, `/br` opens the standalone settings window instead.
 - **Addon compartment** – the entry "Pardona's Addons" in the addon compartment (next to the minimap, if the client has one) works like the minimap button.
@@ -265,7 +265,7 @@ Spell, item and tracking names as well as standard game texts come from the game
 .\tools\fetch-libs.ps1
 ```
 
-It copies the library from a sibling checkout `..\lib-pardona` if present (for local library development), otherwise it clones `https://github.com/KempaLars/lib-pardona`. It can be run any number of times; the previous copy is replaced. Changes to the library belong in the lib-pardona repository, never in `Libs/`.
+It copies the library from a sibling checkout `..\lib-pardona` if present (for local library development), otherwise it clones `https://github.com/Pardonas-addons/lib-pardona`. It can be run any number of times; the previous copy is replaced. Changes to the library belong in the lib-pardona repository, never in `Libs/`.
 
 The code is linted with [luacheck](https://github.com/lunarmodules/luacheck). The configuration is in `.luacheckrc` (Lua 5.1, the WoW API globals the addon uses, and the globals it writes). Run it locally from the repository root before committing:
 
