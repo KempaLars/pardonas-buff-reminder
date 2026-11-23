@@ -12,7 +12,12 @@
       - keys of enUS that are missing in the file are listed
 
     The script only reads Locales/enUS.lua and writes enUS.txt; it never changes other files.
-    Exit code 1 if a file contains unknown keys, otherwise 0 (missing keys are only listed).
+    Every phrase value must be one valid Lua string literal: a double quote inside a text must be
+    escaped (\") - better use single ASCII quotes ('...'), since the CurseForge import also rejects
+    typographic quotes there. A phrase line with an unescaped double quote stops the export
+    (enUS.lua) or counts as an error (other files).
+    Exit code 1 if a file contains unknown keys or invalid lines, otherwise 0 (missing keys are
+    only listed).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\export-locale-import.ps1
@@ -26,7 +31,9 @@ $repo      = Split-Path -Parent $PSScriptRoot
 $source    = Join-Path $repo 'Locales\enUS.lua'
 $importDir = Join-Path $PSScriptRoot 'locale-import'
 $utf8      = New-Object System.Text.UTF8Encoding($false)
-$phrase    = '^L\["([A-Z][A-Z0-9_]*)"\]\s*=\s*".*"\s*$'
+# value: exactly one Lua string literal (inner double quotes only escaped)
+$phrase    = '^L\["([A-Z][A-Z0-9_]*)"\]\s*=\s*"(?:[^"\\]|\\.)*"\s*$'
+$script:invalidTotal = 0
 
 function Get-PhraseKeys([string[]]$lines, [string]$name) {
     $keys = New-Object System.Collections.Generic.List[string]
@@ -37,7 +44,8 @@ function Get-PhraseKeys([string[]]$lines, [string]$name) {
         if ($line -match $phrase) {
             $keys.Add($Matches[1])
         } else {
-            Write-Warning ("{0}, line {1}: not a phrase line: {2}" -f $name, $n, $line)
+            Write-Warning ("{0}, line {1}: not a valid phrase line (unescaped quote?): {2}" -f $name, $n, $line)
+            $script:invalidTotal++
         }
     }
     return ,$keys
@@ -47,7 +55,12 @@ if (-not (Test-Path $source)) { throw "Not found: $source" }
 if (-not (Test-Path $importDir)) { New-Item -ItemType Directory -Path $importDir | Out-Null }
 
 # 1. enUS.txt from Locales/enUS.lua (only the phrase lines, in file order)
-$enLines = @([System.IO.File]::ReadAllLines($source, $utf8) | Where-Object { $_ -match $phrase })
+$srcLines = [System.IO.File]::ReadAllLines($source, $utf8)
+foreach ($line in $srcLines) {
+    # looks like a phrase line, but its value is not one valid Lua string (e.g. unescaped quote)
+    if ($line -match '^L\[' -and $line -notmatch $phrase) { throw "Invalid phrase line in enUS.lua: $line" }
+}
+$enLines = @($srcLines | Where-Object { $_ -match $phrase })
 if ($enLines.Count -eq 0) { throw "No phrases found in $source" }
 $enKeys = @{}
 foreach ($line in $enLines) {
@@ -78,5 +91,5 @@ foreach ($file in Get-ChildItem -Path $importDir -Filter '*.txt' | Sort-Object N
     $unknownTotal += $unknown.Count
 }
 
-if ($unknownTotal -gt 0) { exit 1 }
+if ($unknownTotal -gt 0 -or $script:invalidTotal -gt 0) { exit 1 }
 exit 0
