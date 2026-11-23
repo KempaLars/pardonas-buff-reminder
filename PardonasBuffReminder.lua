@@ -338,6 +338,7 @@ local CAST_DATA = {
 -- Sortierung ("beste Wahl" zuerst):
 --   1) XP-Bonus laut Tooltip, 2) Score = Kategorie-Gewicht x Kochkunst-Stufe, 3) Anzahl.
 --   Nur Items, deren benötigte Stufe <= Spielerstufe.
+--   Anderes Buff-Essen (Tooltip nennt "Well Fed") zählt ebenfalls (Items.DetectFood).
 ---------------------------------------------------------------------------
 Items.FOOD = {
     MeleeAP = { { 6290, 1 }, { 787, 50 }, { 4592, 50 }, { 8364, 175 }, { 13927, 225 }, { 13932, 250 },
@@ -780,6 +781,9 @@ Items.bagCounts = {}      -- Item-ID -> Anzahl in den Taschen (Scan bei BAG_UPDA
 Items.foodScore = {}      -- Item-ID -> Kategorie-Gewicht x Kochkunst-Stufe (Klasse des Spielers)
 Items.foodCat = {}        -- Item-ID -> FOOD-Kategorie mit dem höchsten Score (Anzeige im Menü)
 Items.xpCache = {}        -- Item-ID -> true/false: Tooltip nennt XP-Bonus (nur geladene Items)
+Items.foodWeights = {}    -- FOOD-Kategorie -> Gewicht für die Klasse des Spielers (BuildFoodScores)
+Items.foodDetect = {}     -- Item-ID -> false | { score, cat }: Buff-Essen außerhalb von FOOD (DetectFood)
+Items.foodPending = {}    -- Item-ID -> true: Daten für DetectFood angefordert, false: angekommen
 Items.flaskBySpell = {}   -- Spell-ID des Fläschchen-Effekts -> Item-ID
 local flaskEntry          -- Eintrag gen_flask (idSet wird zur Laufzeit ergänzt)
 local foodEntry           -- Eintrag gen_wellfed (eatStart = Beginn des Essens, nil = isst nicht)
@@ -873,8 +877,10 @@ function Items.BuildFoodScores(class)
         weights.Healing = math.max(weights.Healing, Items.FOOD_HEALING_MIN[class])
     end
     Items.class = class   -- auch für die Rangfolge der Waffen-Items
+    Items.foodWeights = weights
     wipe(Items.foodScore)
     wipe(Items.foodCat)
+    wipe(Items.foodDetect)
     for cat, list in pairs(Items.FOOD) do
         for _, v in ipairs(list) do
             local score = weights[cat] * v[2]
@@ -927,24 +933,116 @@ function Items.UpdateXP(level)
     Items.xpOn = on
 end
 
+-- Tooltip-Texte eines Items in Kleinbuchstaben, ein Eintrag je Zeile (links und rechts).
+-- Rückgabe: texts, complete. texts = nil: Tooltip nicht lesbar; complete = false: mindestens
+-- ein Text war ein Secret Value (fehlt in texts).
+function Items.TooltipTexts(item)
+    if not (C_TooltipInfo and C_TooltipInfo.GetItemByID) then return nil end
+    local ok, data = pcall(C_TooltipInfo.GetItemByID, item)
+    if not ok or type(data) ~= "table" or IsSecret(data) then return nil end
+    local lines = data.lines
+    if type(lines) ~= "table" or IsSecret(lines) then return nil end
+    local texts, complete = {}, true
+    for i, line in ipairs(lines) do
+        local s = ""
+        if type(line) == "table" and not IsSecret(line) then
+            for k = 1, 2 do
+                local t
+                if k == 1 then t = line.leftText else t = line.rightText end
+                if IsSecret(t) then
+                    complete = false
+                elseif type(t) == "string" then
+                    s = s .. "\n" .. t:lower()
+                end
+            end
+        else
+            complete = false
+        end
+        texts[i] = s
+    end
+    return texts, complete
+end
+
 -- Nennt der Tooltip einen XP-Bonus? (enUS "experience", deDE "Erfahrung")
 function Items.HasXPBonus(item)
     if Items.xpCache[item] ~= nil then return Items.xpCache[item] end
-    if not (C_TooltipInfo and C_TooltipInfo.GetItemByID) then return false end
-    local ok, data = pcall(C_TooltipInfo.GetItemByID, item)
-    if not ok or type(data) ~= "table" or IsSecret(data) or type(data.lines) ~= "table" then return false end
+    local texts = Items.TooltipTexts(item)
+    if not texts then return false end
     local found = false
-    for _, line in ipairs(data.lines) do
-        for _, t in ipairs({ line.leftText, line.rightText }) do
-            if type(t) == "string" and not IsSecret(t) then
-                local s = t:lower()
-                if s:find("experience", 1, true) or s:find("erfahrung", 1, true) then found = true end
-            end
-        end
+    for _, s in ipairs(texts) do
+        if s:find("experience", 1, true) or s:find("erfahrung", 1, true) then found = true end
     end
     -- nur cachen, wenn das Item geladen ist (sonst ist der Tooltip unvollständig)
     if Items.ItemLevels(item) then Items.xpCache[item] = found end
     return found
+end
+
+-- Primärwerte im Tooltip (SPELL_STAT1_NAME .. SPELL_STAT5_NAME) -> FOOD-Kategorie
+Items.FOOD_STATS = { "Strength", "Agility", "Stamina", "Intellect", "Spirit" }
+Items.FOOD_WELLFED_SPELL = 19705   -- Well Fed
+
+-- Item-Klasse Consumable / Food & Drink? nil = nicht ermittelbar
+function Items.IsFoodDrink(item)
+    local fn = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if not fn then return false end
+    local ok, _, _, _, _, _, classID, subClassID = pcall(fn, item)
+    if not ok or classID == nil or IsSecret(classID) or IsSecret(subClassID) then return nil end
+    local consumable = (Enum and Enum.ItemClass and Enum.ItemClass.Consumable) or 0
+    local sub = Enum and Enum.ItemConsumableSubclass
+    local foodSub = (sub and (sub.Fooddrink or sub.FoodDrink)) or 5
+    return classID == consumable and subClassID == foodSub
+end
+
+-- Item-Daten für DetectFood einmalig anfordern (GET_ITEM_INFO_RECEIVED / ITEM_DATA_LOAD_RESULT
+-- bewerten neu); kein erneutes Anfordern, falls der Tooltip danach noch nicht lesbar ist
+function Items.RequestFoodData(item)
+    if Items.foodPending[item] ~= nil then return end
+    Items.foodPending[item] = true
+    if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, item) end
+end
+
+-- Buff-Essen außerhalb von Items.FOOD: Food & Drink, dessen Tooltip "Well Fed" (Client-Sprache)
+-- nennt. Kategorie = Primärwert im Tooltip mit dem höchsten Gewicht der Klasse (keiner erkannt:
+-- FOOD_WEIGHT_OTHER, keine Kategorie). Score = Gewicht x (Itemstufe x 5, begrenzt auf 1-300)
+-- als Näherung für die Kochkunst-Stufe. Rückgabe/Cache (Items.foodDetect):
+-- false = kein Buff-Essen, { score, cat } = Buff-Essen, nil = noch unbekannt (später erneut).
+function Items.DetectFood(item)
+    local known = Items.foodDetect[item]
+    if known ~= nil then return known end
+    local isFood = Items.IsFoodDrink(item)
+    if isFood == false then
+        Items.foodDetect[item] = false
+        return false
+    end
+    local ilvl = Items.ItemLevels(item)
+    local texts, complete = Items.TooltipTexts(item)
+    if isFood == nil or type(ilvl) ~= "number" or not texts then
+        Items.RequestFoodData(item)
+        return nil
+    end
+    local wellFed = (SpellName(Items.FOOD_WELLFED_SPELL) or "well fed"):lower()
+    local found, weight, cat = false, nil, nil
+    for i, s in ipairs(texts) do
+        if s:find(wellFed, 1, true) then found = true end
+        if i > 1 then   -- Zeile 1 = Item-Name
+            for n, c in ipairs(Items.FOOD_STATS) do
+                local stat = _G["SPELL_STAT" .. n .. "_NAME"]
+                if type(stat) == "string" and not IsSecret(stat) and stat ~= ""
+                    and s:find(stat:lower(), 1, true) then
+                    local w = Items.foodWeights[c] or Items.FOOD_WEIGHT_OTHER
+                    if not weight or w > weight then weight, cat = w, c end
+                end
+            end
+        end
+    end
+    if not found then
+        if not complete then return nil end   -- Secret-Text: noch unbekannt
+        Items.foodDetect[item] = false
+        return false
+    end
+    local res = { score = (weight or Items.FOOD_WEIGHT_OTHER) * math.min(300, math.max(1, ilvl * 5)), cat = cat }
+    if complete then Items.foodDetect[item] = res end   -- unvollständig: später erneut lesen
+    return res
 end
 
 function Items.IsFlaskItem(item)
@@ -1000,13 +1098,18 @@ function Items.ItemChoices(e)
     if kind == "food" then
         local lvl = UnitLevel("player") or 1
         for id, n in pairs(Items.bagCounts) do
-            if Items.foodScore[id] then
+            local score, cat = Items.foodScore[id], Items.foodCat[id]
+            if not score then
+                local d = Items.DetectFood(id)   -- anderes Buff-Essen (Tooltip nennt "Well Fed")
+                if d then score, cat = d.score, d.cat end
+            end
+            if score then
                 local _, minLevel = Items.ItemLevels(id)
                 if not minLevel or minLevel <= lvl then
                     -- XP-Bonus nur, wenn Erfahrung für den Spieler zählt (Abzeichen + Bevorzugung)
                     local xp = Items.xpOn ~= false and Items.HasXPBonus(id) or false
-                    list[#list + 1] = { id = id, count = n, xp = xp, score = Items.foodScore[id],
-                        cat = Items.foodCat[id], fav = favs[id] == true }
+                    list[#list + 1] = { id = id, count = n, xp = xp, score = score,
+                        cat = cat, fav = favs[id] == true }
                 end
             end
         end
@@ -6249,6 +6352,7 @@ SafeRegisterEvent(ev, "BAG_UPDATE_DELAYED")
 SafeRegisterEvent(ev, "MINIMAP_UPDATE_TRACKING")
 SafeRegisterEvent(ev, "PLAYER_REGEN_DISABLED")
 SafeRegisterEvent(ev, "GET_ITEM_INFO_RECEIVED")
+SafeRegisterEvent(ev, "ITEM_DATA_LOAD_RESULT")   -- Item-Daten für die Essens-Erkennung
 SafeRegisterEvent(ev, "ENABLE_XP_GAIN")
 SafeRegisterEvent(ev, "DISABLE_XP_GAIN")
 SafeRegisterEvent(ev, "UPDATE_BINDINGS")   -- Tasten-Hinweis in den Einstellungen
@@ -6384,12 +6488,22 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         return
     end
 
+    if event == "ITEM_DATA_LOAD_RESULT" then
+        -- arg1 = Item-ID: Daten eines noch unbekannten Essens geladen -> Auswahl neu bewerten
+        if IsSecret(arg1) or Items.foodPending[arg1] ~= true then return end
+        Items.foodPending[arg1] = false
+        Menu.RefreshItemPanel()
+        Evaluate()
+        return
+    end
+
     if event == "GET_ITEM_INFO_RECEIVED" then
         -- arg1 = Item-ID; nur eigene Reagenzien interessieren (lokalisierter Name nachgeladen)
         -- bzw. Essen/Fläschchen in den Taschen (Name, Stufe, Tooltip jetzt verfügbar)
         if IsSecret(arg1) then return end
         if Demo.active then Demo.OnItemInfo(arg1) end   -- Demo: Vorladen fertig? Motive ergänzen
         if Eat.eatPending[arg1] then Eat.ResolveEatSpell(arg1, true) end   -- Ess-Aura jetzt ermittelbar
+        if Items.foodPending[arg1] then Items.foodPending[arg1] = false end   -- DetectFood prüft neu
         if Items.bagCounts[arg1] then
             Items.LearnItem(arg1)
             Menu.RefreshItemPanel()
