@@ -1,19 +1,30 @@
 <#
 .SYNOPSIS
     Copies the screenshots of a demo run (/br demo shot) under descriptive names, cropped to
-    the shown reminders, menus or settings window.
+    the shown reminders, menus or settings window, and writes crops.txt.
 
 .DESCRIPTION
-    The hidden demo mode of Pardona's Buff Reminder takes a series of screenshots and records
-    their order, names and crop rectangles in the SavedVariables (BuffReminderDB.demoShots).
-    This script reads that list, takes the screenshot files (WoWScrnShot_*.png) written since
-    the run started, in chronological order, and writes copies named "01-pardona-list.png",
-    "02-pardona-food-menu.png" and so on into the output folder:
+    The hidden demo mode of Pardona's Buff Reminder takes a series of screenshots from a scene
+    list with fixed IDs (S02, C04, E09 ...) and records their order, IDs, names and crop
+    rectangles in the SavedVariables (BuffReminderDB.demoShots). This script reads that list,
+    takes the screenshot files (WoWScrnShot_*.png) written since the run started, in
+    chronological order, and writes copies into the output folder:
 
-      default   cropped copy: crop rectangle plus a 32 px margin on each side (limited to the
-                image); shots without a crop rectangle are copied uncropped
-      -Full     additionally the uncropped image as "01-pardona-list-full.png"
-      -NoCrop   only uncropped copies named "01-pardona-list.png" (previous behaviour)
+      "<ID>-<name>.png"   for shots with an ID, e.g. "S08-restock-trade.png"
+      "NN-<name>.png"     for shots of older runs without an ID, e.g. "01-pardona-list.png"
+
+      default   cropped copy: crop rectangle plus a margin (-Margin, default 12 px) on each side
+                (limited to the image); shots without a crop rectangle are copied uncropped
+      -Full     additionally the uncropped image as "<base>-full.png"
+      -NoCrop   only uncropped copies (no cropping at all)
+
+    In addition the script writes crops.txt into the output folder, one line per image:
+
+        id;file;x;y;w;h;imagewidth;imageheight
+
+    id is empty for shots without an ID. x, y, w, h is the rectangle cut out of the screenshot
+    (pixels, origin top left, margin included); for uncropped copies these four fields are empty.
+    imagewidth and imageheight are the size of the original screenshot.
 
     If the number of screenshots does not match the number of recorded shots, the script warns
     and stops without writing anything. If an image size differs from the recorded screen size,
@@ -35,7 +46,8 @@
                 ["shots"] = {
                     {
                         ["n"] = 1,
-                        ["name"] = "pardona-list",
+                        ["id"] = "S02",          -- scene ID (missing in older runs)
+                        ["name"] = "mixed-list",
                         ["t"] = 1763650004,      -- Unix time of the screenshot
                         ["crop"] = {             -- optional; screen pixels, origin top left
                             ["x"] = 1210,
@@ -53,8 +65,8 @@
     The blocks are located with regular expressions and brace matching; key order inside the
     tables does not matter.
 
-    Cropping uses System.Drawing (Windows PowerShell 5.1 and PowerShell 7 on Windows); the
-    output is PNG (lossless).
+    Cropping and reading the image size use System.Drawing (Windows PowerShell 5.1 and
+    PowerShell 7 on Windows); the output is PNG (lossless).
 
 .PARAMETER WowPath
     Game folder of the client (contains WTF and Screenshots).
@@ -64,24 +76,27 @@
     written) PardonasBuffReminder.lua under WTF\Account\*\SavedVariables is used.
 
 .PARAMETER OutDir
-    Output folder for the copies. Default: <WowPath>\Screenshots\PardonasDemo
+    Output folder for the copies and crops.txt. Default: <WowPath>\Screenshots\PardonasDemo
+
+.PARAMETER Margin
+    Margin in pixels added on each side of the crop rectangle. Default: 12
 
 .PARAMETER Full
-    Also write the uncropped images as "NN-name-full.png".
+    Also write the uncropped images as "<base>-full.png".
 
 .PARAMETER NoCrop
-    Write only uncropped copies as "NN-name.png" (no cropping at all).
+    Write only uncropped copies (no cropping at all).
 
 .EXAMPLE
     .\tools\rename-demo-shots.ps1
 
     Uses the default WoW Forever folder and the most recent SavedVariables file; writes
-    cropped copies.
+    cropped copies ("S02-mixed-list.png" ...) and crops.txt.
 
 .EXAMPLE
-    .\tools\rename-demo-shots.ps1 -Full
+    .\tools\rename-demo-shots.ps1 -Full -Margin 32
 
-    Cropped copies plus the uncropped images ("01-pardona-list-full.png" ...).
+    Cropped copies with a 32 px margin plus the uncropped images ("S02-mixed-list-full.png" ...).
 
 .EXAMPLE
     .\tools\rename-demo-shots.ps1 -Account MYACCOUNT -OutDir D:\Images\BuffReminder -NoCrop
@@ -91,12 +106,13 @@ param(
     [string]$WowPath = 'C:\Program Files (x86)\World of Warcraft\_forever_',
     [string]$Account,
     [string]$OutDir,
+    [ValidateRange(0, 1000)]
+    [int]$Margin = 12,
     [switch]$Full,
     [switch]$NoCrop
 )
 
 $ErrorActionPreference = 'Stop'
-$Margin = 32
 
 if (-not $OutDir) { $OutDir = Join-Path $WowPath 'Screenshots\PardonasDemo' }
 
@@ -173,6 +189,13 @@ function Get-Number([string]$s, [string]$key) {
     return $null
 }
 
+# Value of ["key"] = "<text>" in a table text; $null if missing.
+function Get-String([string]$s, [string]$key) {
+    $m = [regex]::Match($s, '\["' + $key + '"\]\s*=\s*"([^"]*)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return $null
+}
+
 # Sub-table ["key"] = { ... } of a table text; $null if missing.
 function Get-SubTable([string]$s, [string]$key) {
     $m = [regex]::Match($s, '\["' + $key + '"\]\s*=\s*\{')
@@ -199,8 +222,9 @@ $shotsText = Get-SubTable $demo 'shots'
 if ($shotsText) {
     foreach ($entry in (Get-ChildTables $shotsText)) {
         $n = Get-Number $entry 'n'
-        $name = [regex]::Match($entry, '\["name"\]\s*=\s*"([^"]*)"')
-        if ($null -eq $n -or -not $name.Success) { continue }
+        $name = Get-String $entry 'name'
+        if ($null -eq $n -or $null -eq $name) { continue }
+        $id = Get-String $entry 'id'
         $crop = $null
         $cropText = Get-SubTable $entry 'crop'
         if ($cropText) {
@@ -210,7 +234,7 @@ if ($shotsText) {
                 $crop = [pscustomobject]@{ X = $cx; Y = $cy; W = $cw; H = $ch }
             }
         }
-        $shots += [pscustomobject]@{ N = [int]$n; Name = $name.Groups[1].Value; Crop = $crop }
+        $shots += [pscustomobject]@{ N = [int]$n; Id = $id; Name = $name; Crop = $crop }
     }
 }
 $shots = @($shots | Sort-Object N)
@@ -234,15 +258,18 @@ if ($files.Count -ne $shots.Count) {
 }
 
 if (-not (Test-Path -LiteralPath $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
-if (-not $NoCrop) { Add-Type -AssemblyName System.Drawing }
+Add-Type -AssemblyName System.Drawing
 
-# Writes the cropped copy of $source to $target. Returns $false if the rectangle is empty.
-function Save-Cropped([string]$source, [string]$target, $crop) {
+# Opens $source (via stream, so the original file is not locked or changed), returns its size
+# and - if $crop is given and $target set - writes the cropped copy to $target.
+# Returns @{ W; H; Rect } (Rect = rectangle cut out, $null if not cropped).
+function Invoke-Image([string]$source, [string]$target, $crop) {
     $stream = $null; $image = $null; $part = $null
     try {
-        # read via stream so the original file is not locked or changed
         $stream = [IO.File]::OpenRead($source)
         $image = New-Object System.Drawing.Bitmap $stream
+        $result = [pscustomobject]@{ W = $image.Width; H = $image.Height; Rect = $null }
+        if (-not $crop -or -not $target) { return $result }
         $x = $crop.X; $y = $crop.Y; $w = $crop.W; $h = $crop.H
         if ($screen -and ($image.Width -ne $screen.W -or $image.Height -ne $screen.H)) {
             Write-Warning ("{0}: image is {1} x {2}, recorded screen {3} x {4}; scaling the crop rectangle" -f `
@@ -254,11 +281,12 @@ function Save-Cropped([string]$source, [string]$target, $crop) {
         $top    = [Math]::Max(0, [int][Math]::Floor($y - $Margin))
         $right  = [Math]::Min($image.Width,  [int][Math]::Ceiling($x + $w + $Margin))
         $bottom = [Math]::Min($image.Height, [int][Math]::Ceiling($y + $h + $Margin))
-        if ($right -le $left -or $bottom -le $top) { return $false }
+        if ($right -le $left -or $bottom -le $top) { return $result }
         $rect = New-Object System.Drawing.Rectangle $left, $top, ($right - $left), ($bottom - $top)
         $part = $image.Clone($rect, $image.PixelFormat)
         $part.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
-        return $true
+        $result.Rect = $rect
+        return $result
     } finally {
         if ($part) { $part.Dispose() }
         if ($image) { $image.Dispose() }
@@ -266,26 +294,39 @@ function Save-Cropped([string]$source, [string]$target, $crop) {
     }
 }
 
+$cropLines = New-Object System.Collections.Generic.List[string]
 for ($i = 0; $i -lt $shots.Count; $i++) {
     $shot = $shots[$i]
     $source = $files[$i].FullName
-    $base = '{0:D2}-{1}' -f $shot.N, $shot.Name
-    $target = Join-Path $OutDir "$base.png"
+    if ($shot.Id) { $base = '{0}-{1}' -f $shot.Id, $shot.Name } else { $base = '{0:D2}-{1}' -f $shot.N, $shot.Name }
+    $file = "$base.png"
+    $target = Join-Path $OutDir $file
+    $info = $null
     if ($NoCrop) {
+        $info = Invoke-Image $source $null $null
         Copy-Item -LiteralPath $source -Destination $target -Force
-        Write-Host ("{0} -> {1}" -f $files[$i].Name, "$base.png")
-        continue
-    }
-    if ($shot.Crop -and (Save-Cropped $source $target $shot.Crop)) {
-        Write-Host ("{0} -> {1} (cropped)" -f $files[$i].Name, "$base.png")
+        Write-Host ("{0} -> {1}" -f $files[$i].Name, $file)
     } else {
-        if ($shot.Crop) { Write-Warning ("{0}: crop rectangle outside the image, copied uncropped" -f $base) }
-        Copy-Item -LiteralPath $source -Destination $target -Force
-        Write-Host ("{0} -> {1} (uncropped, no crop rectangle)" -f $files[$i].Name, "$base.png")
+        $info = Invoke-Image $source $target $shot.Crop
+        if ($info.Rect) {
+            Write-Host ("{0} -> {1} (cropped)" -f $files[$i].Name, $file)
+        } else {
+            if ($shot.Crop) { Write-Warning ("{0}: crop rectangle outside the image, copied uncropped" -f $base) }
+            Copy-Item -LiteralPath $source -Destination $target -Force
+            Write-Host ("{0} -> {1} (uncropped, no crop rectangle)" -f $files[$i].Name, $file)
+        }
+        if ($Full) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $OutDir "$base-full.png") -Force
+            Write-Host ("{0} -> {1}" -f $files[$i].Name, "$base-full.png")
+        }
     }
-    if ($Full) {
-        Copy-Item -LiteralPath $source -Destination (Join-Path $OutDir "$base-full.png") -Force
-        Write-Host ("{0} -> {1}" -f $files[$i].Name, "$base-full.png")
+    $r = $info.Rect
+    if ($r) {
+        $cropLines.Add(('{0};{1};{2};{3};{4};{5};{6};{7}' -f $shot.Id, $file, $r.X, $r.Y, $r.Width, $r.Height, $info.W, $info.H))
+    } else {
+        $cropLines.Add(('{0};{1};;;;;{2};{3}' -f $shot.Id, $file, $info.W, $info.H))
     }
 }
-Write-Host ("{0} shot(s) written to {1}" -f $shots.Count, $OutDir)
+$cropsFile = Join-Path $OutDir 'crops.txt'
+[IO.File]::WriteAllText($cropsFile, (($cropLines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+Write-Host ("{0} shot(s) written to {1}, crop list: {2}" -f $shots.Count, $OutDir, $cropsFile)
