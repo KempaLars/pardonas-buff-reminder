@@ -322,7 +322,7 @@ git tag 1.0.1
 git push origin 1.0.1
 ```
 
-The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck and, if it passes, uses the BigWigs packager to build the addon zip, upload it to CurseForge and Wago and create a GitHub release. The changelog is generated from the commit messages.
+The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck and, if it passes, uses the BigWigs packager to build the addon zip, upload it to CurseForge and Wago and create a GitHub release. The changelog on CurseForge and Wago comes from CHANGELOG.md.
 
 - The file is named `PardonasBuffReminder-X.Y.Z.zip`; the display name on CurseForge and Wago is just the version number (e.g. **1.0.3**). The packager replaces spaces, apostrophes and other special characters in the label with `_`, so a label like "Pardona's Buff Reminder 1.0.3" would turn into `Pardona_s_Buff_Reminder_1.0.3`.
 
