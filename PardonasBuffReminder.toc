@@ -6,6 +6,7 @@
 ## Version: @project-version@
 ## X-Curse-Project-ID: 1806185
 ## X-Wago-ID: aN0ab36j
+## X-Website: https://pardonas-addons.de/buff-reminder/
 ## SavedVariables: BuffReminderDB
 ## SavedVariablesPerCharacter: BuffReminderCharDB
 ## IconTexture: Interface\AddOns\PardonasBuffReminder\Textures\Icon

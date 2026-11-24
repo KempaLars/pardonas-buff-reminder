@@ -8,6 +8,9 @@ A lightweight World of Warcraft addon that reminds you when your class buffs, we
 
 Available on CurseForge and Wago.
 
+**Handbook:** https://pardonas-addons.de/buff-reminder/ (English) · https://pardonas-addons.de/de/buff-reminder/ (Deutsch)  
+**Changelog:** [CHANGELOG.md](CHANGELOG.md) · https://pardonas-addons.de/buff-reminder/changelog
+
 **CurseForge:** https://www.curseforge.com/wow/addons/pardonas-buff-reminder
 
 ## Compatibility
@@ -310,6 +313,8 @@ Thanks to zwrss for Paladin blessings in group buffs, the tracking reminder and 
 
 ## Releasing
 
+Before tagging, finish the changelog: rename `## Unreleased` in CHANGELOG.md to `## <version> – <YYYY-MM-DD>` and add a new empty `## Unreleased` above it. The packager uses CHANGELOG.md as the changelog on CurseForge and Wago (`manual-changelog` in `.pkgmeta`). When a stable version is released, merge the beta sections of its cycle into the stable section.
+
 Versions are not edited by hand: the version in the TOC is `@project-version@` and is filled in from the Git tag. To publish a new version, push a tag in the format `X.Y.Z`:
 
 ```sh
@@ -352,6 +357,7 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 ├── .luacheckrc                     # luacheck configuration
 ├── .pkgmeta                        # Packager configuration
 ├── Bindings.xml                    # Keybinding "Use top warning" in the "Pardona's Addons" section (loaded automatically, not listed in the TOC)
+├── CHANGELOG.md                    # Player-facing changelog, used by the packager
 ├── PardonasBuffReminder.lua        # Addon code
 ├── PardonasBuffReminder.toc        # Addon metadata
 └── README.md
