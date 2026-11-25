@@ -16,17 +16,17 @@ local Style   = {}   -- Stil-Tabelle und Gestaltungs-Helfer
 local Display = {}   -- Warnzeilen (Secure Buttons)
 local Menu    = {}   -- Rechtsklick-Menü
 local Cfg     = {}   -- Einstellungsfenster
-local Expiry  = {}   -- Warnung vor Ablauf (experimentell)
-local Conjure = {}   -- Klassen-Verbrauchsgüter: Magier-Essen/-Wasser/Manastein, Hexenmeister-Steine (experimentell)
+local Expiry  = {}   -- Warnung vor Ablauf
+local Conjure = {}   -- Klassen-Verbrauchsgüter: Magier-Essen/-Wasser/Manastein, Hexenmeister-Steine
 local Keybind = {}   -- Tastenbelegung "Oberste Warnung auslösen" (unsichtbarer Secure Button)
-local Variant = {}   -- Variantenmenü per Rechtsklick (experimentell)
+local Variant = {}   -- Variantenmenü per Rechtsklick
 local Tracking = {}  -- Minimap-Tracking (z. B. Mineraliensuche)
 local Demo = {}      -- versteckter Demo-Modus mit Screenshot-Lauf (nur mit BuffReminderDB.demo)
-local Elixir = {}    -- Wunsch-Elixiere pro Charakter (experimentell)
-local Scroll = {}    -- Rollen (experimentell)
+local Elixir = {}    -- Wunsch-Elixiere pro Charakter
+local Scroll = {}    -- Rollen
 local Pet = {}       -- Tier-Erinnerung: Jäger-Tier (fehlt/tot/füttern), Hexenmeister-Dämon (experimentell)
-local Supply = {}    -- Vorräte: Munition, Seelensplitter, Tierfutter, eigene Items (experimentell)
-local Restock = {}   -- Auffüllen beim Händler: Fenster "Auffüllen" (experimentell)
+local Supply = {}    -- Vorräte: Munition, Seelensplitter, Tierfutter, eigene Items
+local Restock = {}   -- Auffüllen beim Händler: Fenster "Auffüllen"
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -51,7 +51,7 @@ ns.Locales.Activate(ns.Locales.Client())   -- jetzt sind alle Sprachdateien gela
 --   defaultOff: standardmäßig nicht ausgewählt (situative Buffs)
 ---------------------------------------------------------------------------
 ---------------------------------------------------------------------------
--- Klassen-Verbrauchsgüter (experimentell, Schalter expConsumables)
+-- Klassen-Verbrauchsgüter (Schalter expConsumables)
 --   spells    : Zauber-Ränge aufsteigend (Erlernt-Prüfung; Linksklick zaubert den höchsten)
 --   rankItems : Item des jeweiligen Rangs (gleicher Index, nil = nicht hinterlegt);
 --               nur für Name und Icon der Zeile (Namen immer per C_Item)
@@ -201,7 +201,7 @@ local GENERAL_BUFFS = {
     { key = "gen_wellrested", general = true, defaultOff = true, label = "WELLRESTED",
       ids = { 429959 }, nameIds = { 429959 }, matchNames = { "Well-Rested", "Well Rested" },
       excludeIds = { 1225478 } },
-    -- Waffen-Items (experimentell, expWeaponItems): Steine/Öle per Klick; fehlt nur, wenn eine Waffe
+    -- Waffen-Items (Schalter expWeaponItems): Steine/Öle per Klick; fehlt nur, wenn eine Waffe
     -- im Slot steckt, keine temporäre Verzauberung aktiv ist und ein passendes Item in den Taschen
     -- liegt. Nicht für Schamanen (entfernt beim Login); bei Schurken nur, wenn der Gift-Eintrag
     -- desselben Slots aus ist (poisonEntry, beim Login gesetzt).
@@ -394,7 +394,7 @@ Items.FOOD_HEALING_MIN = { PRIEST = 0.55, PALADIN = 0.55, DRUID = 0.55, SHAMAN =
 Items.FLASK_IDS = { [13506] = true, [13510] = true, [13511] = true, [13512] = true, [13513] = true }
 
 ---------------------------------------------------------------------------
--- Waffen-Items (experimentell, Schalter expWeaponItems): Steine, Öle, Gifte
+-- Waffen-Items (Schalter expWeaponItems): Steine, Öle, Gifte
 --   Gruppen je Liste in aufsteigender Stufe (höchste Stufe = letzter Index wird bevorzugt);
 --   WEAPON_SPECIAL: nur gegen Untote (geweiht/gesegnet) -> niedrigste Stufe der Gruppe
 --   Wetzsteine nur für Klingenwaffen, Gewichtssteine nur für stumpfe Waffen, Öle/Gifte für alle;
@@ -715,11 +715,18 @@ local function PrintVersionNotice()
     end
 end
 
--- Experimentelle Funktionen (account-weit): nil = nicht vom Nutzer gesetzt →
--- in Test-Builds an, in Release-Versionen aus
+-- Freigegebene Schalter (seit 1.5.0): ohne Nutzerwert immer an, abschaltbar wie bisher
+Cfg.RELEASED_EXP = {
+    expExpiry = true, expConsumables = true, expElixirs = true, expScrolls = true,
+    expWeaponItems = true, expVariantMenu = true, expTracking = true, expReagents = true,
+    expRestock = true,
+}
+
+-- Schalter (account-weit): nil = nicht vom Nutzer gesetzt → freigegebene an, experimentelle
+-- (expPet, expGroup, expBlessings) in Test-Builds an, in Release-Versionen aus
 local function ExpOn(key)
     local v = db and db[key]
-    if v == nil then return IsTestBuild() end
+    if v == nil then return Cfg.RELEASED_EXP[key] == true or IsTestBuild() end
     return v and true or false
 end
 
@@ -1169,7 +1176,7 @@ function Items.ItemChoices(e)
 end
 
 -- Item-Art eines Eintrags für Linksklick/Menü: "food" | "flask" | "weapon" | "poison" | nil.
--- Waffen-Items und Gifte nur mit aktivem Experimental-Schalter expWeaponItems.
+-- Waffen-Items und Gifte nur mit aktivem Schalter expWeaponItems.
 function Items.KindOf(e)
     if e.weaponItems then return ExpOn("expWeaponItems") and "weapon" or nil end
     if e.poisonItems then return ExpOn("expWeaponItems") and "poison" or nil end
@@ -1239,7 +1246,7 @@ function Items.WeaponMacro(id, slot)
 end
 
 ---------------------------------------------------------------------------
--- Verfolgungs-Erinnerung (experimentell, Schalter expTracking): mehrere gewünschte Verfolgungen
+-- Verfolgungs-Erinnerung (Schalter expTracking): mehrere gewünschte Verfolgungen
 -- gleichzeitig (pro Charakter, cdb.trackSet). Erkennung zur Laufzeit über die Verfolgungsliste
 -- (C_Minimap bzw. Legacy-API). Bekannte Arten (Mineralien, Kräuter, Fische, Schätze) über
 -- Spell-ID, Zaubernamen aus dem Client oder Icon; alle übrigen Einträge der Liste (Fähigkeiten wie
@@ -1682,21 +1689,21 @@ local function RefreshKnown()
 end
 
 local function IsEnabled(e)
-    -- Reagenzien: nur mit aktivem Experimental-Schalter (sonst keine Zeile, keine Mengenprüfung)
+    -- Reagenzien: nur mit aktivem Schalter (sonst keine Zeile, keine Mengenprüfung)
     if e.kind == "reagent" then return ExpOn("expReagents") and ReagentThreshold(e.item) > 0 end
     -- Vorräte (Munition, Seelensplitter, Tierfutter, eigene Items): gleicher Schalter wie Reagenzien
     if e.kind == "supply" then return ExpOn("expReagents") and Supply.Enabled(e) end
-    -- Klassen-Verbrauchsgüter: nur mit aktivem Experimental-Schalter
+    -- Klassen-Verbrauchsgüter: nur mit aktivem Schalter
     if e.kind == "conjure" and not ExpOn("expConsumables") then return false end
-    -- Verfolgungs-Erinnerung: nur mit Experimental-Schalter (gewünschte gelernt: knownCache)
+    -- Verfolgungs-Erinnerung: nur mit Schalter (gewünschte gelernt: knownCache)
     if e.kind == "tracking" then return ExpOn("expTracking") end
-    -- Wunsch-Elixiere: nur mit Experimental-Schalter und Haken in der Liste (pro Charakter)
+    -- Wunsch-Elixiere: nur mit Schalter und Haken in der Liste (pro Charakter)
     if e.kind == "elixir" then return ExpOn("expElixirs") and cdb.elixirsWanted[e.item] == true end
-    -- Rollen: nur mit Experimental-Schalter; je Art Wahl pro Charakter, sonst Vorgabe der Klasse
+    -- Rollen: nur mit Schalter; je Art Wahl pro Charakter, sonst Vorgabe der Klasse
     if e.kind == "scroll" then return ExpOn("expScrolls") and Scroll.Enabled(e.scrollType) end
     -- Tier-Erinnerung: nur mit Experimental-Schalter; Einzelschalter (cdb.buffs) wie Klassenbuffs
     if e.kind == "pet" and not ExpOn("expPet") then return false end
-    -- Waffen-Items: nur mit Experimental-Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
+    -- Waffen-Items: nur mit Schalter; Schurke: nur, wenn der Gift-Eintrag aus ist
     if e.weaponItems then
         if not ExpOn("expWeaponItems") then return false end
         if e.poisonEntry and IsEnabled(e.poisonEntry) then return false end
@@ -1834,7 +1841,7 @@ function Variant.PrepareLabels(list)
     end
 end
 
--- Variantenmenü (experimentell, Schalter expVariantMenu): nur für markierte Variantengruppen
+-- Variantenmenü (Schalter expVariantMenu): nur für markierte Variantengruppen
 -- (CAST_DATA menu = true), mit "Linksklick zaubert Buff" und nicht für Gruppen-Zeilen
 function Variant.MenuOn(e)
     -- Tier-Zeilen (Tier rufen/wiederbeleben, Dämon): eigener Beta-Schalter expPet
@@ -2581,7 +2588,7 @@ function Group.PrintDebug(log)
 end
 
 ---------------------------------------------------------------------------
--- Warnung vor Ablauf (experimentell, Schalter expExpiry)
+-- Warnung vor Ablauf (Schalter expExpiry)
 -- Für aktive eigene Buffs der aktivierten Einträge: Klassenbuffs, Well Fed, Fläschchen und
 -- temporäre Waffenverzauberungen. Gewarnt wird, wenn Restdauer <= expiryPct % der Gesamtdauer.
 -- Dauer/Ablaufzeit aus den Aura-Daten; secret, fehlend oder Dauer 0 -> keine Ablaufwarnung.
@@ -2699,7 +2706,7 @@ function Expiry.Text(e)
 end
 
 ---------------------------------------------------------------------------
--- Wunsch-Elixiere pro Charakter (experimentell, Schalter expElixirs)
+-- Wunsch-Elixiere pro Charakter (Schalter expElixirs)
 -- Ob WoW Forever Elixiere nach den Original-Regeln stapelt (verschiedene Werte, mit Fläschchen)
 -- oder nach der TBC-Regel (1 Kampf- + 1 Wächterelixier, nicht mit Fläschchen), ist unbestätigt.
 -- Deshalb keine festen Plätze: Jedes Elixier, das schon einmal in den Taschen war, steht in der
@@ -2818,7 +2825,7 @@ function Elixir.List()
 end
 
 ---------------------------------------------------------------------------
--- Rollen (experimentell, Schalter expScrolls): je Art eine Warnung, wenn eine benutzbare Rolle
+-- Rollen (Schalter expScrolls): je Art eine Warnung, wenn eine benutzbare Rolle
 -- dieser Art in den Taschen liegt, ihr Buff (irgendein Rang) fehlt und kein aktiver Klassenbuff
 -- schon mindestens so viel vom Wert gibt (Intelligenz, Willenskraft, Ausdauer).
 -- Benutzbar = Mindeststufe (Item-Daten) bekannt und <= Stufe des Spielers.
@@ -3567,7 +3574,7 @@ function Pet.DemonText()
 end
 
 ---------------------------------------------------------------------------
--- Vorräte (experimentell, Schalter expReagents – sichtbar "Vorratswarnung"), Reiter "Vorräte"
+-- Vorräte (Schalter expReagents – sichtbar "Vorratswarnung"), Reiter "Vorräte"
 -- Eine gemeinsame Liste mit den Reagenzien der Klasse (kind "reagent", Schwellen cdb.reagents) und
 -- Einträgen kind = "supply", supplyType:
 --   "ammo"    : Jäger; angelegte Munition (Ammo-Slot), Summe aller Stapel dieser Sorte in den Taschen;
@@ -4030,7 +4037,7 @@ function Supply.OnItemInfo(id)
 end
 
 ---------------------------------------------------------------------------
--- Auffüllen beim Händler (experimentell, Schalter expRestock; wirkt nur mit der Vorratswarnung)
+-- Auffüllen beim Händler (Schalter expRestock; wirkt nur mit der Vorratswarnung)
 --   Zielmenge je Vorrats-Eintrag: Spalte "Auffüllen auf" (Supply.Refill; nicht für Tierfutter).
 --   Passend ist ein Eintrag, wenn sein Bestand unter Min. liegt (mit "Auch oberhalb der Mindestmenge
 --   auffüllen", db.restockAbove: unter "Auffüllen auf") und der offene Händler genau sein
@@ -6131,7 +6138,7 @@ function Menu.LayoutMenu(e)
     local kind = Items.KindOf(e)
     -- Elixiere: kein Item-Menü (ein Eintrag = ein Elixier)
     local withItems = kind and kind ~= "elixir" and (db.clickCast or e.demo) and not combat
-    -- Variantenmenü (experimentell): erlernte Varianten statt Items; nie im Kampf
+    -- Variantenmenü: erlernte Varianten statt Items; nie im Kampf
     local variants = not combat and not withItems and Variant.MenuOn(e) and Variant.Choices(e) or nil
     -- Demo-Modus: Beispiel-Varianten bzw. Dämonen (unabhängig davon, ob gelernt)
     if e.demo and e.demoVariants and not combat then variants = Demo.MenuVariants(e.demo) end
@@ -6773,7 +6780,7 @@ function Cfg.MakeHeader(parent, text, y)
     return fs
 end
 
--- Ausgegraut? (Experimental-Schalter aus bzw. Schurke mit aktivem Gift-Eintrag); 2. Wert = Statushinweis
+-- Ausgegraut? (Schalter aus bzw. Schurke mit aktivem Gift-Eintrag); 2. Wert = Statushinweis
 function Cfg.Gate(e, expCons)
     if e.kind == "elixir" then return not ExpOn("expElixirs"), nil end
     if e.kind == "scroll" then return not ExpOn("expScrolls"), nil end
@@ -7372,7 +7379,7 @@ function Cfg.MakeBetaCheck(parent, text, x, y, onClick)
     return cb
 end
 
--- Fußzeile "(beta) = experimentell …" unten in Tabs mit Beta-Funktionen; Rückgabe: neues y
+-- Fußzeile "(beta) = experimentell …" unten in Tabs mit Beta-Funktionen (Tier, Gruppe); Rückgabe: neues y
 function Cfg.AddFooter(p, y)
     local fs = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     fs:SetPoint("TOPLEFT", 16, y - 10)
@@ -7485,7 +7492,7 @@ function Cfg.FinishTab(p, y)
     p:SetSize(Cfg.WIDTH, -y + 10)
 end
 
--- Tab "Anzeige": Knopfreihe, Grundeinstellungen, Stil, Ton, Taste, Warnung vor Ablauf (beta)
+-- Tab "Anzeige": Knopfreihe, Grundeinstellungen, Stil, Ton, Taste, Warnung vor Ablauf
 function Cfg.BuildDisplayTab()
     local p = Cfg.NewTab("display", "TAB_DISPLAY")
     local y = -8
@@ -7597,8 +7604,8 @@ function Cfg.BuildDisplayTab()
     keyWhere:SetText(L.KEY_WHERE)
     y = y - 26
 
-    -- Warnung vor Ablauf (beta) + Detail-Regler (Schwelle, Transparenz)
-    config.expExpiryCB = Cfg.MakeBetaCheck(p, L.EXP_EXPIRY, 16, y, function(self)
+    -- Warnung vor Ablauf + Detail-Regler (Schwelle, Transparenz)
+    config.expExpiryCB = Cfg.MakeCheck(p, L.EXP_EXPIRY, 16, y, function(self)
         db.expExpiry = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -7619,10 +7626,10 @@ function Cfg.BuildDisplayTab()
         RefreshConfig()
     end)
     y = y - 24
-    Cfg.FinishTab(p, Cfg.AddFooter(p, y))
+    Cfg.FinishTab(p, y)
 end
 
--- Tab "Klassenbuffs": Liste (mit Talent-Hinweisen) + Variantenmenü (beta). Alles unter der Liste
+-- Tab "Klassenbuffs": Liste (mit Talent-Hinweisen) + Variantenmenü. Alles unter der Liste
 -- liegt in config.below, das Cfg.LayoutClassRows unter die sichtbaren Klassenzeilen rückt.
 function Cfg.BuildClassTab()
     local p = Cfg.NewTab("class", "TAB_CLASS")
@@ -7644,7 +7651,7 @@ function Cfg.BuildClassTab()
     config.below = b
     local by = -8
     -- Variantenmenü per Rechtsklick (Aura, Siegel, Aspekt, Rüstung, Schild, Waffenverzauberung)
-    config.expVariantCB = Cfg.MakeBetaCheck(b, L.EXP_VARIANTMENU, 16, by, function(self)
+    config.expVariantCB = Cfg.MakeCheck(b, L.EXP_VARIANTMENU, 16, by, function(self)
         db.expVariantMenu = self:GetChecked() and true or false
         if menu:IsShown() then menu:Hide() end   -- nächstes Öffnen mit/ohne Varianten
         NoteDeferred()
@@ -7652,7 +7659,7 @@ function Cfg.BuildClassTab()
         RefreshConfig()
     end)
     by = by - 24
-    Cfg.belowHeight = -Cfg.AddFooter(b, by) + 10
+    Cfg.belowHeight = -by + 10
 end
 
 -- Tab "Tier" (Jäger/Hexenmeister; im Demo-Modus für alle sichtbar): Beta-Schalter, darunter die
@@ -7725,7 +7732,7 @@ end
 
 -- Abschnitte der Tabs "Weitere Buffs" und "Vorräte": je Abschnitt ein eigener Frame (Kinder mit
 -- Koordinaten relativ zum Abschnitt, y = 0 oben). Cfg.LayoutTab ordnet die sichtbaren Abschnitte
--- untereinander an (einheitlicher Abstand Cfg.SECTION_GAP); Listen unter einem Beta-Schalter
+-- untereinander an (einheitlicher Abstand Cfg.SECTION_GAP); Listen unter einem Schalter
 -- (Elixiere, Rollen, Reagenzien) sind eingeklappt, solange der Schalter aus ist (visible()).
 Cfg.sections = {}      -- Tab-Key -> { { frame, visible = function | nil }, ... }
 Cfg.SECTION_GAP = 6
@@ -7810,7 +7817,7 @@ function Cfg.MakeScrollCell(parent, e, col, row)
 end
 
 -- Tab "Weitere Buffs" (Buffs aktiv halten): allgemeine Buffs, "Nur in Instanzen" mit Hinweis,
--- Steine/Öle/Gifte, Elixiere mit Liste, Rollen mit Liste, Verfolgung (alle beta)
+-- Steine/Öle/Gifte, Elixiere mit Liste, Rollen mit Liste, Verfolgung
 function Cfg.BuildOtherTab()
     Cfg.NewTab("other", "TAB_OTHER")
     local f = Cfg.NewSection("other", 26 * #GENERAL_BUFFS)
@@ -7833,7 +7840,7 @@ function Cfg.BuildOtherTab()
 
     -- Steine, Öle, Gifte per Klick
     f = Cfg.NewSection("other", 24)
-    config.expWeaponCB = Cfg.MakeBetaCheck(f, L.EXP_WEAPONITEMS, 16, 0, function(self)
+    config.expWeaponCB = Cfg.MakeCheck(f, L.EXP_WEAPONITEMS, 16, 0, function(self)
         db.expWeaponItems = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -7843,7 +7850,7 @@ function Cfg.BuildOtherTab()
     -- Wunsch-Elixiere: Schalter + Liste aller bekannten Elixiere (Taschen + Merkliste); die Liste
     -- wächst, wenn neue Elixiere in die Taschen kommen (Cfg.LayoutElixirs)
     f = Cfg.NewSection("other", 24)
-    config.expElixirCB = Cfg.MakeBetaCheck(f, L.EXP_ELIXIRS, 16, 0, function(self)
+    config.expElixirCB = Cfg.MakeCheck(f, L.EXP_ELIXIRS, 16, 0, function(self)
         db.expElixirs = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -7856,7 +7863,7 @@ function Cfg.BuildOtherTab()
 
     -- Rollen: Schalter + sechs Arten in zwei Spalten (Vorgabe pro Klasse; neutraler Name der Art)
     f = Cfg.NewSection("other", 24)
-    config.expScrollCB = Cfg.MakeBetaCheck(f, L.EXP_SCROLLS, 16, 0, function(self)
+    config.expScrollCB = Cfg.MakeCheck(f, L.EXP_SCROLLS, 16, 0, function(self)
         db.expScrolls = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -7870,7 +7877,7 @@ function Cfg.BuildOtherTab()
     -- Verfolgungs-Erinnerung: Schalter + Häkchen je Verfolgung in zwei Spalten, Gruppen
     -- "Fähigkeiten" und "Minimap" (Cfg.LayoutTracking; eingeklappt, solange der Schalter aus ist)
     f = Cfg.NewSection("other", 24)
-    config.expTrackCB = Cfg.MakeBetaCheck(f, L.EXP_TRACKING, 16, 0, function(self)
+    config.expTrackCB = Cfg.MakeCheck(f, L.EXP_TRACKING, 16, 0, function(self)
         db.expTracking = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -7881,8 +7888,6 @@ function Cfg.BuildOtherTab()
     config.trackEmpty = Cfg.trackSection:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     config.trackEmpty:SetPoint("TOPLEFT", 44, -2)
     config.trackEmpty:SetText(L.TRACK_EMPTY)
-
-    Cfg.FooterSection("other")
     Cfg.LayoutElixirs()   -- ordnet auch den Tab an
 end
 
@@ -8004,7 +8009,7 @@ function Cfg.LayoutElixirs()
     Cfg.LayoutTab("other")
 end
 
--- Tab "Vorräte" (genug dabeihaben): Klassen-Verbrauchsgüter, Reagenzien-Warnung mit Liste (beta),
+-- Tab "Vorräte" (genug dabeihaben): Klassen-Verbrauchsgüter, Reagenzien-Warnung mit Liste,
 -- Hinweis auf spätere Erweiterungen
 function Cfg.BuildSuppliesTab()
     Cfg.NewTab("supplies", "TAB_SUPPLIES")
@@ -8015,7 +8020,7 @@ function Cfg.BuildSuppliesTab()
         if e.kind == "conjure" and e.conj.mode == "sum" then hasConjureSum = true end
     end
     local f = Cfg.NewSection("supplies", hasConjureSum and 52 or 24)
-    config.expConsCB = Cfg.MakeBetaCheck(f, L.EXP_CONSUMABLES, 16, 0, function(self)
+    config.expConsCB = Cfg.MakeCheck(f, L.EXP_CONSUMABLES, 16, 0, function(self)
         db.expConsumables = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -8034,7 +8039,7 @@ function Cfg.BuildSuppliesTab()
     -- Munition, Seelensplitter und Tierfutter; darunter eigene Items mit Feld "Item hinzufügen".
     -- Beides eingeklappt, solange der Schalter aus ist.
     f = Cfg.NewSection("supplies", 102)
-    config.expReagCB = Cfg.MakeBetaCheck(f, L.EXP_SUPPLIES, 16, 0, function(self)
+    config.expReagCB = Cfg.MakeCheck(f, L.EXP_SUPPLIES, 16, 0, function(self)
         db.expReagents = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()
@@ -8042,7 +8047,7 @@ function Cfg.BuildSuppliesTab()
         RefreshConfig()
     end)
     -- Auffüllen beim Händler (eigener Schalter; nur wirksam mit der Vorratswarnung)
-    config.restockCB = Cfg.MakeBetaCheck(f, L.EXP_RESTOCK, 40, -24, function(self)
+    config.restockCB = Cfg.MakeCheck(f, L.EXP_RESTOCK, 40, -24, function(self)
         db.expRestock = self:GetChecked() and true or false
         NoteDeferred()
         Evaluate()   -- Hinweis der Vorratszeilen beim Händler
@@ -8137,8 +8142,6 @@ function Cfg.BuildSuppliesTab()
     note:SetJustifyH("LEFT")
     note:SetText(L.SUPPLY_BAGS_ONLY)
     Cfg.LayoutSupplies()
-
-    Cfg.FooterSection("supplies")
     Cfg.LayoutTab("supplies")
 end
 
@@ -9571,7 +9574,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
             end
         end
         for _, e in ipairs(GENERAL_BUFFS) do PrepareEntry(e); entries[#entries + 1] = e end
-        -- Verfolgungs-Erinnerung (experimentell): eigener Eintrag ohne Zeile in der Buff-Liste der
+        -- Verfolgungs-Erinnerung: eigener Eintrag ohne Zeile in der Buff-Liste der
         -- Einstellungen; gilt überall (nicht nur in Instanzen); Verfolgung wird in RefreshKnown bestimmt
         Tracking.entry = { key = "gen_tracking", general = true, kind = "tracking", everywhere = true, ids = {} }
         PrepareEntry(Tracking.entry)
@@ -9887,7 +9890,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
     elseif cmd == "reset" then
         if InCombatLockdown() then Print(L.COMBAT); return end
         for k in pairs(DEFAULTS) do db[k] = nil end
-        -- Experimental-Schalter: wieder Build-abhängig
+        -- Schalter: wieder Vorgabe (freigegebene an, experimentelle Build-abhängig)
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
         db.expVariantMenu, db.expBlessings, db.expTracking = nil, nil, nil
         db.expElixirs, db.expScrolls, db.expPet, db.expRestock = nil, nil, nil, nil

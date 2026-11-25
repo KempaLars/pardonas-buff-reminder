@@ -5,7 +5,8 @@ What changed for players in each version. Handbook: https://pardonas-addons.de/b
 Features marked (beta) are experimental: on in beta versions, off by default in releases. You can switch them on in the settings at any time.
 
 ## Unreleased
-No changes yet.
+### Changed
+- No longer beta and now on by default: expiry warning (including poison charges), class consumables, elixirs, scrolls, weapon buffs from items (oils, stones, poisons), the right-click item and variant menu, tracking, supplies and restocking at vendors. If you switched one of them off yourself, it stays off.
 
 ## 1.5.0-beta4 – 2026-11-23
 ### Added
