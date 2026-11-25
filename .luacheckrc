@@ -146,3 +146,6 @@ read_globals = {
 
 -- Locale files: "L" stays unused until the CurseForge packager inserts the phrases
 files["Locales/*.lua"] = { ignore = { "211/L" } }
+
+-- Module files: every file starts with "local ADDON_NAME, ns = ..."; most of them only use ns
+files["Modules/*.lua"] = { ignore = { "211/ADDON_NAME" } }

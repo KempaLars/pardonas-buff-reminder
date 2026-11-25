@@ -363,9 +363,46 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then runs luacheck
 ├── .pkgmeta                        # Packager configuration
 ├── Bindings.xml                    # Keybinding "Use top warning" in the "Pardona's Addons" section (loaded automatically, not listed in the TOC)
 ├── CHANGELOG.md                    # Player-facing changelog, used by the packager
-├── PardonasBuffReminder.lua        # Addon code
+├── Modules/                        # Addon code, one file per topic (see Project layout)
+├── PardonasBuffReminder.lua        # Events, initialization and slash commands (loaded last)
 ├── PardonasBuffReminder.toc        # Addon metadata
 └── README.md
 ```
 
 `README.md`, `.luacheckrc`, `media/` and `tools/` are excluded from the packaged addon. The packaged addon contains `Locales/` (with the translations inserted by the packager) and `Libs/lib-pardona` (LibPardona-1.0 with LibStub), both loaded by the TOC before the addon code.
+
+## Project layout
+
+The addon code is split by topic. The TOC loads the files in this order: `Locales/`, `Libs/`, then `Modules/` as listed below, and `PardonasBuffReminder.lua` last.
+
+| File | Purpose |
+| --- | --- |
+| `Modules/Core.lua` | Namespace and module tables (on `ns`), texts (`L`), shared state, shared helpers (`Print`, `IsSecret`, `SpellName`, `ExpOn`, …) |
+| `Modules/Data.lua` | Static data: buff database, class consumables, click casting, food and flasks, weapon items, reagents, group buffs, sounds, defaults |
+| `Modules/Items.lua` | Item helpers (name, icon, count, reagent thresholds), food and flasks (bag scan, choice, sorting), eating countdown |
+| `Modules/Tracking.lua` | Tracking reminder (minimap tracking) |
+| `Modules/Detect.lua` | Entry labels and icons, "learned" check, click casting, consumable counting, buff detection |
+| `Modules/Group.lua` | Group buffs (party and raid members) |
+| `Modules/Expiry.lua` | Expiry warning |
+| `Modules/Elixirs.lua` | Wanted elixirs and scrolls |
+| `Modules/Pet.lua` | Pet reminder (Hunter pet, Warlock demon) |
+| `Modules/Supply.lua` | Supply warning (ammunition, soul shards, pet food, own items) |
+| `Modules/Restock.lua` | Restock window at vendors |
+| `Modules/Style.lua` | Styles of the warning list and the right-click menu |
+| `Modules/Display.lua` | Warning list: anchor, rows (secure buttons), layout, clicks |
+| `Modules/Keybind.lua` | Keybinding "Use top warning" and the warning sound |
+| `Modules/Menu.lua` | Right-click menu and variant menu |
+| `Modules/Evaluate.lua` | Check logic (which warnings are shown) and the test reminder |
+| `Modules/Config.lua` | Settings page (widgets, dropdowns, tabs) |
+| `Modules/Pardona.lua` | LibPardona integration (minimap button, addon compartment, settings category, status) |
+| `Modules/Demo.lua` | Hidden demo mode |
+| `PardonasBuffReminder.lua` | Events, initialization and slash commands |
+
+Every file starts with `local ADDON_NAME, ns = ...` and shares code only through the addon namespace `ns` (no new globals):
+
+- A file publishes the locals other files need at its end (`ns.Name = Name`); later files import them at the top (`local Name = ns.Name`). Files only import from files loaded before them.
+- `Evaluate` and `RefreshConfig` are defined late; earlier files call them as `ns.Evaluate()` / `ns.RefreshConfig()` at runtime.
+- Values that are reassigned and used in several files live in the shared table `ns.State` (`ready`, `unlocked`, `warnCount`, `classEntries`, `reagentLines`, `flaskEntry`, `foodEntry`, `layoutPending`, `config`).
+- `db` / `cdb` (the SavedVariables) are set on `ADDON_LOADED` through `ns.SetDB`; every file that uses them keeps its own locals and registers with `ns.OnDB`.
+
+Lua 5.1 allows at most 200 locals per chunk and 60 upvalues per function; `luac5.1 -p` on every file checks this.
