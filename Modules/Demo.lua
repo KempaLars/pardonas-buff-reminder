@@ -16,6 +16,7 @@ local Tracking = ns.Tracking
 local Demo = ns.Demo
 local Pet = ns.Pet
 local Supply = ns.Supply
+local Ranks = ns.Ranks
 local Restock = ns.Restock
 local Print = ns.Print
 local IsSecret = ns.IsSecret
@@ -104,6 +105,8 @@ Demo.ROWS = {
     { key = "supply",   item = 1645, count = 4, hint = "HINT_SNOOZE" },                          -- Mondbeerensaft (eigenes Item knapp)
     -- Kristallphiole (8925): eigenes Item knapp; keine Tabelle im Addon (Handwerkswaren)
     { key = "supplytrade", item = 8925, count = 4, hint = "HINT_RESTOCK_CLICK", menu = "restock" },
+    -- niedriger Zauberrang: Geringes Heilen Rang 1 gewirkt, Rang 3 erlernt (Ranks.TEST)
+    { key = "lowrank",  spell = Ranks.TEST.best, rank = Ranks.TEST, hint = "HINT_RANK" },
 }
 -- Motive von /br demo (ohne Lauf)
 Demo.DEFAULT_ROWS = { "class", "armor", "food", "flask", "weapon", "group", "reagent", "tracking", "expiry",
@@ -156,6 +159,7 @@ Demo.SCENES = {
     { id = "S11", name = "tracking-off", rows = { "tracking" } },
     { id = "S12", name = "food-menu", rows = { "class", "food", "flask" }, menu = "food" },
     { id = "S13", name = "eating", rows = { "eating" } },
+    { id = "S14", name = "low-rank", rows = { "lowrank" } },
     { id = "C01", name = "druid-group", rows = { "groupmotw" } },
     { id = "C02", name = "hunter-pet-ammo", rows = { "petfeed", "ammo" } },
     { id = "C03", name = "mage-consumables", rows = { "water", "managem", "class" } },
@@ -176,6 +180,7 @@ Demo.SCENES = {
     { id = "E09", name = "dropdown-sound", settings = "display", dropdown = "sound" },
     { id = "E10", name = "dropdown-demon", settings = "pet", dropdown = "demon", class = "WARLOCK" },
     { id = "E11", name = "dropdown-check-in", settings = "group", dropdown = "groupmode" },
+    { id = "E12", name = "settings-ranks", settings = "ranks", scroll = "top" },
 }
 
 -- Szenen eines Laufs: nil = alle, "settings" = nur E-Szenen, sonst genau die Szene mit dieser ID
@@ -277,10 +282,14 @@ function Demo.Entry(d)
     local icon = d.icon or (d.spell and SpellIcon(d.spell)) or (d.item and ItemIcon(d.item)) or FALLBACK_ICON
     if d.track2 then label = label .. ", " .. (SpellName(d.track2) or "?") end   -- Verfolgung: zwei Namen
     local demon = d.menu == "demon"
+    -- Rang-Zeile: kind/rankInfo wie beim echten Eintrag (Rechtsklick-Menü mit Rang-Knöpfen ohne Wirkung)
+    local rankInfo = d.rank and { name = label, id = d.rank.id, rank = d.rank.rank, best = d.rank.best,
+        bestRank = d.rank.bestRank, count = 1 } or nil
     -- Dämonen-Menü: kind/petType wie beim echten Eintrag (Überschrift "Zu beschwörender Dämon")
     return { key = "demo_" .. d.key, demo = d, demoLabel = label, demoIcon = icon,
         itemKind = Demo.ITEM_MENUS[d.menu], demoVariants = d.menu == "variant" or demon,
-        kind = demon and "pet" or nil, petType = demon and "demon" or nil }
+        kind = (demon and "pet") or (rankInfo and "rank") or nil, petType = demon and "demon" or nil,
+        rankInfo = rankInfo }
 end
 
 -- Zeile wie die echte Warnung gestalten (aus ShowRows; nur außerhalb des Kampfes)
@@ -305,6 +314,8 @@ function Demo.FillRow(r, e, st)
         status, text, right = "expiring", L.EXPIRES_CHARGES:format(label, d.charges), ""
     elseif d.expiry then
         status, text, right = "expiring", L.EXPIRES:format(label, d.expiry), ""
+    elseif d.rank then
+        text, right = L.RANK_LINE:format(label, d.rank.rank, d.rank.bestRank), L.RANK_N:format(d.rank.rank)
     elseif d.plain then
         text = label
         if d.pet then right = "" end   -- Tier-Zeilen: Text sagt schon alles ("Tier fehlt", "Tier füttern")

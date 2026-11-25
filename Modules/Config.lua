@@ -21,6 +21,7 @@ local Elixir = ns.Elixir
 local Scroll = ns.Scroll
 local Pet = ns.Pet
 local Supply = ns.Supply
+local Ranks = ns.Ranks
 local Restock = ns.Restock
 local reagentEntries = ns.reagentEntries
 local knownCache = ns.knownCache
@@ -32,6 +33,7 @@ local Print = ns.Print
 local NoteDeferred = ns.NoteDeferred
 local ExpOn = ns.ExpOn
 local GroupFeatureOn = ns.GroupFeatureOn
+local SpellIcon = ns.SpellIcon
 -- aus Data.lua
 local GENERAL_BUFFS = ns.GENERAL_BUFFS
 local GROUP_MODE_ORDER = ns.GROUP_MODE_ORDER
@@ -212,6 +214,7 @@ function RefreshConfig()
     Cfg.LayoutTab("other")      -- Listen ein-/ausklappen (Schalter an/aus)
     Cfg.LayoutTab("supplies")
     Cfg.RefreshPet()
+    Cfg.RefreshRanks()
     config.elixirEmpty:SetTextColor(ExpOn("expElixirs") and 0.6 or 0.4, ExpOn("expElixirs") and 0.6 or 0.4, 0.4)
     Cfg.SyncDropdown(config.soundDD, true)
     local scalePct = math.floor(Display.SavedScale() * 100 + 0.5)
@@ -688,7 +691,7 @@ end
 ---------------------------------------------------------------------------
 Cfg.TAB_ORDER = {
     { "display", "TAB_DISPLAY" }, { "class", "TAB_CLASS" }, { "pet", "TAB_PET" }, { "other", "TAB_OTHER" },
-    { "supplies", "TAB_SUPPLIES" }, { "group", "TAB_GROUP" },
+    { "ranks", "TAB_RANKS" }, { "supplies", "TAB_SUPPLIES" }, { "group", "TAB_GROUP" },
 }
 
 -- Tab sichtbar? Reiter "Tier" nur für Jäger/Hexenmeister, im Demo-Modus/Screenshot-Lauf immer
@@ -1462,6 +1465,105 @@ function Cfg.LayoutElixirs()
     Cfg.LayoutTab("other")
 end
 
+-- Tab "Ränge" (für alle Klassen): Beta-Schalter "Warnung bei niedrigen Zauberrängen", Erklärung,
+-- Liste der akzeptierten Ränge (eingeklappt, solange der Schalter aus ist), Fußzeile "(beta) = …"
+function Cfg.BuildRanksTab()
+    Cfg.NewTab("ranks", "TAB_RANKS")
+    local f = Cfg.NewSection("ranks", 24)
+    config.expRanksCB = Cfg.MakeBetaCheck(f, L.EXP_RANKS, 16, 0, function(self)
+        db.expRanks = self:GetChecked() and true or false
+        NoteDeferred()
+        Evaluate()
+        RefreshConfig()
+    end)
+    f = Cfg.NewSection("ranks", 44)
+    local note = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    note:SetPoint("TOPLEFT", 44, -2)
+    note:SetWidth(Cfg.WIDTH - 60)
+    note:SetJustifyH("LEFT")
+    note:SetText(L.RANKS_NOTE)
+    Cfg.rankSection = Cfg.NewSection("ranks", 40, function() return ExpOn("expRanks") end)
+    Cfg.rankRows = {}
+    local head = Cfg.rankSection:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    head:SetPoint("TOPLEFT", 20, -2)
+    head:SetText(L.RANKS_ACCEPTED)
+    config.rankEmpty = Cfg.rankSection:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    config.rankEmpty:SetPoint("TOPLEFT", 44, -20)
+    config.rankEmpty:SetText(L.RANKS_EMPTY)
+    Cfg.FooterSection("ranks")
+    Cfg.LayoutRanks()
+end
+
+-- Zeile der Liste "Akzeptierte Ränge": Icon, Name, "Rang n" / "alle Ränge", X zum Entfernen
+function Cfg.MakeRankRow(parent)
+    local w = CreateFrame("Frame", nil, parent)
+    w:SetSize(Cfg.WIDTH - 40, 24)
+    w.icon = w:CreateTexture(nil, "ARTWORK")
+    w.icon:SetSize(18, 18)
+    w.icon:SetPoint("LEFT", 28, 0)
+    w.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    w.remove = Cfg.MakeButton(w, "x", 22)
+    w.remove:SetPoint("RIGHT", 0, 0)
+    w.remove:SetScript("OnClick", function() Ranks.Unaccept(w.kind, w.key) end)
+    w.remove:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(L.RANK_REMOVE, 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    w.remove:SetScript("OnLeave", function(self)
+        if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+    end)
+    w.status = w:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.status:SetPoint("RIGHT", w.remove, "LEFT", -8, 0)
+    w.status:SetJustifyH("RIGHT")
+    w.name = w:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    w.name:SetPoint("LEFT", w.icon, "RIGHT", 6, 0)
+    w.name:SetPoint("RIGHT", w.status, "LEFT", -6, 0)
+    w.name:SetJustifyH("LEFT")
+    w.name:SetWordWrap(false)
+    return w
+end
+
+-- Liste der akzeptierten Ränge neu aufbauen (RefreshConfig); Abschnittshöhe und Tab folgen
+function Cfg.LayoutRanks()
+    local f = Cfg.rankSection
+    if not f then return end
+    local list = Ranks.AcceptedList()
+    local y = -18
+    for i, it in ipairs(list) do
+        local w = Cfg.rankRows[i] or Cfg.MakeRankRow(f)
+        Cfg.rankRows[i] = w
+        w.kind, w.key = it.kind, it.key
+        w:ClearAllPoints()
+        w:SetPoint("TOPLEFT", 16, y)
+        w.icon:SetTexture(SpellIcon(it.id) or FALLBACK_ICON)
+        w.name:SetText(it.name)
+        if it.kind == "all" then
+            w.status:SetText(L.RANK_ALL)
+        else
+            w.status:SetText(it.rank and L.RANK_N:format(it.rank) or "")
+        end
+        w:Show()
+        y = y - 24
+    end
+    for i = #list + 1, #Cfg.rankRows do Cfg.rankRows[i]:Hide() end
+    if #list == 0 then
+        config.rankEmpty:Show()
+        y = y - 18
+    else
+        config.rankEmpty:Hide()
+    end
+    f:SetHeight(-y + 2)
+    Cfg.LayoutTab("ranks")
+end
+
+-- Tab "Ränge" in RefreshConfig: Schalter und Liste
+function Cfg.RefreshRanks()
+    if not config.expRanksCB then return end
+    config.expRanksCB:SetChecked(ExpOn("expRanks"))
+    Cfg.LayoutRanks()
+end
+
 -- Tab "Vorräte" (genug dabeihaben): Klassen-Verbrauchsgüter, Reagenzien-Warnung mit Liste,
 -- Hinweis auf spätere Erweiterungen
 function Cfg.BuildSuppliesTab()
@@ -1749,6 +1851,7 @@ local function BuildConfig()
     Cfg.BuildClassTab()
     Cfg.BuildPetTab()
     Cfg.BuildOtherTab()
+    Cfg.BuildRanksTab()
     Cfg.BuildSuppliesTab()
     -- Tab "Gruppe" nur für Klassen mit Gruppen-Buffs
     local hasGroup, hasBlessings = false, false

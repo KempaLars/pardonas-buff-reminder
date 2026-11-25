@@ -14,6 +14,7 @@ local Conjure = ns.Conjure
 local Demo = ns.Demo
 local Pet = ns.Pet
 local Supply = ns.Supply
+local Ranks = ns.Ranks
 local entries = ns.entries
 local knownCache = ns.knownCache
 local missing = ns.missing
@@ -76,6 +77,7 @@ function Evaluate()
             if knownCache[e.key] and IsEnabled(e) then list[#list + 1] = e end
         end
         if #list == 0 and entries[1] then list[1] = entries[1] end
+        if ExpOn("expRanks") then list[#list + 1] = Ranks.TestEntry() end   -- Beispiel-Rangzeile
         Display.ShowRows(list)
         return
     end
@@ -185,6 +187,19 @@ function Evaluate()
             end
         end
         Supply.AmmoAlert(combat)   -- Munition unter der kritischen Grenze: im Kampf rote Meldung + Ton
+        -- Niedrige Zauberränge: sichtbar erst nach dem Kampf (Ranks.OnCombatEnd); gelten nicht als
+        -- "weitere Buffs" ("Nur in Instanzen" wirkt nicht), neue Zeilen mit Chatzeile und Ton
+        if ExpOn("expRanks") then
+            for _, e in ipairs(Ranks.Entries()) do
+                if not MuteRemaining(e.key) then
+                    list[#list + 1] = e
+                    if not combat and not shownKeys[e.key] then
+                        newOnes = true
+                        Print(L.ALERT_CHAT:format(Ranks.Text(e)))
+                    end
+                end
+            end
+        end
     end
 
     if combat then

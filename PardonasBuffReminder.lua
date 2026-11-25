@@ -29,6 +29,7 @@ local Elixir = ns.Elixir
 local Scroll = ns.Scroll
 local Pet = ns.Pet
 local Supply = ns.Supply
+local Ranks = ns.Ranks
 local Restock = ns.Restock
 local entries = ns.entries
 local reagentEntries = ns.reagentEntries
@@ -164,6 +165,8 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         cdb.supplySnooze = cdb.supplySnooze or {}     -- Vorrat-Key -> true: bis zur nächsten Stadt zurückgestellt
         cdb.supplyCritical = cdb.supplyCritical or {} -- Vorrat-Key -> kritische Grenze
         cdb.supplyRefill = cdb.supplyRefill or {}     -- Vorrat-Key -> Zielmenge "Auffüllen auf"
+        cdb.rankAccept = cdb.rankAccept or {}         -- Spell-ID -> true: genau dieser Rang akzeptiert
+        cdb.rankAcceptAll = cdb.rankAcceptAll or {}   -- Zaubername -> Spell-ID: alle Ränge akzeptiert
         Tracking.Migrate()                        -- frühere Einzelwahl -> cdb.trackSet
         if not Style.STYLES[db.style] then db.style = DEFAULTS.style end
         -- cdb.lastFlask: Item-ID des zuletzt benutzten Fläschchens (nil = keins)
@@ -396,6 +399,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         -- nach dem Kampf: Gruppe sofort neu prüfen, Zeilen/Attribute nachziehen
         if Demo.restorePending then Demo.Restore() end
         if GroupFeatureOn() then Group.groupDirty = true end
+        Ranks.OnCombatEnd()   -- niedrige Zauberränge aus dem Kampf (und davor) jetzt anzeigen
         Evaluate()
         Keybind.Update()   -- Taste neu belegen (Einmal-Sperre aus dem Kampf aufheben)
         Restock.OnEvent(event)   -- Fenster "Auffüllen": Knopf wieder frei
@@ -410,6 +414,7 @@ ev:SetScript("OnEvent", function(self, event, arg1, arg2, arg3, arg4)
         if cdb then
             RememberFromCast(arg3)
             Pet.RememberCast(arg3)   -- Hexenmeister: zuletzt beschworener Dämon
+            Ranks.OnCast(arg3)       -- niedriger Zauberrang? (angezeigt nach dem Kampf)
             -- Fläschchen-Effekt (auch über Aktionsleiste/Taschen benutzt) -> zuletzt benutzt
             if arg3 ~= nil and not IsSecret(arg3) and Items.flaskBySpell[arg3] then
                 cdb.lastFlask = Items.flaskBySpell[arg3]
@@ -499,6 +504,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         if numFn then okN, numTrack = pcall(numFn) end
         dprint(("trackingTypes=%s"):format(okN and tostring(numTrack) or "err"))
         dprint(Style.DebugLine())
+        dprint(Ranks.DebugLine())
         dprint(("locale: %s (client %s, override %s)"):format(ns.Locales.active, ns.Locales.Client(),
             tostring(db.locale)))
         for _, line in ipairs(Cfg.LibDiagLines()) do dprint(line) end
@@ -530,7 +536,7 @@ SlashCmdList.BUFFREMINDER = function(msg)
         -- Schalter: wieder Vorgabe (freigegebene an, experimentelle Build-abhängig)
         db.expGroup, db.expReagents, db.expExpiry, db.expConsumables, db.expWeaponItems = nil, nil, nil, nil, nil
         db.expVariantMenu, db.expBlessings, db.expTracking = nil, nil, nil
-        db.expElixirs, db.expScrolls, db.expPet, db.expRestock = nil, nil, nil, nil
+        db.expElixirs, db.expScrolls, db.expPet, db.expRestock, db.expRanks = nil, nil, nil, nil, nil
         cdb.trackSet = nil                        -- Verfolgungen wieder Vorgabe
         cdb.petUnhappyOnly, cdb.petNoFoodWarn, cdb.demon = nil, nil, nil   -- Tier: Vorgaben
         cdb.ammoMin, cdb.shardMin, cdb.petFoodMin = nil, nil, nil   -- Vorräte: Standard-Mindestmengen

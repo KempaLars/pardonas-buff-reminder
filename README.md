@@ -79,7 +79,7 @@ Built for **WoW Forever** (Interface `16001`).
 
 ## Settings
 
-The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or `/br`) is split into up to six tabs (Display, Class Buffs, Pet, Other Buffs, Supplies, Group; Pet only for hunters and warlocks, Group only for classes with group buffs) that sit on a dark inset panel in one row; with long translations the tab labels are shortened instead of wrapping. Each tab scrolls on its own. `/br` opens the tab you used last (an unknown saved tab falls back to Display). The tabs are split by purpose: **Other Buffs** holds everything that should be *kept active* as a buff, **Supplies** holds everything you should *carry enough of*. Choices with several values (style, growth direction, sound, group check, demon) are dropdowns with the label on the left; they use the modern Blizzard dropdown when the client has it, otherwise the classic dropdown, otherwise a button that cycles through the values.
+The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or `/br`) is split into up to seven tabs (Display, Class Buffs, Pet, Other Buffs, Ranks, Supplies, Group; Pet only for hunters and warlocks, Group only for classes with group buffs) that sit on a dark inset panel in one row; with long translations the tab labels are shortened instead of wrapping. Each tab scrolls on its own. `/br` opens the tab you used last (an unknown saved tab falls back to Display). The tabs are split by purpose: **Other Buffs** holds everything that should be *kept active* as a buff, **Supplies** holds everything you should *carry enough of*. Choices with several values (style, growth direction, sound, group check, demon) are dropdowns with the label on the left; they use the modern Blizzard dropdown when the client has it, otherwise the classic dropdown, otherwise a button that cycles through the values.
 
 - **Display** – buttons Move/Lock, Test and Unmute all; Addon enabled; Left-click casts buff; dropdowns for Style (with the Icons only checkbox next to it), "New warnings appear" (below/above) and Sound; Size and Opacity sliders; the keybinding (current key and where to set it); Expiry warning with its threshold and relative opacity sliders.
 - **Class Buffs** – your class's buffs with on/off checkboxes (spells not learned yet are greyed out with the level or talent they need); Variant menu on right-click.
@@ -91,10 +91,11 @@ The settings page (Options → AddOns → Pardona's Addons → Buff Reminder, or
   4. Elixirs with the list of known elixirs (tick the ones you want).
   5. Scrolls with the six scroll types in two columns of three (checkbox, icon, name, count; long names are shortened, the full name is in the tooltip).
   6. Tracking reminder with one checkbox per tracking (Abilities and Minimap).
+- **Ranks** (all classes) – Low spell rank warning (beta) with a short explanation; below it the list of accepted ranks (icon, name, "Rank N" or "all ranks", x to remove; "No accepted ranks yet." while empty).
 - **Supplies** (carry enough): Class consumables with the food/water threshold; Supplies warning with Restock at vendors below it and a short note on "remind me in the next town", one list of your reagents, ammunition, soul shards and pet food (each with "Min.", "Critical" and – except pet food – "Refill to" fields), "Your items" with the "Add item" field, and a note that only your bags are counted.
 - **Group** (only for classes with group buffs: Priest, Mage, Druid, Paladin) – Group buffs (beta), Check group buffs, "Check in" dropdown; for Paladins also Paladin blessings in group buffs (beta) with the Pally Power note.
 
-The experimental switches (Pet reminder, Group buffs, Paladin blessings) carry an orange "(beta)" tag (muted while a parent switch is off). Lists below a switch (elixirs, scrolls, trackings, supplies, pet reminders) are collapsed while the switch is off and the rest of the tab moves up; simple detail settings (expiry sliders, food/water threshold, group settings) stay visible but greyed out. A footer in the tabs with such switches (Pet, Group) explains: "(beta) = experimental: on in beta builds, off by default in releases".
+The experimental switches (Pet reminder, Low spell rank warning, Group buffs, Paladin blessings) carry an orange "(beta)" tag (muted while a parent switch is off). Lists below a switch (elixirs, scrolls, trackings, supplies, pet reminders, accepted ranks) are collapsed while the switch is off and the rest of the tab moves up; simple detail settings (expiry sliders, food/water threshold, group settings) stay visible but greyed out. A footer in the tabs with such switches (Pet, Ranks, Group) explains: "(beta) = experimental: on in beta builds, off by default in releases".
 
 ## Right-click menu
 
@@ -134,7 +135,7 @@ All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one 
 Each of these features has its own switch in the tab it belongs to (see [Settings](#settings)).
 
 - **On by default**, can be switched off: Expiry warning on the Display tab, Variant menu on the Class Buffs tab, Stones/oils/poisons, Elixirs, Scrolls and Tracking reminder on the Other Buffs tab, Class consumables, Supplies warning and Restock at vendors on the Supplies tab.
-- **Experimental (beta)**, not fully tested yet: Pet reminder on the Pet tab, Group buffs and Paladin blessings on the Group tab. They are marked "(beta)", **off by default in release versions** and can be turned on in the settings; in beta, alpha and development builds they are on by default.
+- **Experimental (beta)**, not fully tested yet: Pet reminder on the Pet tab, Low spell rank warning on the Ranks tab, Group buffs and Paladin blessings on the Group tab. They are marked "(beta)", **off by default in release versions** and can be turned on in the settings; in beta, alpha and development builds they are on by default.
 
 Once you tick or untick a checkbox, your choice is kept (account-wide) regardless of the build; `/br reset` returns to the default.
 
@@ -239,6 +240,13 @@ While a feature is off, it does nothing at all: no group lines, no group scans, 
   - One line per buff replaces your own reminder for it, e.g. "Fortitude missing: 3". Below it are the names of the players without the buff (up to 5, then "+N"), then the click hints.
   - **Left-click** casts the group version on the first player without the buff, which covers that player's party or raid subgroup (or class for Greater Blessings; which blessing is cast: see Paladin blessings above). If you have not learned the group version or are out of its reagent (see supply warnings), the single-target version is cast instead. **Ctrl+Left-click** casts the single-target version on the next player without the buff. After each cast or buff change the target is chosen again. Hint: "Left-click: group · Ctrl+Left-click: single · Right-click: mute".
   - Detail settings below the "Group buffs" checkbox (Priest, Mage, Druid and Paladin only): "Check group buffs" (on by default; both checkboxes must be on) and the "Check in" dropdown (Always / Dungeons & raids only / Raids only) (default Always); for Paladins also "Paladin blessings in group buffs". Each buff's own on/off checkbox still applies.
+- **Low spell rank warning (beta)** – tells you after a fight if you cast a lower rank of a spell than the highest one you know (e.g. Lesser Heal rank 1 while you know rank 3). Switch "Low spell rank warning" on the **Ranks** tab (all classes).
+  - Detection: every spell you cast successfully is compared with the highest rank of the same spell you have learned. Rank numbers come from the game client ("Rank 3" / "Rang 3"); spells without ranks and anything the client does not reveal are ignored.
+  - Lines appear only when combat ends: everything cast during the fight – and low ranks cast outside combat before it – shows up then, one line per spell, e.g. "Lesser Heal: Rank 1 used - Rank 3 known" ("(3x)" when cast several times; the last cast rank counts). Chat message and sound as for other new warnings. Nothing is saved; the list is per session.
+  - The lines also appear outside instances ("Other buffs only in instances" does not apply) and are skipped by the "Use top warning" key.
+  - **Left-click** dismisses the line. If you cast the low rank again later, it comes back after the next fight.
+  - **Right-click** opens the menu: "Accept Rank N of <spell>" (that exact rank never warns again), "Accept all ranks of <spell>", "Replace on action bars with Rank M" and the usual mute buttons. Replacing works out of combat only (greyed out in combat): every action button on all bars and pages (slots 1–180) that holds exactly that rank gets the highest rank; macros are not touched, and nothing happens while your cursor is holding something. A chat line reports how many buttons were replaced or that the rank is not on your action bars (macro or other bar addon?).
+  - Accepted ranks are saved per character and listed on the Ranks tab, where the x removes an entry (it warns again). `/br test` adds an example line while the feature is on.
 
 ## Localization
 
@@ -392,6 +400,7 @@ The addon code is split by topic. The TOC loads the files in this order: `Locale
 | `Modules/Display.lua` | Warning list: anchor, rows (secure buttons), layout, clicks |
 | `Modules/Keybind.lua` | Keybinding "Use top warning" and the warning sound |
 | `Modules/Menu.lua` | Right-click menu and variant menu |
+| `Modules/Ranks.lua` | Low spell rank warning (detection, rank lines, accept, replace on action bars) |
 | `Modules/Evaluate.lua` | Check logic (which warnings are shown) and the test reminder |
 | `Modules/Config.lua` | Settings page (widgets, dropdowns, tabs) |
 | `Modules/Pardona.lua` | LibPardona integration (minimap button, addon compartment, settings category, status) |

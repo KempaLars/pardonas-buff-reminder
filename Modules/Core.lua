@@ -25,6 +25,7 @@ local Scroll = {}    -- Rollen
 local Pet = {}       -- Tier-Erinnerung: Jäger-Tier (fehlt/tot/füttern), Hexenmeister-Dämon (experimentell)
 local Supply = {}    -- Vorräte: Munition, Seelensplitter, Tierfutter, eigene Items
 local Restock = {}   -- Auffüllen beim Händler: Fenster "Auffüllen"
+local Ranks = {}     -- Warnung bei niedrigen Zauberrängen (experimentell)
 
 ---------------------------------------------------------------------------
 -- Texte
@@ -149,7 +150,7 @@ Cfg.RELEASED_EXP = {
 }
 
 -- Schalter (account-weit): nil = nicht vom Nutzer gesetzt → freigegebene an, experimentelle
--- (expPet, expGroup, expBlessings) in Test-Builds an, in Release-Versionen aus
+-- (expPet, expGroup, expBlessings, expRanks) in Test-Builds an, in Release-Versionen aus
 local function ExpOn(key)
     local v = db and db[key]
     if v == nil then return Cfg.RELEASED_EXP[key] == true or IsTestBuild() end
@@ -203,6 +204,7 @@ ns.Scroll = Scroll
 ns.Pet = Pet
 ns.Supply = Supply
 ns.Restock = Restock
+ns.Ranks = Ranks
 ns.entries = entries
 ns.reagentEntries = reagentEntries
 ns.knownCache = knownCache

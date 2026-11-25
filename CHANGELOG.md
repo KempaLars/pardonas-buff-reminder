@@ -5,7 +5,8 @@ What changed for players in each version. Handbook: https://pardonas-addons.de/b
 Features marked (beta) are experimental: on in beta versions, off by default in releases. You can switch them on in the settings at any time.
 
 ## Unreleased
-No changes yet.
+### Added
+- Low spell rank warning: after a fight, the addon tells you if you cast a lower rank of a spell than the highest one you know. Left-click dismisses it; right-click lets you keep that rank on purpose or replace it on your action bars. Accepted ranks are listed on the new Ranks tab (beta)
 
 ## 1.6.0-beta1 – 2026-11-25
 ### Changed

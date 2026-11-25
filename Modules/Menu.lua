@@ -17,6 +17,7 @@ local Demo = ns.Demo
 local Scroll = ns.Scroll
 local Pet = ns.Pet
 local Supply = ns.Supply
+local Ranks = ns.Ranks
 local muted = ns.muted
 local NoteDeferred = ns.NoteDeferred
 local SpellName = ns.SpellName
@@ -73,8 +74,10 @@ end
 menu.itemHead = Menu.MenuText("GameFontNormalSmall")
 menu.itemNone = Menu.MenuText("GameFontDisableSmall")
 menu.muteHead = Menu.MenuText("GameFontNormalSmall")
+menu.rankHead = Menu.MenuText("GameFontNormalSmall")
+menu.rankNote = Menu.MenuText("GameFontDisableSmall")
 menu.seps = {}
-for i = 1, 3 do menu.seps[i] = menu:CreateTexture(nil, "ARTWORK") end
+for i = 1, 4 do menu.seps[i] = menu:CreateTexture(nil, "ARTWORK") end
 
 -- kleine Schaltfläche im Stil (Rahmen + Hintergrund + Text)
 function Menu.MenuButton(text, onClick)
@@ -102,6 +105,24 @@ for i, opt in ipairs(Menu.MUTE_OPTIONS) do
         end
         menu:Hide()
     end)
+end
+
+-- Rang-Zeile (Warnung bei niedrigen Zauberrängen): Rang akzeptieren, alle Ränge akzeptieren,
+-- auf den Aktionsleisten ersetzen (nur außerhalb des Kampfes). Beschriftung per Menu.LayoutMenu.
+menu.rankButtons = {}
+for i, fn in ipairs({
+    function(e) Ranks.Accept(e, false) end,
+    function(e) Ranks.Accept(e, true) end,
+    function(e) Ranks.ReplaceOnBars(e) end,
+}) do
+    local b = Menu.MenuButton("", function()
+        local e = menu.entry
+        menu:Hide()
+        if e and e.kind == "rank" then fn(e) end
+    end)
+    b.label:SetWordWrap(false)
+    b:Hide()
+    menu.rankButtons[i] = b
 end
 
 -- "Anzeige verschieben" (volle Breite unter den Stumm-Knöpfen; nicht im Kampf)
@@ -392,6 +413,8 @@ function Menu.LayoutMenu(e)
         sub = L.REAGENT_LOW:format(EntryLabel(e), e.count or 0)
     elseif e.kind == "supply" then
         sub = Supply.Text(e)
+    elseif e.kind == "rank" then
+        sub = Ranks.Text(e)
     elseif e.kind == "conjure" then
         sub = Conjure.Text(e)
     elseif withItems then
@@ -556,6 +579,46 @@ function Menu.LayoutMenu(e)
     end
     -- Sterne nur bei Items (Varianten: keine Favoriten)
     for i = (variants and 0 or n) + 1, #menu.stars do menu.stars[i]:Hide() end
+
+    -- Rang-Zeile: Akzeptieren / Ersetzen (Ersetzen im Kampf ausgegraut mit Hinweis)
+    if e.kind == "rank" and e.rankInfo then
+        local info = e.rankInfo
+        Separator()
+        Head(menu.rankHead, L.MENU_RANK)
+        local texts = { L.RANK_ACCEPT:format(info.rank, info.name), L.RANK_ACCEPT_ALL:format(info.name),
+            L.RANK_REPLACE:format(info.bestRank) }
+        for i, b in ipairs(menu.rankButtons) do
+            b:SetSize(inner, 20)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", pad, y)
+            Menu.StyleButton(b, ms)
+            b.label:SetWidth(inner - 8)
+            b.label:SetText(texts[i])
+            if i == 3 and combat then
+                b:Disable()
+                b.label:SetAlpha(0.5)
+            else
+                b:Enable()
+                b.label:SetAlpha(1)
+            end
+            b:Show()
+            y = y - 20 - 4
+        end
+        if combat then
+            menu.rankNote:ClearAllPoints()
+            menu.rankNote:SetPoint("TOPLEFT", pad + 4, y)
+            menu.rankNote:SetText(L.RANK_REPLACE_COMBAT)
+            menu.rankNote:Show()
+            y = y - 14
+        else
+            menu.rankNote:Hide()
+        end
+        y = y - ms.gap + 4
+    else
+        menu.rankHead:Hide()
+        menu.rankNote:Hide()
+        for _, b in ipairs(menu.rankButtons) do b:Hide() end
+    end
 
     -- Stummschalten: vier Schaltflächen nebeneinander
     Separator()

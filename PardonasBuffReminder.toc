@@ -36,6 +36,7 @@ Modules\Style.lua
 Modules\Display.lua
 Modules\Keybind.lua
 Modules\Menu.lua
+Modules\Ranks.lua
 Modules\Evaluate.lua
 Modules\Config.lua
 Modules\Pardona.lua

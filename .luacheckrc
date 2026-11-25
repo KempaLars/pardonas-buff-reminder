@@ -142,6 +142,10 @@ read_globals = {
     "GetMoney",
     "MerchantFrame",
     "wipe",
+    -- low spell rank warning: replace on action bars (all calls checked at runtime)
+    "GetActionInfo",
+    "PickupSpell",
+    "PlaceAction",
 }
 
 -- Locale files: "L" stays unused until the CurseForge packager inserts the phrases

@@ -133,7 +133,8 @@ function Display.ScreenOrder(n)
 end
 
 -- Zeile für die Taste: zuerst die oberste Fehlt-Zeile mit Aktion (nicht "isst gerade", nicht eben
--- benutzt); gibt es keine, die oberste Ablauf-Zeile mit Aktion (nicht eben benutzt); sonst nil
+-- benutzt); gibt es keine, die oberste Ablauf-Zeile mit Aktion (nicht eben benutzt); sonst nil.
+-- Rang-Zeilen (Warnung bei niedrigen Zauberrängen) werden immer übersprungen.
 function Keybind.PickRow(n)
     if State.unlocked then return nil end   -- Verschiebe-Modus
     local order = Display.ScreenOrder(n)
@@ -143,7 +144,7 @@ function Keybind.PickRow(n)
             local r = rows[i]
             local e, a = r and r.entry, r and r.action
             if e and r:IsShown() and (r.expiryRow and true or false) == wantExpiry
-                and (wantExpiry or not e.eatStart) and not Keybind.IsRecent(e.key) and a
+                and (wantExpiry or not e.eatStart) and e.kind ~= "rank" and not Keybind.IsRecent(e.key) and a
                 and (a.spell or a.item or a.macro or a.trackIndex) then
                 return r
             end

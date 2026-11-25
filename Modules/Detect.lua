@@ -15,6 +15,7 @@ local Elixir = ns.Elixir
 local Scroll = ns.Scroll
 local Pet = ns.Pet
 local Supply = ns.Supply
+local Ranks = ns.Ranks
 local entries = ns.entries
 local knownCache = ns.knownCache
 local missing = ns.missing
@@ -44,6 +45,7 @@ local function EntryLabel(e)
     if e.kind == "elixir" then return ItemName(e.item) end
     if e.kind == "scroll" then return Scroll.Label(e) end
     if e.kind == "supply" then return Supply.Label(e) end
+    if e.kind == "rank" then return Ranks.Label(e) end
     if e.label then   -- Variantengruppen: Grundwort + bekannte Varianten (Variant.GroupLabel)
         return e.variantClass and Variant.GroupLabel(e.variantClass, e.key, e.label) or L[e.label]
     end
@@ -61,6 +63,7 @@ local function EntryIcon(e)
     if e.kind == "elixir" then return ItemIcon(e.item) or FALLBACK_ICON end
     if e.kind == "pet" then return Pet.Icon(e) end
     if e.kind == "supply" then return Supply.Icon(e) end
+    if e.kind == "rank" then return Ranks.Icon(e) end
     if e.kind == "scroll" then
         -- Icon der Rolle des Linksklicks, sonst der Rolle I der Art
         local c = Scroll.Choices(e)[1]

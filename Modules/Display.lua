@@ -19,6 +19,7 @@ local Tracking = ns.Tracking
 local Demo = ns.Demo
 local Pet = ns.Pet
 local Supply = ns.Supply
+local Ranks = ns.Ranks
 local SpellIcon = ns.SpellIcon
 -- aus Items.lua
 local ItemName = ns.ItemName
@@ -352,6 +353,11 @@ function Display.GetRow(i)
                 Supply.OnClick(self.entry)
                 return
             end
+            -- Rang-Zeile: schließen (keine Secure-Aktion)
+            if self.entry and self.entry.kind == "rank" and not State.unlocked then
+                Ranks.Dismiss(self.entry)
+                return
+            end
             -- Verfolgungs-Zeile: Verfolgung einschalten (nur außerhalb des Kampfes)
             if self.entry and self.entry.kind == "tracking" and not State.unlocked and Tracking.Activate(self) then
                 return
@@ -400,6 +406,11 @@ function Display.GetRow(i)
         end
         if self.entry.kind == "pet" then
             Pet.AddTooltip(self)   -- Laune, Ernährung, Klick-Hinweise
+            GameTooltip:Show()
+            return
+        end
+        if self.entry.kind == "rank" then
+            Ranks.AddTooltip()
             GameTooltip:Show()
             return
         end
@@ -476,6 +487,9 @@ function Display.ShowRows(list, dragMode, expFrom)
         elseif Supply.IsSupply(e) then
             r.entry = e
             Supply.FillRow(r, e, st)
+        elseif e.kind == "rank" then
+            r.entry = e
+            Ranks.FillRow(r, e, st)
         elseif e.groupActive then
             -- Gruppen-Zeile: Anzahl, Namen, Gruppen-/Einzel-Klick auf den ersten Spieler ohne Buff
             r.entry = e
