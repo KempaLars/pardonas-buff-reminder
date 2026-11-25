@@ -45,7 +45,7 @@ Built for **WoW Forever** (Interface `16001`).
 - **Use food and flasks by click** – for the Well Fed and Flask reminders:
   - **Left-click** uses the best matching item from your bags. The hint line shows which one ("Left-click: Smoked Desert Dumplings · Right-click: choose"), or "Not in bags · Right-click: mute" if you have none.
   - **Right-click** opens the reminder menu (see [Right-click menu](#right-click-menu)) with all matching items in your bags.
-  - **Favorites (beta)** – click the star next to an item in the menu to mark it as a favorite (saved per character). Left-click on the reminder always uses a favorite if one is in your bags; with several favorites the normal order below decides. Favorites are listed at the top of the menu. Click the star again to remove the favorite.
+  - **Favorites** – click the star next to an item in the menu to mark it as a favorite (saved per character). Left-click on the reminder always uses a favorite if one is in your bags; with several favorites the normal order below decides. Favorites are listed at the top of the menu. Click the star again to remove the favorite.
   - **Food** comes from a fixed list of WoW Forever cooking food that gives an XP buff (based on the beta, so it may still change). Any other food in your bags whose tooltip mentions Well Fed is recognized as well (e.g. Tasty Lion Steak), with XP food first; its category comes from the stats in its tooltip and its score uses item level × 5 instead of the cooking skill level. Only food you are high enough level for is offered. Best choice first (after favorites): 1) food whose tooltip mentions an experience bonus (only while you can still gain experience – not at max level or with experience gain turned off), 2) score = category weight for your class × cooking skill level, 3) larger stack. Each class has its own category order (e.g. Warrior: Strength, Melee AP, Agility, Crit, Stamina; Priest: Spirit, Intellect, Spell Damage, Healing); categories not listed for your class count less, movement and profession food the least.
   - **Flasks** are any flask in your bags (detected by item type, with a fallback list of the Classic flasks). After favorites, the flask you used last (remembered per character) comes first, then higher item level. The addon also learns each flask's effect so that new flasks count as an active Flask buff.
   - Uses the "Left-click casts buff" option: when it is off, left-click does nothing and right-click only mutes.
@@ -65,15 +65,15 @@ Built for **WoW Forever** (Interface `16001`).
   - **LibSharedMedia** – if another addon loads LibSharedMedia-3.0, its sounds are listed below a "LibSharedMedia" separator and saved by name. If such a sound is no longer available later (e.g. the providing addon is disabled), Bell plays instead, without an error.
 - **Size and opacity** – "Size" (50–200 %, default 100 %) and "Opacity" (30–100 %, default 100 %) sliders on the Display tab. They apply to the whole reminder list in every style (including Compact "Icons only"), in test and move mode; the list keeps its anchor point when resized. The pulsing stays visible relative to the chosen opacity. Right-click menus keep their normal size. Changes made in combat are applied when combat ends.
 - **Movable display** – click "Move" in the settings (Display tab), "Move display" in the right-click menu of any reminder, or type `/br move`; drag the reminder to the desired position and click "Lock" or type `/br lock`. While moving, left-click does not cast. Not possible in combat.
-- **Growth direction (beta)** – "New warnings appear: below / above" in the settings (default: below). With "above", the first reminder sits at the saved position and further reminders stack upwards, in every style; Move mode and `/br test` behave the same. Switching does not move the first reminder. With Compact "Icons only", icons are placed left to right, 8 per row; further rows are added below or above. The right-click menu always stays on screen and opens upwards if there is not enough room below the mouse pointer. In combat the new order is applied when combat ends.
-- **Styles (beta)** – choose the look of the reminders and the right-click menu in the settings ("Style"). Switching applies immediately (in combat: when combat ends).
+- **Growth direction** – "New warnings appear: below / above" in the settings (default: below). With "above", the first reminder sits at the saved position and further reminders stack upwards, in every style; Move mode and `/br test` behave the same. Switching does not move the first reminder. With Compact "Icons only", icons are placed left to right, 8 per row; further rows are added below or above. The right-click menu always stays on screen and opens upwards if there is not enough room below the mouse pointer. In combat the new order is applied when combat ends.
+- **Styles** – choose the look of the reminders and the right-click menu in the settings ("Style"). Switching applies immediately (in combat: when combat ends).
   - **Pardona** (default) – dark purple gradient, gold border with rounded corners, colored status stripe on the left (red = missing, orange = low supplies, green = eating), icon with gold frame, golden title, grey-purple hint line. Its colors, border and fonts come from the shared library LibPardona-1.0 (shared with all Pardona addons); if the library does not provide them, the addon uses its own built-in values.
   - **Classic** – stone/brown background, square gold frame, title in WoW yellow, beige hint line.
   - **Compact** – slim dark bars with a status stripe on the left and "missing" on the right; hints only in the tooltip. The extra option **Icons only** (only available with Compact) shows just the icons side by side; name and hints are in the tooltip.
 - **Pet reminder (beta)** – hunters: pet missing, pet dead and "Feed pet" with one-click feeding from your bags (favorites and a food menu); warlocks: demon missing with a choice of demon. See [Optional and experimental features](#optional-and-experimental-features).
 - **Supplies** – warns when you run low on reagents, ammunition, soul shards, pet food or any item you add yourself, and refills them at vendors with one click. See [Optional and experimental features](#optional-and-experimental-features).
-- **Keybinding (beta)** – one key that rebuffs the most urgent reminder, see [Keybinding](#keybinding-beta).
-- **Pardona's Addons entry point (beta)** – see [below](#pardonas-addons-beta).
+- **Keybinding** – one key that rebuffs the most urgent reminder, see [Keybinding](#keybinding).
+- **Pardona's Addons entry point** – see [below](#pardonas-addons).
 - **Smart suppression** – no reminders while dead, on a flight path or in a vehicle.
 - **Languages** – English and German, picked automatically from the game client language; more languages through CurseForge, see [Localization](#localization).
 
@@ -110,7 +110,7 @@ Right-clicking a reminder opens one window in the selected style:
 - **Close (Esc)** – the footer closes the window; Esc closes it as well, and it closes on its own when the mouse has left it for 2 seconds.
 - **In combat** only the header and the mute buttons are shown (no "Move display" either) (the item and variant lines are secure buttons and cannot be created or changed in combat). An open window with items or variants closes when combat starts.
 
-## Keybinding (beta)
+## Keybinding
 
 Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warning** you can bind a key. All Pardona addons share the "Pardona's Addons" section. Pressing the key does the same as a left-click on the topmost **missing** reminder on screen: cast the buff, eat, drink a flask, read a scroll, imbue the weapon, turn on tracking, call, revive or feed your pet, summon your demon, or the group action of a group buff line. If nothing is missing, it refreshes the topmost buff that is about to expire (expiry warning). The "eating" line and reminders without a click action (e.g. supply warnings, "No pet food") are skipped. "Topmost" follows the screen: with "New warnings appear: above" the list grows upwards, so the most recently added reminder is checked first; with Compact "Icons only" the top row is checked left to right. If there is nothing to do, the key does nothing (also in move mode).
 
@@ -119,7 +119,7 @@ Under **Options > Keybindings > Pardona's Addons > Buff Reminder > Use top warni
 - The settings (Display tab) show the current key (or "not bound") and where to set it.
 - Macro alternative: `/click PardonasBuffReminderKeyButton`. If your client casts on key down ("Cast action keybinds on key down" on) and this macro does nothing, use `/click PardonasBuffReminderKeyButton LeftButton 1` instead.
 
-## Pardona's Addons (beta)
+## Pardona's Addons
 
 All Pardona addons (Pardona's Buff Reminder, Pardona's ToolTips, …) share one entry point, provided by the embedded library [LibPardona-1.0](https://github.com/Pardonas-addons/lib-pardona). With several Pardona addons installed you still get only one minimap button and one settings category.
 

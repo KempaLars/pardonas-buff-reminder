@@ -5,35 +5,24 @@ What changed for players in each version. Handbook: https://pardonas-addons.de/b
 Features marked (beta) are experimental: on in beta versions, off by default in releases. You can switch them on in the settings at any time.
 
 ## Unreleased
-### Changed
-- No longer beta and now on by default: expiry warning (including poison charges), class consumables, elixirs, scrolls, weapon buffs from items (oils, stones, poisons), the right-click item and variant menu, tracking, supplies and restocking at vendors. If you switched one of them off yourself, it stays off.
+No changes yet.
 
-## 1.5.0-beta4 – 2026-11-23
-### Added
-- Restock at vendors: open a vendor who sells one of your low supplies and a window offers to refill them up to your "Refill to" amount. Nothing is bought without your click (beta)
-- "Also restock above the minimum": get everything below "Refill to" offered at every vendor visit (beta)
-### Changed
-- The expiry warning also watches poison charges, not only the remaining time (beta)
-
-## 1.5.0-beta3 – 2026-11-23
-### Fixed
-- Buff food was missing from the food menu: any food that gives Well Fed is now recognized, not only food from the built-in list (same fix as 1.4.1)
-
-## 1.5.0-beta2 – 2026-11-23
+## 1.5.0 – 2026-11-25
 ### Added
 - Pet tab for Hunters and Warlocks: pet missing, pet dead and feed pet reminders with one-click feeding, demon reminder for Warlocks (beta)
-- Supplies: ammunition, soul shards, pet food and up to 20 items of your own, each with a minimum and a critical amount (beta)
-- Left-click a supply warning outside of towns to be reminded at the next inn, city, vendor or bank (beta)
-- Low ammunition during a fight shows a red warning (beta)
-- Several trackings at once, including Find Treasure for Dwarves and minimap trackings like flight masters (beta)
-
-## 1.5.0-beta1 – 2026-11-22
-### Added
+- Supplies: ammunition, soul shards, pet food and up to 20 items of your own, each with a minimum and a critical amount
+- Left-click a supply warning outside of towns to be reminded at the next inn, city, vendor or bank
+- Low ammunition during a fight shows a red warning
+- Restock at vendors: open a vendor who sells one of your low supplies and a window offers to refill them up to your "Refill to" amount. Nothing is bought without your click
+- Optionally get everything below "Refill to" offered at every vendor visit, not only what is below the minimum
+- Several trackings at once, including Find Treasure for Dwarves and minimap trackings like flight masters
 - Quick actions in the Pardona minimap menu: move or lock the display, test, unmute all
 - Size and opacity of the reminder list
 - More sounds with a preview, plus sounds from LibSharedMedia
-- `/br debug` now also lists your Pardona addons and their versions – handy when you report a bug
+- /br debug now also lists your Pardona addons and their versions – handy when you report a bug
 ### Changed
+- No longer beta and now on by default: expiry warning, class consumables, elixirs, scrolls, weapon buffs from items (oils, stones, poisons), the right-click item and variant menu, tracking, supplies and restocking at vendors. If you switched one of them off yourself, it stays off
+- The expiry warning also watches poison charges, not only the remaining time
 - Style, sound, growth direction and group check are now picked from a drop-down list
 - The "Use top warning" key handles the topmost missing buff first, then refreshes buffs that are about to expire. It no longer uses the same item twice by accident. In combat, the game only lets it use an item once per fight
 - Expiry warnings now stay as faint as you set them, also when you change the list's opacity
